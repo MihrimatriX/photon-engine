@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PhotonEngine Web Preview</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f0f11;
+            --panel-bg: rgba(22, 22, 26, 0.7);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --accent-color: #3b82f6;
+            --accent-hover: #2563eb;
+            --text-color: #e4e4e7;
+            --text-muted: #a1a1aa;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+        }
+
+        /* App Layout */
+        #app-container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+
+        /* 3D Viewport */
+        #viewport-container {
+            flex: 1;
+            height: 100%;
+            position: relative;
+            background-color: #000;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Sidebar Control Panel */
+        #sidebar {
+            width: 380px;
+            height: 100%;
+            background: var(--panel-bg);
+            backdrop-filter: blur(20px);
+            border-left: 1px solid var(--border-color);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            overflow-y: auto;
+            z-index: 10;
+        }
+
+        h1 {
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        h1 span {
+            color: var(--accent-color);
+        }
+
+        .section {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .section-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label {
+            font-size: 13px;
+            color: var(--text-muted);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        label span {
+            color: var(--text-color);
+            font-family: monospace;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent-color);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            background: var(--accent-hover);
+        }
+
+        .color-picker-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        input[type="color"] {
+            -webkit-appearance: none;
+            border: none;
+            width: 40px;
+            height: 28px;
+            border-radius: 4px;
+            cursor: pointer;
+            background: none;
+        }
+
+        input[type="color"]::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+
+        input[type="color"]::-webkit-color-swatch {
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }
+
+        select {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-color);
+            outline: none;
+            cursor: pointer;
+        }
+
+        select:focus {
+            border-color: var(--accent-color);
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent-color);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+
+        button:hover {
+            background: var(--accent-hover);
+        }
+
+        button:active {
+            transform: scale(0.98);
+        }
+
+        /* Overlay Stats */
+        #stats-overlay {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            background: rgba(15, 15, 17, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+            padding: 12px 18px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            pointer-events: none;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+        }
+
+        .stats-val {
+            color: var(--accent-color);
+            font-weight: bold;
+        }
+
+        /* Navigation guide overlay */
+        #nav-guide {
+            position: absolute;
+            bottom: 24px;
+            left: 24px;
+            background: rgba(15, 15, 17, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 11px;
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <!-- Viewport -->
+        <div id="viewport-container">
+            <canvas id="renderCanvas"></canvas>
+            
+            <!-- HUD Stats -->
+            <div id="stats-overlay">
+                <div class="stats-row"><span>Resolution:</span><span id="res-val" class="stats-val">512x512</span></div>
+                <div class="stats-row"><span>Samples (SPP):</span><span id="spp-val" class="stats-val">0</span></div>
+                <div class="stats-row"><span>FPS:</span><span id="fps-val" class="stats-val">0</span></div>
+                <div class="stats-row"><span>Device:</span><span class="stats-val">WebGPU Fallback (GLSL)</span></div>
+            </div>
+
+            <!-- Interaction Guide -->
+            <div id="nav-guide">
+                🖱️ Left Drag: Orbit Camera · 🖱️ Middle Drag: Pan · 📜 Scroll: Zoom
+            </div>
+        </div>
+
+        <!-- Sidebar Panel -->
+        <div id="sidebar">
+            <h1>🔥 Photon<span>Engine</span></h1>
+            
+            <!-- Scene Settings -->
+            <div class="section">
+                <div class="section-title">Scene Materials</div>
+                
+                <!-- Target Material Selector -->
+                <div class="control-group">
+                    <label>Edit Target Object</label>
+                    <select id="material-target">
+                        <option value="0">Gold Lobe (Center Sphere)</option>
+                        <option value="1">Glass Lobe (Left Sphere)</option>
+                        <option value="2">Mirror Lobe (Right Box)</option>
+                    </select>
+                </div>
+
+                <!-- Base Color -->
+                <div class="control-group">
+                    <label>Base Color</label>
+                    <div class="color-picker-wrapper">
+                        <input type="color" id="mat-color" value="#ffc857">
+                        <span id="color-hex">#ffc857</span>
+                    </div>
+                </div>
+
+                <!-- Metallic -->
+                <div class="control-group">
+                    <label>Metallic <span id="metallic-val">0.90</span></label>
+                    <input type="range" id="mat-metallic" min="0" max="1" step="0.01" value="0.9">
+                </div>
+
+                <!-- Roughness -->
+                <div class="control-group">
+                    <label>Roughness <span id="roughness-val">0.20</span></label>
+                    <input type="range" id="mat-roughness" min="0.001" max="1" step="0.01" value="0.2">
+                </div>
+
+                <!-- Specular -->
+                <div class="control-group">
+                    <label>Specular Lobe <span id="specular-val">0.50</span></label>
+                    <input type="range" id="mat-specular" min="0" max="1" step="0.01" value="0.5">
+                </div>
+            </div>
+
+            <!-- Camera settings -->
+            <div class="section">
+                <div class="section-title">Camera & Lens</div>
+                
+                <!-- Depth of Field Aperture -->
+                <div class="control-group">
+                    <label>Lens Aperture (DoF) <span id="dof-val">0.00</span></label>
+                    <input type="range" id="cam-dof" min="0" max="0.1" step="0.001" value="0.0">
+                </div>
+
+                <!-- Focus Distance -->
+                <div class="control-group">
+                    <label>Focus Distance <span id="focus-val">5.50</span></label>
+                    <input type="range" id="cam-focus" min="1" max="15" step="0.1" value="5.5">
+                </div>
+
+                <!-- FOV -->
+                <div class="control-group">
+                    <label>Field of View <span id="fov-val-display">40°</span></label>
+                    <input type="range" id="cam-fov" min="15" max="90" step="1" value="40">
+                </div>
+            </div>
+
+            <!-- Render parameters -->
+            <div class="section">
+                <div class="section-title">Lighting & Quality</div>
+                
+                <!-- Ceiling Light Intensity -->
+                <div class="control-group">
+                    <label>Light Intensity <span id="light-val">15.0</span></label>
+                    <input type="range" id="light-intensity" min="1" max="100" step="0.5" value="15.0">
+                </div>
+
+                <!-- Max Bounces -->
+                <div class="control-group">
+                    <label>Max Ray Bounces <span id="bounces-val">4</span></label>
+                    <input type="range" id="ray-bounces" min="1" max="8" step="1" value="4">
+                </div>
+            </div>
+
+            <!-- Export -->
+            <button id="btn-export">Export Render (PNG)</button>
+        </div>
+    </div>
+
+    <!-- WebGL Path Tracer Core Script -->
+    <script>
+        const canvas = document.getElementById('renderCanvas');
+        const gl = canvas.getContext('webgl2');
+
+        if (!gl) {
+            alert('WebGL 2 is required to run the PhotonEngine web preview.');
+        }
+
+        // --- Shader Source Code ---
+
+        // Vertex Shader: full-screen quad pass
+        const vsSource = `#version 300 es
+            in vec2 position;
+            out vec2 uv;
+            void main() {
+                uv = position * 0.5 + 0.5;
+                gl_Position = vec4(position, 0.0, 1.0);
+            }
+        `;
+
+        // Fragment Shader: GPU Ray/Path Tracer
+        const fsSource = `#version 300 es
+            precision highp float;
+            in vec2 uv;
+            out vec4 outColor;
+
+            // Uniforms
+            uniform vec2 u_resolution;
+            uniform uint u_sample_index;
+            uniform float u_time;
+            
+            // Camera
+            uniform vec3 u_cam_pos;
+            uniform vec3 u_cam_target;
+            uniform float u_cam_fov;
+            uniform float u_cam_dof;
+            uniform float u_cam_focus;
+
+            // Material Edits (Metallic gold sphere index 0, glass sphere 1, mirror box 2)
+            uniform vec3 u_mat0_color;
+            uniform float u_mat0_metallic;
+            uniform float u_mat0_roughness;
+            uniform float u_mat0_specular;
+
+            uniform vec3 u_mat1_color;
+            uniform float u_mat1_ior;
+
+            uniform vec3 u_mat2_color;
+
+            // Lighting
+            uniform float u_light_intensity;
+            uniform int u_max_bounces;
+
+            #define PI 3.14159265359
+            #define TWO_PI 6.28318530718
+            #define INFINITY 1e30
+
+            // --- RNG Helpers (PCG Hash) ---
+            uint state;
+            uint pcg_hash() {
+                uint prev = state;
+                state = prev * 747796405u + 2891336453u;
+                uint word = ((prev >> ((prev >> 28u) + 4u)) ^ prev) * 277803737u;
+                return (word >> 22u) ^ word;
+            }
+
+            float rand() {
+                return float(pcg_hash()) / 4294967296.0;
+            }
+
+            vec2 rand2() {
+                return vec2(rand(), rand());
+            }
+
+            // Cosine weighted hemisphere sampling
+            vec3 cosineSampleHemisphere(vec3 normal) {
+                vec2 r = rand2();
+                float phi = TWO_PI * r.x;
+                float cosTheta = sqrt(r.y);
+                float sinTheta = sqrt(1.0 - r.y);
+                
+                // Orthonormal basis
+                vec3 w = normal;
+                vec3 u = normalize(cross(abs(w.x) > 0.1 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0), w));
+                vec3 v = cross(w, u);
+                
+                return u * sinTheta * cos(phi) + v * sinTheta * sin(phi) + w * cosTheta;
+            }
+
+            // GGX Importance sampling for specular lobes
+            vec3 ggxSampleDirection(vec3 normal, float roughness) {
+                vec2 r = rand2();
+                float alpha = roughness * roughness;
+                float phi = TWO_PI * r.x;
+                float cosTheta = sqrt((1.0 - r.y) / (1.0 + (alpha * alpha - 1.0) * r.y));
+                float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+                
+                vec3 hLocal = vec3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+                
+                // Transform to normal space
+                vec3 w = normal;
+                vec3 u = normalize(cross(abs(w.x) > 0.1 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0), w));
+                vec3 v = cross(w, u);
+                
+                return normalize(u * hLocal.x + v * hLocal.y + w * hLocal.z);
+            }
+
+            // GGX NDF
+            float GGX_D(float cosThetaH, float roughness) {
+                float a = roughness * roughness;
+                float a2 = a * a;
+                float cos2 = cosThetaH * cosThetaH;
+                float denom = cos2 * (a2 - 1.0) + 1.0;
+                return a2 / (PI * denom * denom);
+            }
+
+            // Smith G1 masking function
+            float smithG1(float cosTheta, float roughness) {
+                float a = roughness * roughness;
+                float a2 = a * a;
+                float cos2 = cosTheta * cosTheta;
+                float tanTheta2 = (1.0 - cos2) / cos2;
+                return 2.0 / (1.0 + sqrt(1.0 + a2 * tanTheta2));
+            }
+
+            // Fresnel Schlick
+            vec3 FresnelSchlick(float cosTheta, vec3 F0) {
+                return F0 + (1.0 - F0) * pow(max(0.0, 1.0 - cosTheta), 5.0);
+            }
+
+            // --- Ray Struct & Scene Intersection ---
+            struct Ray {
+                vec3 origin;
+                vec3 direction;
+            };
+
+            struct Hit {
+                float t;
+                vec3 point;
+                vec3 normal;
+                int matID;
+            };
+
+            // Cornell Box geometry parameters (hardcoded for WebGL preview simplicity)
+            // Left/Right Walls: x=[-2.0, 2.0]
+            // Bottom/Top Walls: y=[-2.0, 2.0]
+            // Back/Front Walls: z=[-2.0, 2.0]
+
+            bool intersectSphere(Ray ray, vec3 center, float radius, inout Hit hit, int matID) {
+                vec3 oc = ray.origin - center;
+                float a = dot(ray.direction, ray.direction);
+                float b = 2.0 * dot(oc, ray.direction);
+                float c = dot(oc, oc) - radius * radius;
+                float disc = b * b - 4.0 * a * c;
+                if (disc < 0.0) return false;
+                
+                float t = (-b - sqrt(disc)) / (2.0 * a);
+                if (t < 0.001) t = (-b + sqrt(disc)) / (2.0 * a);
+                if (t < 0.001 || t > hit.t) return false;
+                
+                hit.t = t;
+                hit.point = ray.origin + ray.direction * t;
+                hit.normal = (hit.point - center) / radius;
+                hit.matID = matID;
+                return true;
+            }
+
+            bool intersectBox(Ray ray, vec3 bMin, vec3 bMax, inout Hit hit, int matID) {
+                vec3 invD = 1.0 / (ray.direction + vec3(1e-9));
+                vec3 t0 = (bMin - ray.origin) * invD;
+                vec3 t1 = (bMax - ray.origin) * invD;
+                
+                vec3 tNear = min(t0, t1);
+                vec3 tFar = max(t0, t1);
+                
+                float tMin = max(max(tNear.x, tNear.y), tNear.z);
+                float tMax = min(min(tFar.x, tFar.y), tFar.z);
+                
+                if (tMin > tMax || tMax < 0.001 || tMin > hit.t) return false;
+                
+                hit.t = tMin;
+                hit.point = ray.origin + ray.direction * tMin;
+                
+                // Normal extraction
+                vec3 pLocal = hit.point - (bMin + bMax) * 0.5;
+                vec3 size = (bMax - bMin) * 0.5;
+                vec3 bias = pLocal / size;
+                vec3 absBias = abs(bias);
+                
+                if (absBias.x > absBias.y && absBias.x > absBias.z) {
+                    hit.normal = vec3(sign(bias.x), 0.0, 0.0);
+                } else if (absBias.y > absBias.x && absBias.y > absBias.z) {
+                    hit.normal = vec3(0.0, sign(bias.y), 0.0);
+                } else {
+                    hit.normal = vec3(0.0, 0.0, sign(bias.z));
+                }
+                
+                hit.matID = matID;
+                return true;
+            }
+
+            bool intersectScene(Ray ray, inout Hit hit) {
+                bool isec = false;
+                
+                // Walls (planes represented as boxes)
+                // Floor (y = -2.0)
+                if (intersectBox(ray, vec3(-2.0, -2.05, -2.0), vec3(2.0, -2.0, 2.0), hit, 3)) isec = true;
+                // Ceiling (y = 2.0)
+                if (intersectBox(ray, vec3(-2.0, 2.0, -2.0), vec3(2.0, 2.05, 2.0), hit, 3)) isec = true;
+                // Back wall (z = 2.0)
+                if (intersectBox(ray, vec3(-2.0, -2.0, 2.0), vec3(2.0, 2.0, 2.05), hit, 3)) isec = true;
+                // Left wall (red, x = -2.0)
+                if (intersectBox(ray, vec3(-2.05, -2.0, -2.0), vec3(-2.0, 2.0, 2.0), hit, 4)) isec = true;
+                // Right wall (green, x = 2.0)
+                if (intersectBox(ray, vec3(2.0, -2.0, -2.0), vec3(2.05, 2.0, 2.0), hit, 5)) isec = true;
+                
+                // ceiling light source box
+                if (intersectBox(ray, vec3(-0.5, 1.99, -0.5), vec3(0.5, 2.0, 0.5), hit, 6)) isec = true;
+
+                // Objects inside
+                // Sphere 0: Gold (parameterized)
+                if (intersectSphere(ray, vec3(0.0, -1.3, 0.0), 0.7, hit, 0)) isec = true;
+                // Sphere 1: Glass (parameterized)
+                if (intersectSphere(ray, vec3(-1.1, -1.3, -0.6), 0.7, hit, 1)) isec = true;
+                // Box 2: Mirror (parameterized)
+                if (intersectBox(ray, vec3(0.7, -2.0, -1.1), vec3(1.7, -0.5, -0.1), hit, 2)) isec = true;
+                
+                return isec;
+            }
+
+            // Concentric disk sampler (Shirley-Chiu)
+            vec2 sampleConcentricDisk(vec2 u) {
+                float r, theta;
+                float sx = 2.0 * u.x - 1.0;
+                float sy = 2.0 * u.y - 1.0;
+                if (sx == 0.0 && sy == 0.0) return vec2(0.0);
+                if (sx * sx > sy * sy) {
+                    r = sx;
+                    theta = (PI / 4.0) * (sy / sx);
+                } else {
+                    r = sy;
+                    theta = (PI / 2.0) - (PI / 4.0) * (sx / sy);
+                }
+                return vec2(r * cos(theta), r * sin(theta));
+            }
+
+            // Path tracing solver
+            vec3 tracePath(Ray ray) {
+                vec3 L = vec3(0.0);
+                vec3 throughput = vec3(1.0);
+                Ray currentRay = ray;
+                
+                for (int bounce = 0; bounce < u_max_bounces; ++bounce) {
+                    Hit hit;
+                    hit.t = INFINITY;
+                    
+                    if (!intersectScene(currentRay, hit)) {
+                        // Environment map gradient fallback
+                        float tGrad = 0.5 * (currentRay.direction.y + 1.0);
+                        vec3 sky = mix(vec3(0.05, 0.05, 0.06), vec3(0.01, 0.01, 0.01), tGrad);
+                        L += throughput * sky;
+                        break;
+                    }
+                    
+                    // Material lookups
+                    vec3 albedo = vec3(0.8);
+                    float metallic = 0.0;
+                    float roughness = 0.2;
+                    float specular = 0.5;
+                    float ior = 1.0;
+                    float emissive = 0.0;
+                    
+                    if (hit.matID == 0) { // Gold sphere
+                        albedo = u_mat0_color;
+                        metallic = u_mat0_metallic;
+                        roughness = u_mat0_roughness;
+                        specular = u_mat0_specular;
+                    } else if (hit.matID == 1) { // Glass sphere
+                        albedo = u_mat1_color;
+                        ior = u_mat1_ior;
+                    } else if (hit.matID == 2) { // Mirror box
+                        albedo = u_mat2_color;
+                        metallic = 1.0;
+                        roughness = 0.02;
+                    } else if (hit.matID == 3) { // Floor / Ceiling / Back wall
+                        albedo = vec3(0.73);
+                    } else if (hit.matID == 4) { // Left wall (Red)
+                        albedo = vec3(0.65, 0.05, 0.05);
+                    } else if (hit.matID == 5) { // Right wall (Green)
+                        albedo = vec3(0.12, 0.45, 0.15);
+                    } else if (hit.matID == 6) { // Light source
+                        albedo = vec3(1.0);
+                        emissive = u_light_intensity;
+                    }
+
+                    // Add emitted light
+                    if (emissive > 0.0) {
+                        L += throughput * albedo * emissive;
+                        break;
+                    }
+                    
+                    // Normal orientation
+                    vec3 n = hit.normal;
+                    bool frontFace = dot(currentRay.direction, n) < 0.0;
+                    if (!frontFace) n = -n;
+                    
+                    // --- Scattering math ---
+                    vec3 wi;
+                    vec3 wo = -currentRay.direction;
+                    
+                    if (ior > 1.0) { // Glass Refraction/Reflection (Dielectric)
+                        float eta = frontFace ? (1.0 / ior) : ior;
+                        float cosTheta = min(dot(wo, n), 1.0);
+                        float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+                        
+                        // Exact fresnel
+                        float r0 = (1.0 - ior) / (1.0 + ior);
+                        r0 = r0 * r0;
+                        float fresnel = r0 + (1.0 - r0) * pow(1.0 - cosTheta, 5.0);
+                        
+                        if (eta * sinTheta > 1.0 || rand() < fresnel) {
+                            // Reflect
+                            wi = reflect(currentRay.direction, n);
+                            throughput *= albedo;
+                        } else {
+                            // Refract
+                            wi = refract(currentRay.direction, n, eta);
+                            throughput *= albedo;
+                        }
+                    } else { // Metallic Roughness Disney-ish Model
+                        float pSpec = mix(0.5, 1.0, metallic);
+                        
+                        if (rand() < pSpec) {
+                            // Specular bounce
+                            vec3 h = ggxSampleDirection(n, roughness);
+                            wi = reflect(-wo, h);
+                            
+                            // Check hemisphere validity
+                            if (dot(wi, n) <= 0.0) break;
+                            
+                            // Cook-Torrance calculation
+                            float cosThetaO = max(0.0, dot(wo, n));
+                            float cosThetaI = max(0.0, dot(wi, n));
+                            float cosThetaH = max(0.0, dot(h, n));
+                            float cosThetaD = max(0.0, dot(wo, h));
+                            
+                            vec3 F0 = mix(vec3(0.04 * specular), albedo, metallic);
+                            vec3 F = FresnelSchlick(cosThetaD, F0);
+                            float D = GGX_D(cosThetaH, roughness);
+                            float G = smithG1(cosThetaO, roughness) * smithG1(cosThetaI, roughness);
+                            
+                            vec3 specVal = (F * D * G) / (4.0 * cosThetaO * cosThetaI + 1e-4);
+                            
+                            // Importance sampling PDF cancels out parts of terms
+                            throughput *= specVal * cosThetaI / (pSpec * D * cosThetaH / (4.0 * cosThetaD + 1e-4) + 1e-4);
+                        } else {
+                            // Diffuse cosine reflection
+                            wi = cosineSampleHemisphere(n);
+                            if (dot(wi, n) <= 0.0) break;
+                            
+                            float cosThetaI = dot(wi, n);
+                            throughput *= (albedo / PI) * cosThetaI / ((1.0 - pSpec) * cosThetaI / PI + 1e-4);
+                        }
+                    }
+                    
+                    // Jitter origin along normal to avoid self-intersection
+                    vec3 offsetOrigin = hit.point + n * 1e-4;
+                    currentRay = Ray(offsetOrigin, wi);
+                }
+                
+                return L;
+            }
+
+            void main() {
+                // PCG RNG initialization based on pixel coords + sample count
+                uvec2 pixel = uvec2(gl_FragCoord.xy);
+                state = pixel.y * u_resolution.x + pixel.x + u_sample_index * 981273u;
+                
+                // Anti-aliasing jitter
+                vec2 jitter = rand2() - 0.5;
+                vec2 ndc = ((gl_FragCoord.xy + jitter) / u_resolution.xy) * 2.0 - 1.0;
+                
+                // Camera coordinate frame setup
+                vec3 w = normalize(u_cam_pos - u_cam_target);
+                vec3 u_dir = normalize(cross(vec3(0.0, 1.0, 0.0), w));
+                vec3 v_dir = cross(w, u_dir);
+                
+                float aspect = u_resolution.x / u_resolution.y;
+                float theta = u_cam_fov * PI / 180.0;
+                float h = tan(theta * 0.5);
+                
+                // DoF lens sampling
+                vec3 rayOrigin = u_cam_pos;
+                vec3 rayDir = normalize(u_dir * ndc.x * h * aspect + v_dir * ndc.y * h - w);
+                
+                if (u_cam_dof > 0.0) {
+                    vec2 lens = sampleConcentricDisk(rand2()) * u_cam_dof;
+                    vec3 focalPoint = u_cam_pos + rayDir * u_cam_focus;
+                    rayOrigin = u_cam_pos + u_dir * lens.x + v_dir * lens.y;
+                    rayDir = normalize(focalPoint - rayOrigin);
+                }
+                
+                Ray ray = Ray(rayOrigin, rayDir);
+                
+                vec3 color = tracePath(ray);
+                
+                // Prevent NaN or infinite pixel values blowing up accumulation
+                if (isnan(color.r) || isnan(color.g) || isnan(color.b)) color = vec3(0.0);
+                if (isinf(color.r) || isinf(color.g) || isinf(color.b)) color = vec3(0.0);
+                
+                outColor = vec4(color, 1.0);
+            }
+        `;
+
+        // Accumulation Shader: blends current frame output with past frames
+        const accumFsSource = `#version 300 es
+            precision highp float;
+            in vec2 uv;
+            out vec4 outColor;
+
+            uniform sampler2D u_accum_tex;
+            uniform sampler2D u_current_tex;
+            uniform float u_blend;
+
+            void main() {
+                vec4 prev = texture(u_accum_tex, uv);
+                vec4 curr = texture(u_current_tex, uv);
+                outColor = mix(prev, curr, u_blend);
+            }
+        `;
+
+        // Output Display Shader: renders accumulated texture to screen with Tone mapping & Gamma
+        const outputFsSource = `#version 300 es
+            precision highp float;
+            in vec2 uv;
+            out vec4 outColor;
+
+            uniform sampler2D u_tex;
+
+            // ACES Film Tone Mapping curve
+            vec3 ACESFilm(vec3 x) {
+                float a = 2.51;
+                float b = 0.03;
+                float c = 2.43;
+                float d = 0.59;
+                float e = 0.14;
+                return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+            }
+
+            void main() {
+                vec3 rgb = texture(u_tex, uv).rgb;
+                
+                // Tone mapping
+                rgb = ACESFilm(rgb);
+                
+                // Gamma correction
+                rgb = pow(rgb, vec3(1.0 / 2.2));
+                
+                outColor = vec4(rgb, 1.0);
+            }
+        `;
+
+        // --- WebGL Initialization ---
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vs, fs) {
+            const program = gl.createProgram();
+            gl.attachShader(program, vs);
+            gl.attachShader(program, fs);
+            gl.linkProgram(program);
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Program linking error:', gl.getProgramInfoLog(program));
+                return null;
+            }
+            return program;
+        }
+
+        // Setup Shaders
+        const vs = createShader(gl, gl.VERTEX_SHADER, vsSource);
+        
+        const ptFs = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        const ptProgram = createProgram(gl, vs, ptFs);
+
+        const accumFs = createShader(gl, gl.FRAGMENT_SHADER, accumFsSource);
+        const accumProgram = createProgram(gl, vs, accumFs);
+
+        const outFs = createShader(gl, gl.FRAGMENT_SHADER, outputFsSource);
+        const outProgram = createProgram(gl, vs, outFs);
+
+        // Quad geometry Setup
+        const positionAttributeLocation = gl.getAttribLocation(ptProgram, "position");
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        const positions = new Float32Array([
+            -1.0, -1.0,
+             1.0, -1.0,
+            -1.0,  1.0,
+            -1.0,  1.0,
+             1.0, -1.0,
+             1.0,  1.0,
+        ]);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        gl.enableVertexAttribArray(positionAttributeLocation);
+        gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+        // --- Textures & Framebuffers for double-buffer accumulation ---
+        
+        let width = 512;
+        let height = 512;
+        canvas.width = width;
+        canvas.height = height;
+
+        function createTexture() {
+            const tex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, tex);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            return tex;
+        }
+
+        // We need OES_texture_float_linear and EXT_color_buffer_float extensions
+        const ext1 = gl.getExtension('EXT_color_buffer_float');
+        if (!ext1) {
+            alert('Your GPU does not support float framebuffers (EXT_color_buffer_float). Render might fail.');
+        }
+
+        let textures = [createTexture(), createTexture(), createTexture()];
+        let fbos = [gl.createFramebuffer(), gl.createFramebuffer(), gl.createFramebuffer()];
+
+        for (let i = 0; i < 3; ++i) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[i]);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures[i], 0);
+        }
+
+        // --- App State & Interactive Controls ---
+        
+        const stateControls = {
+            // Camera
+            theta: Math.PI / 4,
+            phi: Math.PI / 4,
+            radius: 5.5,
+            target: [0.0, -0.3, 0.0],
+            fov: 40.0,
+            dof: 0.0,
+            focus: 5.5,
+            
+            // Materials
+            matID: 0,
+            mat0_color: [1.0, 0.78, 0.34], // gold
+            mat0_metallic: 0.9,
+            mat0_roughness: 0.2,
+            mat0_specular: 0.5,
+
+            mat1_color: [1.0, 1.0, 1.0], // glass tint
+            mat1_ior: 1.5,
+
+            mat2_color: [0.95, 0.95, 0.95], // mirror
+
+            // Lighting
+            light_intensity: 15.0,
+            max_bounces: 4,
+
+            // Sampling progress
+            sampleIndex: 0
+        };
+
+        let isDirty = true; // Set to true when camera or params change, forcing restart of accumulation
+
+        // Camera calculations
+        function getCameraPosition() {
+            return [
+                stateControls.target[0] + stateControls.radius * Math.sin(stateControls.theta) * Math.cos(stateControls.phi),
+                stateControls.target[1] + stateControls.radius * Math.cos(stateControls.theta),
+                stateControls.target[2] + stateControls.radius * Math.sin(stateControls.theta) * Math.sin(stateControls.phi)
+            ];
+        }
+
+        // --- Mouse Interaction Event Listeners ---
+        
+        let isMouseDown = false;
+        let mouseButton = 0;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+
+        canvas.addEventListener('mousedown', (e) => {
+            isMouseDown = true;
+            mouseButton = e.button;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+        });
+
+        window.addEventListener('mouseup', () => {
+            isMouseDown = false;
+        });
+
+        canvas.addEventListener('contextmenu', e => e.preventDefault()); // Disable right click menu
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!isMouseDown) return;
+
+            const deltaX = e.clientX - lastMouseX;
+            const deltaY = e.clientY - lastMouseY;
+            lastMouseX = e.clientX;
+            lastMouseY = e.clientY;
+
+            if (mouseButton === 0) { // Left button: Orbit
+                stateControls.phi -= deltaX * 0.005;
+                stateControls.theta -= deltaY * 0.005;
+                stateControls.theta = Math.max(0.01, Math.min(Math.PI - 0.01, stateControls.theta));
+            } else if (mouseButton === 1 || mouseButton === 2) { // Middle or Right button: Pan target
+                const camPos = getCameraPosition();
+                const w = camPos.map((c, i) => c - stateControls.target[i]);
+                const wLen = Math.sqrt(w[0]*w[0] + w[1]*w[1] + w[2]*w[2]);
+                const wNorm = w.map(c => c / wLen);
+                
+                // Cross products to find camera local directions
+                const u = [
+                    -wNorm[2],
+                    0,
+                    wNorm[0]
+                ];
+                const uLen = Math.sqrt(u[0]*u[0] + u[2]*u[2]);
+                const uNorm = uLen > 0 ? u.map(c => c / uLen) : [1,0,0];
+                const vNorm = [
+                    wNorm[1]*uNorm[2] - wNorm[2]*uNorm[1],
+                    wNorm[2]*uNorm[0] - wNorm[0]*uNorm[2],
+                    wNorm[0]*uNorm[1] - wNorm[1]*uNorm[0]
+                ];
+
+                const panSpeed = 0.003 * stateControls.radius;
+                stateControls.target[0] -= (uNorm[0] * deltaX - vNorm[0] * deltaY) * panSpeed;
+                stateControls.target[1] -= (uNorm[1] * deltaX - vNorm[1] * deltaY) * panSpeed;
+                stateControls.target[2] -= (uNorm[2] * deltaX - vNorm[2] * deltaY) * panSpeed;
+            }
+
+            isDirty = true;
+        });
+
+        canvas.addEventListener('wheel', (e) => {
+            stateControls.radius += e.deltaY * 0.002 * stateControls.radius;
+            stateControls.radius = Math.max(1.0, Math.min(50.0, stateControls.radius));
+            isDirty = true;
+        });
+
+        // --- HTML Controller UI Listeners ---
+
+        const targetSelect = document.getElementById('material-target');
+        const colorPicker = document.getElementById('mat-color');
+        const colorHexSpan = document.getElementById('color-hex');
+        
+        const matMetallic = document.getElementById('mat-metallic');
+        const matRoughness = document.getElementById('mat-roughness');
+        const matSpecular = document.getElementById('mat-specular');
+        
+        const metallicVal = document.getElementById('metallic-val');
+        const roughnessVal = document.getElementById('roughness-val');
+        const specularVal = document.getElementById('specular-val');
+
+        const camDof = document.getElementById('cam-dof');
+        const camFocus = document.getElementById('cam-focus');
+        const camFov = document.getElementById('cam-fov');
+        
+        const dofVal = document.getElementById('dof-val');
+        const focusVal = document.getElementById('focus-val');
+        const fovValDisplay = document.getElementById('fov-val-display');
+
+        const lightIntensity = document.getElementById('light-intensity');
+        const rayBounces = document.getElementById('ray-bounces');
+        
+        const lightVal = document.getElementById('light-val');
+        const bouncesVal = document.getElementById('bounces-val');
+
+        // Hex to rgb conversion
+        function hexToRgb(hex) {
+            const r = parseInt(hex.slice(1, 3), 16) / 255.0;
+            const g = parseInt(hex.slice(3, 5), 16) / 255.0;
+            const b = parseInt(hex.slice(5, 7), 16) / 255.0;
+            return [r, g, b];
+        }
+
+        // RGB to hex
+        function rgbToHex(r, g, b) {
+            const toHex = x => {
+                const h = Math.round(x * 255).toString(16);
+                return h.length === 1 ? '0' + h : h;
+            };
+            return '#' + toHex(r) + toHex(g) + toHex(b);
+        }
+
+        // Material target dropdown update
+        targetSelect.addEventListener('change', () => {
+            stateControls.matID = parseInt(targetSelect.value);
+            // Load current target properties into inputs
+            if (stateControls.matID === 0) {
+                colorPicker.value = rgbToHex(...stateControls.mat0_color);
+                matMetallic.value = stateControls.mat0_metallic;
+                matRoughness.value = stateControls.mat0_roughness;
+                matSpecular.value = stateControls.mat0_specular;
+                matMetallic.disabled = false;
+                matRoughness.disabled = false;
+                matSpecular.disabled = false;
+            } else if (stateControls.matID === 1) { // Glass
+                colorPicker.value = rgbToHex(...stateControls.mat1_color);
+                matMetallic.value = 0.0;
+                matRoughness.value = 0.0;
+                matSpecular.value = stateControls.mat1_ior / 2.0; // dummy mapping
+                matMetallic.disabled = true;
+                matRoughness.disabled = true;
+                matSpecular.disabled = true;
+            } else { // Mirror Box
+                colorPicker.value = rgbToHex(...stateControls.mat2_color);
+                matMetallic.value = 1.0;
+                matRoughness.value = 0.02;
+                matSpecular.value = 0.5;
+                matMetallic.disabled = true;
+                matRoughness.disabled = true;
+                matSpecular.disabled = true;
+            }
+            colorHexSpan.textContent = colorPicker.value.toUpperCase();
+            
+            metallicVal.textContent = parseFloat(matMetallic.value).toFixed(2);
+            roughnessVal.textContent = parseFloat(matRoughness.value).toFixed(2);
+            specularVal.textContent = parseFloat(matSpecular.value).toFixed(2);
+        });
+
+        colorPicker.addEventListener('input', () => {
+            const rgb = hexToRgb(colorPicker.value);
+            colorHexSpan.textContent = colorPicker.value.toUpperCase();
+            if (stateControls.matID === 0) stateControls.mat0_color = rgb;
+            else if (stateControls.matID === 1) stateControls.mat1_color = rgb;
+            else stateControls.mat2_color = rgb;
+            isDirty = true;
+        });
+
+        matMetallic.addEventListener('input', () => {
+            stateControls.mat0_metallic = parseFloat(matMetallic.value);
+            metallicVal.textContent = stateControls.mat0_metallic.toFixed(2);
+            isDirty = true;
+        });
+
+        matRoughness.addEventListener('input', () => {
+            stateControls.mat0_roughness = parseFloat(matRoughness.value);
+            roughnessVal.textContent = stateControls.mat0_roughness.toFixed(2);
+            isDirty = true;
+        });
+
+        matSpecular.addEventListener('input', () => {
+            stateControls.mat0_specular = parseFloat(matSpecular.value);
+            specularVal.textContent = stateControls.mat0_specular.toFixed(2);
+            isDirty = true;
+        });
+
+        camDof.addEventListener('input', () => {
+            stateControls.dof = parseFloat(camDof.value);
+            dofVal.textContent = stateControls.dof.toFixed(3);
+            isDirty = true;
+        });
+
+        camFocus.addEventListener('input', () => {
+            stateControls.focus = parseFloat(camFocus.value);
+            focusVal.textContent = stateControls.focus.toFixed(1);
+            isDirty = true;
+        });
+
+        camFov.addEventListener('input', () => {
+            stateControls.fov = parseFloat(camFov.value);
+            fovValDisplay.textContent = stateControls.fov + '°';
+            isDirty = true;
+        });
+
+        lightIntensity.addEventListener('input', () => {
+            stateControls.light_intensity = parseFloat(lightIntensity.value);
+            lightVal.textContent = stateControls.light_intensity.toFixed(1);
+            isDirty = true;
+        });
+
+        rayBounces.addEventListener('input', () => {
+            stateControls.max_bounces = parseInt(rayBounces.value);
+            bouncesVal.textContent = stateControls.max_bounces;
+            isDirty = true;
+        });
+
+        // Resize handler
+        function checkResize() {
+            const w = Math.floor(canvas.clientWidth);
+            const h = Math.floor(canvas.clientHeight);
+            if (w !== width || h !== height) {
+                width = w;
+                height = h;
+                canvas.width = width;
+                canvas.height = height;
+
+                // Recreate textures at new resolution
+                gl.deleteTexture(textures[0]);
+                gl.deleteTexture(textures[1]);
+                gl.deleteTexture(textures[2]);
+                textures = [createTexture(), createTexture(), createTexture()];
+                
+                for (let i = 0; i < 3; ++i) {
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[i]);
+                    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textures[i], 0);
+                }
+
+                document.getElementById('res-val').textContent = width + 'x' + height;
+                isDirty = true;
+            }
+        }
+
+        // --- Render Loop ---
+
+        let readTexIdx = 0;
+        let writeTexIdx = 1;
+        let ptTexIdx = 2; // Holds the raw unaccumulated sample from path tracer
+
+        let lastFrameTime = performance.now();
+        let fpsSamples = 0;
+        let accumulatedSPP = 0;
+
+        function renderFrame() {
+            checkResize();
+
+            if (isDirty) {
+                // Clear accumulation textures on camera/material edits
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[0]);
+                gl.clearColor(0, 0, 0, 0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+                
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[1]);
+                gl.clearColor(0, 0, 0, 0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+
+                accumulatedSPP = 0;
+                stateControls.sampleIndex = 0;
+                isDirty = false;
+            }
+
+            // 1. Path tracing pass -> render to ptTex (FBO 2)
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[ptTexIdx]);
+            gl.viewport(0, 0, width, height);
+            gl.useProgram(ptProgram);
+            gl.bindVertexArray(vao);
+
+            // Bind Uniforms
+            gl.uniform2f(gl.getUniformLocation(ptProgram, "u_resolution"), width, height);
+            gl.uniform1ui(gl.getUniformLocation(ptProgram, "u_sample_index"), stateControls.sampleIndex);
+            gl.uniform1f(gl.getUniformLocation(ptProgram, "u_time"), performance.now() / 1000.0);
+            
+            const camPos = getCameraPosition();
+            gl.uniform3f(gl.getUniformLocation(ptProgram, "u_cam_pos"), ...camPos);
+            gl.uniform3f(gl.getUniformLocation(ptProgram, "u_cam_target"), ...stateControls.target);
+            gl.uniform1f(gl.getUniformLocation(ptProgram, "u_cam_fov"), stateControls.fov);
+            gl.uniform1f(gl.getUniformLocation(ptProgram, "u_cam_dof"), stateControls.dof);
+            gl.uniform1f(gl.getUniformLocation(ptProgram, "u_cam_focus"), stateControls.focus);
+
+            gl.uniform3f(gl.getUniformLocation(ptProgram, "u_mat0_color"), ...stateControls.mat0_color);
+            gl.uniform1f(gl.getUniformLocation(ptProgram, "u_mat0_metallic"), stateControls.mat0_metallic);
+            gl.uniform1f(gl.getUniformLocation(ptProgram, "u_mat0_roughness"), stateControls.mat0_roughness);
+            gl.uniform1f(gl.getUniformLocation(ptProgram, "u_mat0_specular"), stateControls.mat0_specular);
+            
+            gl.uniform3f(gl.getUniformLocation(ptProgram, "u_mat1_color"), ...stateControls.mat1_color);
+            gl.uniform1f(gl.getUniformLocation(ptProgram, "u_mat1_ior"), stateControls.mat1_ior);
+
+            gl.uniform3f(gl.getUniformLocation(ptProgram, "u_mat2_color"), ...stateControls.mat2_color);
+
+            gl.uniform1f(gl.getUniformLocation(ptProgram, "u_light_intensity"), stateControls.light_intensity);
+            gl.uniform1i(gl.getUniformLocation(ptProgram, "u_max_bounces"), stateControls.max_bounces);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // 2. Accumulation pass: blend ptTex with readTex -> writeTex (FBO writeTexIdx)
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[writeTexIdx]);
+            gl.useProgram(accumProgram);
+            
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, textures[readTexIdx]);
+            gl.uniform1i(gl.getUniformLocation(accumProgram, "u_accum_tex"), 0);
+
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, textures[ptTexIdx]);
+            gl.uniform1i(gl.getUniformLocation(accumProgram, "u_current_tex"), 1);
+
+            // Progressive blend formula: 1 / (sampleIndex + 1)
+            gl.uniform1f(gl.getUniformLocation(accumProgram, "u_blend"), 1.0 / (parseFloat(accumulatedSPP) + 1.0));
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // 3. Output display pass: render accumulated texture to viewport screen (FBO 0)
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, width, height);
+            gl.useProgram(outProgram);
+            
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, textures[writeTexIdx]);
+            gl.uniform1i(gl.getUniformLocation(outProgram, "u_tex"), 0);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // Swap double buffers
+            let temp = readTexIdx;
+            readTexIdx = writeTexIdx;
+            writeTexIdx = temp;
+
+            stateControls.sampleIndex++;
+            accumulatedSPP++;
+            
+            // HUD details update
+            document.getElementById('spp-val').textContent = accumulatedSPP;
+
+            // Frame Rate Calculation
+            fpsSamples++;
+            const now = performance.now();
+            if (now - lastFrameTime >= 1000.0) {
+                const fps = Math.round((fpsSamples * 1000.0) / (now - lastFrameTime));
+                document.getElementById('fps-val').textContent = fps;
+                fpsSamples = 0;
+                lastFrameTime = now;
+            }
+
+            requestAnimationFrame(renderFrame);
+        }
+
+        // Export PNG render action
+        document.getElementById('btn-export').addEventListener('click', () => {
+            // Re-render display pass to make sure readback works
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.useProgram(outProgram);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, textures[readTexIdx]);
+            gl.uniform1i(gl.getUniformLocation(outProgram, "u_tex"), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // Save canvas content
+            const link = document.createElement('a');
+            link.download = 'photon-render-' + accumulatedSPP + 'spp.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        });
+
+        // Kick off loop
+        requestAnimationFrame(renderFrame);
+
+    </script>
+</body>
+</html>

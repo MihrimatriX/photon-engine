@@ -101,12 +101,6 @@ See [`docs/architecture.md`](docs/architecture.md) for a detailed breakdown.
 
 ---
 
-## 📄 License
-
-This project is licensed under the **MIT License** – see the [LICENSE](LICENSE) file for details.
-
----
-
 <p align="center">
   Built with ❤️ and physics.
 </p>
