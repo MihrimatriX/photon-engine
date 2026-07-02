@@ -1,0 +1,22 @@
+BasedOnStyle: Google
+
+IndentWidth: 4
+ColumnLimit: 100
+
+AllowShortFunctionsOnASingleLine: Inline
+BreakBeforeBraces: Attach
+PointerAlignment: Left
+SortIncludes: CaseInsensitive
+
+# Additional refinements
+AccessModifierOffset: -4
+AlignAfterOpenBracket: Align
+AllowShortBlocksOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BinPackArguments: true
+BinPackParameters: true
+SpaceAfterCStyleCast: false
+SpaceBeforeParens: ControlStatements
+TabWidth: 4
+UseTab: Never
