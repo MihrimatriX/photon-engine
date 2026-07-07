@@ -1,0 +1,9 @@
+{
+  "id": "brushed_aluminum",
+  "name": "Brushed Aluminum",
+  "category": "Metalik",
+  "baseColor": [0.85, 0.86, 0.88],
+  "metallic": 1.0,
+  "roughness": 0.35,
+  "specular": 0.5
+}

@@ -1,0 +1,9 @@
+{
+  "id": "linen",
+  "name": "Linen",
+  "category": "Kumas",
+  "baseColor": [0.75, 0.7, 0.6],
+  "metallic": 0.0,
+  "roughness": 0.9,
+  "specular": 0.2
+}

@@ -6,6 +6,7 @@
 #include "geometry/shape.h"
 #include <vector>
 #include <memory>
+#include <cstdint>
 
 namespace photon {
 
@@ -82,7 +83,7 @@ private:
         void initInterior(int axis, BVHBuildNode* c0, BVHBuildNode* c1) {
             children[0] = c0;
             children[1] = c1;
-            bounds = c0->bounds.merge(c1->bounds);
+            bounds = c0->bounds.merged(c1->bounds);
             splitAxis = axis;
             nPrimitives = 0;
         }

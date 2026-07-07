@@ -1,15 +1,13 @@
 #pragma once
 
+#include "core/color/spectrum.h"
+
 #include <vector>
 #include <cstdint>
 #include <cassert>
 #include <algorithm>
-#include <atomic>
-#include <mutex>
 
 namespace photon {
-
-#include "core/color/spectrum.h"
 
 class Image {
 public:
@@ -22,7 +20,7 @@ public:
     void setPixel(int x, int y, const Color3f& color);
     Color3f getPixel(int x, int y) const;
 
-    // Thread-safe sample accumulation
+    // Sample accumulation (tile renderer writes disjoint pixels per pass)
     void addSample(int x, int y, const Color3f& color);
     Color3f getAveragedPixel(int x, int y) const;
     int getSampleCount(int x, int y) const;
@@ -36,9 +34,8 @@ public:
 private:
     int m_width = 0;
     int m_height = 0;
-    std::vector<float> m_data;          // w * h * 3 (RGB)
-    std::vector<std::atomic<int>> m_sampleCounts;
-    mutable std::vector<std::mutex> m_pixelMutexes;
+    std::vector<float> m_data;   // w * h * 3 (RGB)
+    std::vector<int> m_sampleCounts;
 
     size_t pixelIndex(int x, int y) const {
         assert(x >= 0 && x < m_width && y >= 0 && y < m_height);

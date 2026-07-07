@@ -1,0 +1,8 @@
+{
+  "id": "outdoor_hdri",
+  "name": "Outdoor HDRI",
+  "category": "Studio",
+  "camera": { "fov": 45, "radius": 15 },
+  "lightIntensity": 8.0,
+  "exposure": 0.5
+}

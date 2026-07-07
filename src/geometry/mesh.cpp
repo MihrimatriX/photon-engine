@@ -17,7 +17,7 @@ TriangleMesh::TriangleMesh(const std::vector<Vec3f>& positions,
     // Compute bounding box
     m_bounds = AABB::empty();
     for (const auto& p : m_positions) {
-        m_bounds = m_bounds.merge(p);
+        m_bounds.merge(p);
     }
 }
 

@@ -48,7 +48,7 @@ BVH::BVHBuildNode* BVH::recursiveBuild(
     // Compute bounds for all primitives in this node
     AABB bounds = AABB::empty();
     for (int i = start; i < end; ++i) {
-        bounds = bounds.merge(buildPrims[i].bounds);
+        bounds = bounds.merged(buildPrims[i].bounds);
     }
 
     int nPrims = end - start;
@@ -65,7 +65,7 @@ BVH::BVHBuildNode* BVH::recursiveBuild(
     // Compute centroid bounds
     AABB centroidBounds = AABB::empty();
     for (int i = start; i < end; ++i) {
-        centroidBounds = centroidBounds.merge(buildPrims[i].centroid);
+        centroidBounds.merge(buildPrims[i].centroid);
     }
 
     int dim = centroidBounds.maxExtent();
@@ -97,7 +97,7 @@ BVH::BVHBuildNode* BVH::recursiveBuild(
             int b = static_cast<int>(nBuckets * centroidBounds.offset(buildPrims[i].centroid)[dim]);
             if (b == nBuckets) b = nBuckets - 1;
             buckets[b].count++;
-            buckets[b].bounds = buckets[b].bounds.merge(buildPrims[i].bounds);
+            buckets[b].bounds = buckets[b].bounds.merged(buildPrims[i].bounds);
         }
 
         // Compute cost for splitting at each bucket boundary
@@ -108,11 +108,11 @@ BVH::BVHBuildNode* BVH::recursiveBuild(
             int count0 = 0;
             int count1 = 0;
             for (int j = 0; j <= i; ++j) {
-                b0 = b0.merge(buckets[j].bounds);
+                b0 = b0.merged(buckets[j].bounds);
                 count0 += buckets[j].count;
             }
             for (int j = i + 1; j < nBuckets; ++j) {
-                b1 = b1.merge(buckets[j].bounds);
+                b1 = b1.merged(buckets[j].bounds);
                 count1 += buckets[j].count;
             }
             cost[i] = 1.0f + (count0 * b0.surfaceArea() + count1 * b1.surfaceArea()) / bounds.surfaceArea();

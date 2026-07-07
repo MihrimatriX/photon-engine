@@ -1,0 +1,10 @@
+{
+  "id": "led_panel",
+  "name": "LED Panel",
+  "category": "Emissive",
+  "baseColor": [1.0, 0.95, 0.85],
+  "metallic": 0.0,
+  "roughness": 0.5,
+  "specular": 0.5,
+  "emissive": 5.0
+}

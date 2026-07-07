@@ -26,6 +26,6 @@ target_compile_features(photon_core PUBLIC cxx_std_20)
 # Private include dirs for third-party header-only libraries
 target_include_directories(photon_core
     PRIVATE
-        ${CMAKE_SOURCE_DIR}/external/stb
-        ${CMAKE_SOURCE_DIR}/external/tinyexr
+        ${stb_SOURCE_DIR}
+        ${tinyexr_SOURCE_DIR}
 )

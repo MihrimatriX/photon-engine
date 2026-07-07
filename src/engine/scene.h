@@ -28,6 +28,9 @@ public:
     /// Build the BVH acceleration structure on all added shapes
     void buildAccelerator();
 
+    /// Clear all scene contents
+    void reset();
+
     /// Intersect a ray with the scene geometry
     bool intersect(Ray& ray, SurfaceInteraction& isect) const;
 

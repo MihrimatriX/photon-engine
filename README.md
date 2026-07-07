@@ -16,6 +16,7 @@ PhotonEngine is a modern C++20 rendering engine built for photorealistic image s
 - **Denoising** via Intel Open Image Denoise (OIDN) integration
 - **Multiple Camera Models** – pinhole, thin-lens (DoF), orthographic
 - **Scene Import** – OBJ and glTF file formats
+- **Desktop Editor** – GLFW + ImGui with drag-and-drop workflow
 - **Web Version** *(planned)* – WebAssembly + WebGPU target
 
 ---
@@ -49,6 +50,8 @@ cd build && ctest --output-on-failure
 
 | Option                | Default | Description                          |
 |-----------------------|---------|--------------------------------------|
+| `PHOTON_BUILD_APP`    | `ON`    | Build `photon_app` desktop editor    |
+| `PHOTON_BUILD_CLI`    | `OFF`   | Build `photon_render` CLI *(dev only)* |
 | `PHOTON_BUILD_TESTS`  | `ON`    | Build unit tests (Google Test)       |
 | `PHOTON_BUILD_GPU`    | `OFF`   | Build GPU backend (OptiX/Vulkan)     |
 | `PHOTON_ENABLE_SIMD`  | `ON`    | Enable AVX2/FMA SIMD instructions    |
@@ -58,23 +61,22 @@ cd build && ctest --output-on-failure
 
 ## 🚀 Usage
 
-```bash
-# Render the default Cornell Box scene
-./build/photon_render scenes/cornell_box.json
+Launch the desktop editor:
 
-# Specify output and resolution
-./build/photon_render scenes/car.json -o output.exr -w 1920 -h 1080 -s 512
+```bash
+./build/photon_app
+# Windows: build\photon_app.exe
 ```
 
-### Command-Line Options
+**Workflow:**
 
-| Flag       | Description                     |
-|------------|---------------------------------|
-| `-o`       | Output file path (PNG or EXR)   |
-| `-w`       | Image width in pixels           |
-| `-h`       | Image height in pixels          |
-| `-s`       | Samples per pixel               |
-| `-t`       | Number of render threads        |
+1. Drag an OBJ or glTF model into the viewport
+2. Assign materials from the library (left panel)
+3. Adjust camera and render settings in the inspector / Render panel
+4. Use **Render → Tam Cozunurluk** for full-resolution export
+5. Export PNG or EXR via **Dosya → Disa Aktar**
+
+> **Note:** The CLI renderer (`photon_render`) is optional and disabled by default. Enable with `-DPHOTON_BUILD_CLI=ON` for development only.
 
 ---
 
@@ -93,8 +95,12 @@ src/
 ├── samplers/      Stratified, Halton, Sobol quasi-random samplers
 ├── io/            Image I/O (PNG, EXR), scene loaders (OBJ, glTF)
 ├── engine/        Render scheduler, tile manager, tone mapping
+├── app/           photon_app entry point and UI application
+├── ui/            ImGui theme, orbit camera, file dialogs
+├── scene/         Scene graph, material library, project I/O
+├── preview/       OpenGL viewport preview
 ├── gpu/           GPU compute backend (optional)
-└── main.cpp       CLI entry point
+└── main.cpp       CLI entry point (dev only, PHOTON_BUILD_CLI)
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for a detailed breakdown.

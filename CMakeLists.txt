@@ -17,6 +17,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Build Options
 # ──────────────────────────────────────────────
 option(PHOTON_BUILD_TESTS  "Build unit tests"                    ON)
+option(PHOTON_BUILD_CLI    "Build photon_render CLI (dev only)"  OFF)
 option(PHOTON_BUILD_GPU    "Build GPU (OptiX/Vulkan) backend"    OFF)
 option(PHOTON_ENABLE_SIMD  "Enable AVX2/FMA SIMD instructions"  ON)
 option(PHOTON_ENABLE_OIDN  "Enable Intel Open Image Denoise"    OFF)
@@ -70,6 +71,14 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(stb tinyobjloader tinyexr)
 
+# cgltf – single-header glTF 2.0 loader
+FetchContent_Declare(
+    cgltf
+    GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
+    GIT_TAG        v1.13
+)
+FetchContent_MakeAvailable(cgltf)
+
 # Google Test (conditional)
 if(PHOTON_BUILD_TESTS)
     FetchContent_Declare(
@@ -101,13 +110,74 @@ if(PHOTON_BUILD_GPU)
     add_subdirectory(src/gpu)
 endif()
 
+# Desktop UI application (GLFW + ImGui)
+option(PHOTON_BUILD_APP "Build photon_app desktop UI" ON)
+if(PHOTON_BUILD_APP)
+    find_package(glfw3 CONFIG QUIET)
+    find_package(imgui CONFIG QUIET)
+    find_package(glm CONFIG QUIET)
+
+    if(NOT glfw3_FOUND)
+        FetchContent_Declare(
+            glfw
+            GIT_REPOSITORY https://github.com/glfw/glfw.git
+            GIT_TAG        3.4
+        )
+        set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(glfw)
+    endif()
+
+    if(NOT imgui_FOUND)
+        FetchContent_Declare(
+            imgui_fc
+            GIT_REPOSITORY https://github.com/ocornut/imgui.git
+            GIT_TAG        docking
+        )
+        FetchContent_MakeAvailable(imgui_fc)
+        add_library(imgui_app STATIC
+            ${imgui_fc_SOURCE_DIR}/imgui.cpp
+            ${imgui_fc_SOURCE_DIR}/imgui_draw.cpp
+            ${imgui_fc_SOURCE_DIR}/imgui_tables.cpp
+            ${imgui_fc_SOURCE_DIR}/imgui_widgets.cpp
+            ${imgui_fc_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+            ${imgui_fc_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+        )
+        target_include_directories(imgui_app PUBLIC
+            ${imgui_fc_SOURCE_DIR}
+            ${imgui_fc_SOURCE_DIR}/backends
+        )
+        target_compile_definitions(imgui_app PUBLIC IMGUI_HAS_DOCK)
+        target_link_libraries(imgui_app PUBLIC glfw)
+        add_library(imgui::imgui ALIAS imgui_app)
+    endif()
+
+    if(NOT glm_FOUND)
+        FetchContent_Declare(
+            glm
+            GIT_REPOSITORY https://github.com/g-truc/glm.git
+            GIT_TAG        1.0.1
+        )
+        FetchContent_MakeAvailable(glm)
+    endif()
+
+    find_package(OpenGL REQUIRED)
+    add_subdirectory(src/scene)
+    add_subdirectory(src/preview)
+    add_subdirectory(src/ui)
+    add_subdirectory(src/app)
+endif()
+
 # Tests (optional)
 if(PHOTON_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
 # ──────────────────────────────────────────────
-# Main Executable
+# CLI Executable (dev only, OFF by default)
 # ──────────────────────────────────────────────
-add_executable(photon_render src/main.cpp)
-target_link_libraries(photon_render PRIVATE photon_engine)
+if(PHOTON_BUILD_CLI)
+    add_executable(photon_render src/main.cpp)
+    target_link_libraries(photon_render PRIVATE photon_engine)
+endif()

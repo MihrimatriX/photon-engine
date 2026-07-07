@@ -1,15 +1,9 @@
 #pragma once
 
 #include <cstdint>
-#include <cmath>
+#include "core/math/vec.h"
 
 namespace photon {
-
-struct Vec2f {
-    float x = 0.0f, y = 0.0f;
-    Vec2f() = default;
-    Vec2f(float x, float y) : x(x), y(y) {}
-};
 
 class RNG {
 public:

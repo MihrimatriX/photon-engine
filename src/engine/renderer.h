@@ -32,6 +32,10 @@ public:
     /// @param callback Callback invoked after each sample pass per pixel, receives (image, currentSPP).
     void renderProgressive(const Scene& scene, const Camera& camera, const RenderSettings& settings,
                            std::function<void(const Image&, int)> callback);
+
+    /// @brief Render a single sample pass into an existing accumulation buffer.
+    void renderSamplePass(const Scene& scene, const Camera& camera, const RenderSettings& settings,
+                          Image& accum, int passIndex);
 };
 
 } // namespace photon

@@ -27,6 +27,7 @@ public:
     const Vec3f& normal() const { return m_normal; }
     float area() const { return m_area; }
     const Color3f& radiance() const { return m_radiance; }
+    void setRadiance(const Color3f& r) { m_radiance = r; }
 
 private:
     Vec3f m_position;

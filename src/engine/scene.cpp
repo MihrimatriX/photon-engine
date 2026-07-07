@@ -34,6 +34,14 @@ void Scene::buildAccelerator() {
     m_bvh.build(m_shapes);
 }
 
+void Scene::reset() {
+    m_shapes.clear();
+    m_lights.clear();
+    m_lightPtrs.clear();
+    m_environment.reset();
+    m_bvh = BVH{};
+}
+
 bool Scene::intersect(Ray& ray, SurfaceInteraction& isect) const {
     return m_bvh.intersect(ray, isect);
 }

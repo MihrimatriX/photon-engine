@@ -5,6 +5,7 @@
 
 #include "core/math/vec.h"
 #include <memory>
+#include <cstdint>
 
 namespace photon {
 

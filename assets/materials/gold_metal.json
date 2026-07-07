@@ -1,0 +1,9 @@
+{
+  "id": "gold_metal",
+  "name": "Gold Metal",
+  "category": "Metalik",
+  "baseColor": [1.0, 0.78, 0.34],
+  "metallic": 1.0,
+  "roughness": 0.25,
+  "specular": 0.5
+}

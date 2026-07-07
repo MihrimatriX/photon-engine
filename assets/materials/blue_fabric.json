@@ -1,0 +1,9 @@
+{
+  "id": "blue_fabric",
+  "name": "Blue Fabric",
+  "category": "Kumas",
+  "baseColor": [0.15, 0.25, 0.55],
+  "metallic": 0.0,
+  "roughness": 0.85,
+  "specular": 0.3
+}
