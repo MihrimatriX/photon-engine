@@ -11,6 +11,10 @@ target_link_libraries(photon_app PRIVATE
     OpenGL::GL
 )
 
+if(WIN32)
+    target_link_libraries(photon_app PRIVATE user32)
+endif()
+
 if(TARGET glfw)
     target_link_libraries(photon_app PRIVATE glfw)
 else()

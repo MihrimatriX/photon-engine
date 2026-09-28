@@ -23,6 +23,7 @@ public:
 
     void compile(Scene& outScene);
     uint32_t allocatePickId();
+    bool removeNode(SceneNode* node);
 
     void clear();
     bool empty() const { return m_root->children.empty(); }
@@ -33,7 +34,8 @@ private:
     uint32_t m_nextPickId = 1;
 
     void compileNode(const SceneNode& node, Scene& outScene, const Transform& parentXform);
-    std::shared_ptr<TriangleMesh> bakeMesh(const TriangleMesh& mesh, const Transform& xform) const;
+    std::shared_ptr<TriangleMesh> bakeMesh(const TriangleMesh& mesh, const Transform& xform,
+                                           const Material* material) const;
 };
 
 } // namespace photon

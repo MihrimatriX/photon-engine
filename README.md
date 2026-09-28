@@ -55,7 +55,16 @@ cd build && ctest --output-on-failure
 | `PHOTON_BUILD_TESTS`  | `ON`    | Build unit tests (Google Test)       |
 | `PHOTON_BUILD_GPU`    | `OFF`   | Build GPU backend (OptiX/Vulkan)     |
 | `PHOTON_ENABLE_SIMD`  | `ON`    | Enable AVX2/FMA SIMD instructions    |
-| `PHOTON_ENABLE_OIDN`  | `OFF`   | Enable Intel Open Image Denoise      |
+| `PHOTON_ENABLE_OIDN`  | `OFF*` | Auto-links OIDN if found via vcpkg/`find_package`; set `ON` to warn when missing |
+
+\*OIDN is enabled automatically whenever `OpenImageDenoise` is discoverable at configure time, even if the option is `OFF`. Install with:
+
+```bash
+vcpkg install openimagedenoise
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=[vcpkg]/scripts/buildsystems/vcpkg.cmake
+```
+
+Without OIDN, enabling Denoise in the UI still applies a soft firefly blur on full-res export.
 
 ---
 

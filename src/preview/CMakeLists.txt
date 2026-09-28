@@ -8,5 +8,11 @@ target_link_libraries(photon_preview PUBLIC
     OpenGL::GL
 )
 
+if(TARGET glfw)
+    target_link_libraries(photon_preview PUBLIC glfw)
+elseif(TARGET glfw3::glfw)
+    target_link_libraries(photon_preview PUBLIC glfw3::glfw)
+endif()
+
 target_include_directories(photon_preview PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_compile_features(photon_preview PUBLIC cxx_std_20)

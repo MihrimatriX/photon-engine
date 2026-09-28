@@ -7,6 +7,7 @@ add_executable(photon_tests
     test_sphere.cpp
     test_triangle.cpp
     test_bvh.cpp
+    test_disney.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE

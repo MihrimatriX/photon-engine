@@ -44,3 +44,7 @@ compile_commands.json
 # ──────────────────────────────────────────────
 output.png
 output.exr
+
+# Local onboarding flag
+assets/.onboarded
+imgui.ini

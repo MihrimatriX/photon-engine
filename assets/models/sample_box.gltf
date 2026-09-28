@@ -1,0 +1,37 @@
+{
+  "asset": { "version": "2.0", "generator": "PhotonEngine sample" },
+  "scene": 0,
+  "scenes": [{ "nodes": [0] }],
+  "nodes": [{ "mesh": 0, "name": "sample_box" }],
+  "meshes": [{
+    "name": "sample_box",
+    "primitives": [{
+      "attributes": { "POSITION": 0, "NORMAL": 1 },
+      "indices": 2,
+      "material": 0
+    }]
+  }],
+  "materials": [{
+    "name": "soft_white",
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [0.85, 0.85, 0.88, 1.0],
+      "metallicFactor": 0.0,
+      "roughnessFactor": 0.4
+    }
+  }],
+  "accessors": [
+    { "bufferView": 0, "componentType": 5126, "count": 24, "type": "VEC3",
+      "min": [-0.4, 0.0, -0.4], "max": [0.4, 0.8, 0.4] },
+    { "bufferView": 1, "componentType": 5126, "count": 24, "type": "VEC3" },
+    { "bufferView": 2, "componentType": 5123, "count": 36, "type": "SCALAR" }
+  ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 288, "target": 34962 },
+    { "buffer": 0, "byteOffset": 288, "byteLength": 288, "target": 34962 },
+    { "buffer": 0, "byteOffset": 576, "byteLength": 72, "target": 34963 }
+  ],
+  "buffers": [{
+    "byteLength": 648,
+    "uri": "data:application/octet-stream;base64,zczMvgAAAADNzMy+zczMPgAAAADNzMy+zczMPs3MTD/NzMy+zczMvs3MTD/NzMy+zczMPgAAAADNzMw+zczMvgAAAADNzMw+zczMvs3MTD/NzMw+zczMPs3MTD/NzMw+zczMPgAAAADNzMy+zczMPgAAAADNzMw+zczMPs3MTD/NzMw+zczMPs3MTD/NzMy+zczMvgAAAADNzMw+zczMvgAAAADNzMy+zczMvs3MTD/NzMy+zczMvs3MTD/NzMw+zczMvs3MTD/NzMy+zczMPs3MTD/NzMy+zczMPs3MTD/NzMw+zczMvs3MTD/NzMw+zczMvgAAAADNzMw+zczMPgAAAADNzMw+zczMPgAAAADNzMy+zczMvgAAAADNzMy+AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAABAAIAAAACAAMABAAFAAYABAAGAAcACAAJAAoACAAKAAsADAANAA4ADAAOAA8AEAARABIAEAASABMAFAAVABYAFAAWABcA"
+  }]
+}

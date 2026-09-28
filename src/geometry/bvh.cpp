@@ -216,9 +216,11 @@ bool BVH::intersect(Ray& ray, SurfaceInteraction& isect) const {
             } else {
                 // Put far child on stack, traverse near child first
                 if (dirIsNeg[node.splitAxis]) {
+                    if (toVisitOffset >= 64) break;
                     nodesToVisit[toVisitOffset++] = currentNodeIndex + 1; // left child is near
                     currentNodeIndex = node.secondChildOffset;            // right child is far
                 } else {
+                    if (toVisitOffset >= 64) break;
                     nodesToVisit[toVisitOffset++] = node.secondChildOffset; // right child is far
                     currentNodeIndex = currentNodeIndex + 1;                // left child is near
                 }

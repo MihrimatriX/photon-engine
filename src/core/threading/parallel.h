@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <functional>
 #include <future>
+#include <memory>
 #include <vector>
 
 namespace photon {
@@ -25,7 +26,6 @@ inline void parallelFor(int64_t begin, int64_t end, const std::function<void(int
         return;
     }
 
-    // Run sequentially if range is small enough
     if (range <= grainSize) {
         for (int64_t i = begin; i < end; ++i) {
             func(i);
@@ -33,14 +33,16 @@ inline void parallelFor(int64_t begin, int64_t end, const std::function<void(int
         return;
     }
 
+    // Hold a shared copy so worker lifetimes can't outlive a temporary std::function.
+    auto sharedFunc = std::make_shared<std::function<void(int64_t)>>(func);
     auto& pool = getThreadPool();
     std::vector<std::future<void>> futures;
 
     for (int64_t i = begin; i < end; i += grainSize) {
         int64_t chunkEnd = std::min(i + grainSize, end);
-        futures.push_back(pool.submit([&func, i, chunkEnd]() {
+        futures.push_back(pool.submit([sharedFunc, i, chunkEnd]() {
             for (int64_t j = i; j < chunkEnd; ++j) {
-                func(j);
+                (*sharedFunc)(j);
             }
         }));
     }
@@ -50,7 +52,8 @@ inline void parallelFor(int64_t begin, int64_t end, const std::function<void(int
     }
 }
 
-inline void parallelFor2D(int width, int height, const std::function<void(int, int, int, int)>& func, int tileSize = 16) {
+inline void parallelFor2D(int width, int height, const std::function<void(int, int, int, int)>& func,
+                          int tileSize = 16, ThreadPool* poolOverride = nullptr) {
     if (width <= 0 || height <= 0) {
         return;
     }
@@ -59,8 +62,13 @@ inline void parallelFor2D(int width, int height, const std::function<void(int, i
         tileSize = 16;
     }
 
-    auto& pool = getThreadPool();
+    // Copy into shared_ptr: workers must not keep a reference to a stack temporary.
+    auto sharedFunc = std::make_shared<std::function<void(int, int, int, int)>>(func);
+
+    ThreadPool& pool = poolOverride ? *poolOverride : getThreadPool();
     std::vector<std::future<void>> futures;
+    futures.reserve(static_cast<size_t>((width + tileSize - 1) / tileSize) *
+                    static_cast<size_t>((height + tileSize - 1) / tileSize));
 
     for (int y = 0; y < height; y += tileSize) {
         for (int x = 0; x < width; x += tileSize) {
@@ -69,8 +77,8 @@ inline void parallelFor2D(int width, int height, const std::function<void(int, i
             int yBegin = y;
             int yEnd = std::min(y + tileSize, height);
 
-            futures.push_back(pool.submit([&func, xBegin, xEnd, yBegin, yEnd]() {
-                func(xBegin, xEnd, yBegin, yEnd);
+            futures.push_back(pool.submit([sharedFunc, xBegin, xEnd, yBegin, yEnd]() {
+                (*sharedFunc)(xBegin, xEnd, yBegin, yEnd);
             }));
         }
     }

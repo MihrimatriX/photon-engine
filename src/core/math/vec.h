@@ -59,7 +59,11 @@ struct Vec2f {
     constexpr float dot(const Vec2f& v)   const { return x * v.x + y * v.y; }
     constexpr float lengthSquared()       const { return dot(*this); }
     inline    float length()              const { return std::sqrt(lengthSquared()); }
-    inline    Vec2f normalized()          const { float len = length(); assert(len > 0.0f); return *this / len; }
+    inline    Vec2f normalized()          const {
+        float len = length();
+        if (len <= 1e-20f) return Vec2f(0.0f);
+        return *this / len;
+    }
 
     // ── Component-wise operations ────────────────────────────
     constexpr Vec2f cwiseMin(const Vec2f& v) const { return {std::min(x, v.x), std::min(y, v.y)}; }
@@ -140,7 +144,11 @@ struct Vec3f {
 
     constexpr float lengthSquared() const { return dot(*this); }
     inline    float length()        const { return std::sqrt(lengthSquared()); }
-    inline    Vec3f normalized()    const { float len = length(); assert(len > 0.0f); return *this / len; }
+    inline    Vec3f normalized()    const {
+        float len = length();
+        if (len <= 1e-20f) return Vec3f(0.0f);
+        return *this / len;
+    }
 
     // ── Component-wise operations ────────────────────────────
     constexpr Vec3f cwiseMin(const Vec3f& v) const { return {std::min(x, v.x), std::min(y, v.y), std::min(z, v.z)}; }

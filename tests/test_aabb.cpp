@@ -32,11 +32,12 @@ TEST(AABBTest, Merge) {
     AABB b1(Vec3f(0, 0, 0), Vec3f(2, 2, 2));
     AABB b2(Vec3f(1, 1, 1), Vec3f(3, 3, 3));
     
-    AABB merged = b1.merge(b2);
+    AABB merged = b1.merged(b2);
     EXPECT_FLOAT_EQ(merged.pMin.x, 0.0f);
     EXPECT_FLOAT_EQ(merged.pMax.x, 3.0f);
 
-    AABB mergedPoint = b1.merge(Vec3f(-1.0f, 5.0f, 1.0f));
+    AABB mergedPoint = b1;
+    mergedPoint.merge(Vec3f(-1.0f, 5.0f, 1.0f));
     EXPECT_FLOAT_EQ(mergedPoint.pMin.x, -1.0f);
     EXPECT_FLOAT_EQ(mergedPoint.pMax.y, 5.0f);
 }

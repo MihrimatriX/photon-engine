@@ -21,6 +21,10 @@ public:
     /// Evaluate the background radiance in a given world direction.
     Color3f eval(const Vec3f& direction) const;
 
+    /// PDF for sampleLi / MIS on miss (cosine hemisphere about +Y world when no normal).
+    float pdfLi(const Vec3f& wi) const;
+    float pdfLi(const Vec3f& wi, const Vec3f& normal) const;
+
 private:
     const Image* m_envMap;
     float m_rotation; // in radians

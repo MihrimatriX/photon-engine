@@ -2,7 +2,29 @@
   "id": "product_studio",
   "name": "Product Studio",
   "category": "Studio",
-  "camera": { "fov": 35, "radius": 8 },
-  "lightIntensity": 12.0,
-  "exposure": 0.0
+  "camera": { "fov": 35, "radius": 5.5, "yaw": 1.15, "pitch": 0.42 },
+  "hdr": "studio_soft",
+  "exposure": 0.0,
+  "lights": [
+    {
+      "type": "area",
+      "role": "key",
+      "intensity": 18.0,
+      "position": [1.8, 3.5, 1.2],
+      "u": [-1.4, 0, 0],
+      "v": [0, 0, 1.0]
+    },
+    {
+      "type": "directional",
+      "role": "fill",
+      "intensity": 2.2,
+      "direction": [0.55, -0.75, 0.25]
+    },
+    {
+      "type": "directional",
+      "role": "rim",
+      "intensity": 3.0,
+      "direction": [-0.55, -0.25, -0.75]
+    }
+  ]
 }

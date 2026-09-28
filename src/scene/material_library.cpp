@@ -3,6 +3,8 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstdlib>
 
 namespace photon {
@@ -41,7 +43,53 @@ Color3f jsonColor(const std::string& json, const std::string& key, const Color3f
     return Color3f(r, g, b);
 }
 
+float clampf(float v, float lo, float hi) {
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
 } // namespace
+
+void renderSphereThumbnail(const MaterialPreset& p, int size, std::vector<uint8_t>& rgbaOut) {
+    size = std::max(8, size);
+    rgbaOut.assign(static_cast<size_t>(size) * static_cast<size_t>(size) * 4u, 0);
+    const float inv = 2.0f / static_cast<float>(size);
+    const float Lx = 0.45f, Ly = 0.55f, Lz = 0.7f;
+    const float Llen = std::sqrt(Lx * Lx + Ly * Ly + Lz * Lz);
+    const float lx = Lx / Llen, ly = Ly / Llen, lz = Lz / Llen;
+    const float shininess = 8.0f + (1.0f - p.roughness) * (1.0f - p.roughness) * 248.0f;
+    const float amb = 0.18f;
+
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            float u = x * inv - 1.0f;
+            float v = 1.0f - y * inv;
+            float r2 = u * u + v * v;
+            if (r2 > 1.0f) continue;
+            float z = std::sqrt(std::max(0.0f, 1.0f - r2));
+            float ndotl = std::max(0.0f, u * lx + v * ly + z * lz);
+            // Blinn-Phong highlight (view ≈ +Z)
+            float hx = lx, hy = ly, hz = lz + 1.0f;
+            float hlen = std::sqrt(hx * hx + hy * hy + hz * hz);
+            float ndoth = std::max(0.0f, (u * hx + v * hy + z * hz) / hlen);
+            float spec = std::pow(ndoth, shininess);
+
+            Color3f F0 = Color3f(0.04f * p.specular) * (1.0f - p.metallic) + p.baseColor * p.metallic;
+            Color3f diffuse = p.baseColor * (amb + ndotl * (1.0f - amb)) * (1.0f - p.metallic);
+            Color3f col = diffuse + F0 * (spec * (0.25f + 0.75f * p.metallic + 0.35f * (1.0f - p.roughness)));
+            if (p.emissive > 0.0f) col = col + p.baseColor * std::min(p.emissive * 0.08f, 1.5f);
+            // soft rim
+            float rim = 1.0f - z;
+            col = col * (1.0f - rim * 0.25f);
+
+            size_t i = (static_cast<size_t>(y) * static_cast<size_t>(size) + static_cast<size_t>(x)) * 4u;
+            rgbaOut[i] = static_cast<uint8_t>(clampf(col.r, 0.0f, 1.0f) * 255.0f);
+            rgbaOut[i + 1] = static_cast<uint8_t>(clampf(col.g, 0.0f, 1.0f) * 255.0f);
+            rgbaOut[i + 2] = static_cast<uint8_t>(clampf(col.b, 0.0f, 1.0f) * 255.0f);
+            float edge = clampf((1.0f - r2) * 12.0f, 0.0f, 1.0f);
+            rgbaOut[i + 3] = static_cast<uint8_t>(edge * 255.0f);
+        }
+    }
+}
 
 bool MaterialLibrary::loadFile(const std::string& path) {
     std::ifstream in(path);
@@ -75,6 +123,13 @@ bool MaterialLibrary::loadFromDirectory(const std::string& path) {
         if (e.path().extension() == ".json") loadFile(e.path().string());
     }
     return !m_presets.empty();
+}
+
+const MaterialPreset* MaterialLibrary::findById(const std::string& id) const {
+    for (const auto& p : m_presets) {
+        if (p.id == id) return &p;
+    }
+    return nullptr;
 }
 
 std::vector<std::string> MaterialLibrary::categories() const {

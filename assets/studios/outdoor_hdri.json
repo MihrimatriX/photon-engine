@@ -2,7 +2,29 @@
   "id": "outdoor_hdri",
   "name": "Outdoor HDRI",
   "category": "Studio",
-  "camera": { "fov": 45, "radius": 15 },
-  "lightIntensity": 8.0,
-  "exposure": 0.5
+  "camera": { "fov": 45, "radius": 15, "yaw": 1.0, "pitch": 0.2 },
+  "hdr": "warm_sunset",
+  "exposure": 0.5,
+  "lights": [
+    {
+      "type": "directional",
+      "role": "sun",
+      "intensity": 8.0,
+      "direction": [0.25, -1.0, 0.35]
+    },
+    {
+      "type": "directional",
+      "role": "sky_fill",
+      "intensity": 1.8,
+      "direction": [-0.4, -0.5, 0.3]
+    },
+    {
+      "type": "area",
+      "role": "bounce",
+      "intensity": 2.0,
+      "position": [278, 100, 250],
+      "u": [120, 0, 0],
+      "v": [0, 0, 80]
+    }
+  ]
 }

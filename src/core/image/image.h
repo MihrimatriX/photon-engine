@@ -20,6 +20,9 @@ public:
     void setPixel(int x, int y, const Color3f& color);
     Color3f getPixel(int x, int y) const;
 
+    /// Bilinear sample with wrap UV in [0,1]. Uses raw pixel values (not accumulation averages).
+    Color3f sampleBilinear(float u, float v) const;
+
     // Sample accumulation (tile renderer writes disjoint pixels per pass)
     void addSample(int x, int y, const Color3f& color);
     Color3f getAveragedPixel(int x, int y) const;

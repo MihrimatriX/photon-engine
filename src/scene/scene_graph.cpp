@@ -30,15 +30,27 @@ void SceneGraph::clear() {
     m_nextPickId = 1;
 }
 
-std::shared_ptr<TriangleMesh> SceneGraph::bakeMesh(const TriangleMesh& mesh, const Transform& xform) const {
+bool SceneGraph::removeNode(SceneNode* node) {
+    if (!node || !node->parent || node == m_root.get()) return false;
+    auto& siblings = node->parent->children;
+    auto it = std::find_if(siblings.begin(), siblings.end(),
+                           [node](const std::unique_ptr<SceneNode>& c) { return c.get() == node; });
+    if (it == siblings.end()) return false;
+    if (m_selected == node) m_selected = nullptr;
+    siblings.erase(it);
+    return true;
+}
+
+std::shared_ptr<TriangleMesh> SceneGraph::bakeMesh(const TriangleMesh& mesh, const Transform& xform,
+                                                   const Material* material) const {
     std::vector<Vec3f> positions;
     positions.reserve(mesh.positions().size());
     for (const auto& p : mesh.positions()) {
         positions.push_back(xform.transformPoint(p));
     }
-    const auto& indices = mesh.indices();
+    const Material* mat = material ? material : mesh.material();
     return std::make_shared<TriangleMesh>(positions, std::vector<Vec3f>{}, std::vector<Vec2f>{},
-                                          indices, mesh.material());
+                                          mesh.indices(), mat);
 }
 
 void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Transform& parentXform) {
@@ -46,7 +58,7 @@ void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Trans
     Transform world = parentXform * node.localTransform;
 
     if (node.type == SceneNodeType::Mesh && node.mesh) {
-        auto baked = bakeMesh(*node.mesh, world);
+        auto baked = bakeMesh(*node.mesh, world, node.material.get());
         for (size_t i = 0; i < baked->numTriangles(); ++i) {
             outScene.addShape(baked->getTriangle(i));
         }

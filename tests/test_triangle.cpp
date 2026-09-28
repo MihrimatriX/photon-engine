@@ -23,9 +23,9 @@ TEST(TriangleTest, RayIntersection) {
     EXPECT_TRUE(tri.intersect(r, isect));
     EXPECT_FLOAT_EQ(isect.t, 5.0f);
     EXPECT_FLOAT_EQ(isect.point.x, 0.0f);
-    EXPECT_FLOAT_EQ(isect.point.y, -0.33333334f); // centroid y-value of the hit
+    EXPECT_FLOAT_EQ(isect.point.y, 0.0f); // ray through origin on triangle plane
     EXPECT_FLOAT_EQ(isect.point.z, 0.0f);
-    EXPECT_FLOAT_EQ(isect.normal.z, -1.0f); // normals flipped since ray is hitting the front of normal (0,0,1)
+    EXPECT_FLOAT_EQ(isect.normal.z, -1.0f); // flipped vs outward (0,0,1) for front-facing ray
 
     // Ray missing
     Ray r2(Vec3f(2, 2, -5), Vec3f(0, 0, 1));

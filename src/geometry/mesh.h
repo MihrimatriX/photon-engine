@@ -29,6 +29,7 @@ public:
     std::shared_ptr<Triangle> getTriangle(size_t index) const;
 
     const std::vector<Vec3f>& positions() const { return m_positions; }
+    const std::vector<Vec3f>& normals() const { return m_normals; }
     const std::vector<uint32_t>& indices() const { return m_indices; }
     const Material* material() const { return m_material; }
 

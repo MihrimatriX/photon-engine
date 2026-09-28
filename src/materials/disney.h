@@ -4,7 +4,9 @@
 /// @brief Simplified Disney Principled BRDF in PhotonEngine.
 
 #include "materials/material.h"
+#include "core/image/image.h"
 #include <algorithm>
+#include <memory>
 #include <string>
 
 namespace photon {
@@ -12,7 +14,8 @@ namespace photon {
 /// @brief Simplified Disney Principled BRDF.
 ///
 /// Combines a Burley diffuse lobe and a Cook-Torrance GGX specular microfacet lobe,
-/// parameterized by metallic, roughness, and specular strength.
+/// parameterized by metallic, roughness, and specular strength. Optional texture maps
+/// (albedo / normal / roughness / metalness) are sampled at SurfaceInteraction::uv.
 class DisneyMaterial : public Material {
 public:
     DisneyMaterial(const Color3f& baseColor, float metallic, float roughness, float specular)
@@ -39,17 +42,30 @@ public:
     void setClearCoat(float v) { m_clearCoat = std::clamp(v, 0.0f, 1.0f); }
     void setClearCoatRoughness(float v) { m_clearCoatRoughness = std::max(0.001f, v); }
 
-    // ponytail: texture paths stored for UI; CPU integrator ignores until wired
     const std::string& albedoMap() const { return m_albedoMap; }
     const std::string& normalMap() const { return m_normalMap; }
     const std::string& roughnessMap() const { return m_roughnessMap; }
     const std::string& metalnessMap() const { return m_metalnessMap; }
-    void setAlbedoMap(const std::string& p) { m_albedoMap = p; }
-    void setNormalMap(const std::string& p) { m_normalMap = p; }
-    void setRoughnessMap(const std::string& p) { m_roughnessMap = p; }
-    void setMetalnessMap(const std::string& p) { m_metalnessMap = p; }
+    void setAlbedoMap(const std::string& p);
+    void setNormalMap(const std::string& p);
+    void setRoughnessMap(const std::string& p);
+    void setMetalnessMap(const std::string& p);
+
+    /// Resolved scalar/texture parameters at a shading point (for tests / debug).
+    struct ShadingParams {
+        Color3f baseColor;
+        float metallic = 0.0f;
+        float roughness = 0.5f;
+        float specular = 0.5f;
+        float clearCoat = 0.0f;
+        float clearCoatRoughness = 0.03f;
+        Vec3f normal{0, 1, 0};
+    };
+    ShadingParams resolve(const SurfaceInteraction& si) const;
 
 private:
+    static std::shared_ptr<Image> loadMap(const std::string& path);
+
     Color3f m_baseColor;
     float m_metallic;
     float m_roughness;
@@ -60,6 +76,10 @@ private:
     std::string m_normalMap;
     std::string m_roughnessMap;
     std::string m_metalnessMap;
+    std::shared_ptr<Image> m_albedoTex;
+    std::shared_ptr<Image> m_normalTex;
+    std::shared_ptr<Image> m_roughnessTex;
+    std::shared_ptr<Image> m_metalnessTex;
 };
 
 } // namespace photon

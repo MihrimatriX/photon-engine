@@ -14,14 +14,15 @@ struct RenderSettings {
     int samplesPerPixel = 64;          ///< Target samples per pixel (higher = less noise)
     int maxBounces = 8;                ///< Maximum ray depth (path length)
     int tileSize = 32;                 ///< Size of tile for multi-threaded rendering (e.g. 32x32)
+    int numThreads = 0;                ///< 0 = hardware_concurrency (full-render dialog override)
 
     ToneMapOperator tmo = ToneMapOperator::ACES; ///< Tone mapping operator to apply
     float exposure = 0.0f;             ///< Exposure value (EV stops)
 
-    bool adaptiveSampling = false;     ///< ponytail: variance heuristic, extra samples on noisy pixels
-    bool denoiseEnabled = false;       ///< Apply OIDN when PHOTON_ENABLE_OIDN is on
-    float aoStrength = 0.0f;           ///< Advanced: ambient occlusion strength (preview only)
-    int shadowQuality = 1;             ///< Advanced: shadow ray count multiplier
+    bool adaptiveSampling = false;     ///< Extra samples on high-variance pixels
+    bool denoiseEnabled = false;       ///< Apply OIDN when available; else soft blur fallback
+    float aoStrength = 0.0f;           ///< Contact AO strength (short-range; not full GI)
+    int shadowQuality = 1;             ///< NEE / AO sample multiplier (1–4)
 };
 
 } // namespace photon

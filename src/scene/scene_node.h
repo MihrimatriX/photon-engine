@@ -21,6 +21,7 @@ struct SceneNode {
     float sphereRadius = 0.0f;
     bool visible = true;
     uint32_t pickId = 0;
+    std::string sourcePath; ///< Import source (.obj/.gltf) when set on a group
 
     SceneNode* parent = nullptr;
 

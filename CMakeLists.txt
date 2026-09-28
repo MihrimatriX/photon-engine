@@ -20,7 +20,19 @@ option(PHOTON_BUILD_TESTS  "Build unit tests"                    ON)
 option(PHOTON_BUILD_CLI    "Build photon_render CLI (dev only)"  OFF)
 option(PHOTON_BUILD_GPU    "Build GPU (OptiX/Vulkan) backend"    OFF)
 option(PHOTON_ENABLE_SIMD  "Enable AVX2/FMA SIMD instructions"  ON)
-option(PHOTON_ENABLE_OIDN  "Enable Intel Open Image Denoise"    OFF)
+# OIDN: auto-enable when the SDK is findable (vcpkg / CMAKE_PREFIX_PATH).
+# Force with -DPHOTON_ENABLE_OIDN=ON; disable with -DPHOTON_ENABLE_OIDN=OFF.
+option(PHOTON_ENABLE_OIDN "Enable Intel Open Image Denoise (AUTO if found)" OFF)
+set(PHOTON_OIDN_FOUND FALSE)
+find_package(OpenImageDenoise CONFIG QUIET)
+if(OpenImageDenoise_FOUND)
+    set(PHOTON_OIDN_FOUND TRUE)
+    message(STATUS "OIDN: Open Image Denoise found — denoise enabled")
+elseif(PHOTON_ENABLE_OIDN)
+    message(WARNING "PHOTON_ENABLE_OIDN=ON but OpenImageDenoise not found — soft blur fallback only.\n"
+                    "  Install: vcpkg install openimagedenoise, then reconfigure with\n"
+                    "  -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake")
+endif()
 
 # ──────────────────────────────────────────────
 # Compiler Warnings & Flags
