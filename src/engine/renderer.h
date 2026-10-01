@@ -7,9 +7,16 @@
 #include "engine/render_settings.h"
 #include "camera/camera.h"
 #include "core/image/image.h"
+#include <cstdint>
 #include <functional>
+#include <memory>
 
 namespace photon {
+
+class Sampler;
+
+/// Production sampler: stratified grid over samplesPerPixel. Tests keep IndependentSampler.
+std::unique_ptr<Sampler> createRenderSampler(int samplesPerPixel, uint64_t seed = 12345);
 
 /// @brief Orchestrates the rendering process using a tile-based approach on a ThreadPool.
 class Renderer {

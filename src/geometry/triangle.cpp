@@ -54,6 +54,7 @@ bool Triangle::intersect(Ray& ray, SurfaceInteraction& isect) const {
         shadingNormal = geomNormal;
     }
 
+    isect.ng = geomNormal;
     isect.setFaceNormal(ray, shadingNormal);
 
     // Interpolate UV coordinates

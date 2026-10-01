@@ -28,6 +28,7 @@ void SceneGraph::clear() {
     m_root->children.clear();
     m_selected = nullptr;
     m_nextPickId = 1;
+    ++m_revision;
 }
 
 bool SceneGraph::removeNode(SceneNode* node) {
@@ -38,6 +39,7 @@ bool SceneGraph::removeNode(SceneNode* node) {
     if (it == siblings.end()) return false;
     if (m_selected == node) m_selected = nullptr;
     siblings.erase(it);
+    ++m_revision;
     return true;
 }
 
@@ -48,9 +50,34 @@ std::shared_ptr<TriangleMesh> SceneGraph::bakeMesh(const TriangleMesh& mesh, con
     for (const auto& p : mesh.positions()) {
         positions.push_back(xform.transformPoint(p));
     }
+    std::vector<Vec3f> normals;
+    if (!mesh.normals().empty()) {
+        normals.reserve(mesh.normals().size());
+        for (const auto& n : mesh.normals()) {
+            Vec3f tn = xform.transformNormal(n);
+            if (tn.lengthSquared() > 0.0f) tn = tn.normalized();
+            normals.push_back(tn);
+        }
+    }
     const Material* mat = material ? material : mesh.material();
-    return std::make_shared<TriangleMesh>(positions, std::vector<Vec3f>{}, std::vector<Vec2f>{},
-                                          mesh.indices(), mat);
+    return std::make_shared<TriangleMesh>(positions, normals, mesh.uvs(), mesh.indices(), mat);
+}
+
+GroundQuad placeGroundUnder(const AABB& box) {
+    float dx = box.pMax.x - box.pMin.x;
+    float dz = box.pMax.z - box.pMin.z;
+    if (dx < 1.0f) dx = 1.0f;
+    if (dz < 1.0f) dz = 1.0f;
+    float span = dx > dz ? dx : dz;
+    // ponytail: pad is 2x the longest footprint (quad is 4x). Not an infinite plane.
+    float pad = span * 2.0f;
+    float cx = (box.pMin.x + box.pMax.x) * 0.5f;
+    float cz = (box.pMin.z + box.pMax.z) * 0.5f;
+    GroundQuad g;
+    g.corner = Vec3f(cx - pad, box.pMin.y - 0.02f, cz - pad);
+    g.edgeU = Vec3f(pad * 2.0f, 0.0f, 0.0f);
+    g.edgeV = Vec3f(0.0f, 0.0f, pad * 2.0f);
+    return g;
 }
 
 void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Transform& parentXform) {
@@ -59,9 +86,7 @@ void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Trans
 
     if (node.type == SceneNodeType::Mesh && node.mesh) {
         auto baked = bakeMesh(*node.mesh, world, node.material.get());
-        for (size_t i = 0; i < baked->numTriangles(); ++i) {
-            outScene.addShape(baked->getTriangle(i));
-        }
+        outScene.addShape(baked);
     } else if (node.type == SceneNodeType::Sphere && node.material && node.sphereRadius > 0) {
         Vec3f center = world.transformPoint(Vec3f(0, 0, 0));
         outScene.addShape(std::make_shared<Sphere>(center, node.sphereRadius, node.material.get()));

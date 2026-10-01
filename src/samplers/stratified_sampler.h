@@ -28,6 +28,7 @@ private:
     int m_currentSampleIndex = 0;
     int m_pixelX = 0;
     int m_pixelY = 0;
+    int m_get1DCallCount = 0;
     int m_get2DCallCount = 0;
 };
 

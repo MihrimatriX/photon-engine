@@ -1,6 +1,7 @@
 #include "integrators/path_tracer.h"
 #include "materials/material.h"
 #include "lights/light.h"
+#include "lights/area_light.h"
 #include "lights/environment_light.h"
 #include "samplers/sampler.h"
 #include "engine/scene.h"
@@ -16,6 +17,20 @@ namespace {
 
 Vec3f offsetRayOrigin(const Vec3f& p, const Vec3f& n, const Vec3f& dir) {
     return p + n * (dir.dot(n) > 0.0f ? 1e-4f : -1e-4f);
+}
+
+float areaLightSolidAnglePdf(const std::vector<const Light*>& lights,
+                             const Vec3f& ref, const Vec3f& pLight) {
+    for (const Light* light : lights) {
+        if (const auto* area = dynamic_cast<const AreaLight*>(light)) {
+            float pdf = area->pdfLi(ref, pLight);
+            if (pdf > 0.0f) return pdf;
+        } else if (const auto* mesh = dynamic_cast<const MeshLight*>(light)) {
+            float pdf = mesh->pdfLi(ref, pLight);
+            if (pdf > 0.0f) return pdf;
+        }
+    }
+    return 0.0f;
 }
 
 float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sampler,
@@ -44,6 +59,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
     bool specularBounce = true;
     float lastBsdfPdf = 0.0f;
     Vec3f lastNormal(0, 1, 0);
+    Vec3f lastPoint = ray.origin;
 
     // Environment participates in NEE when present (product-studio IBL).
     const EnvironmentLight* env = scene.environment();
@@ -74,7 +90,17 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
             Color3f emitted = isect.material->emitted(isect);
             if (!emitted.isBlack()) {
                 if (specularBounce || depth == 0) {
+                    // Camera ray and delta bounce: the BSDF has no matching NEE sample.
                     L += throughput * emitted;
+                } else {
+                    // Diffuse/glossy hit of an emissive quad. Complementary to NEE's
+                    // powerHeuristic(lightPdf, bsdfPdf). Env MIS is unchanged (miss path).
+                    float lightPdf = areaLightSolidAnglePdf(lights, lastPoint, isect.point);
+                    float weight = 1.0f;
+                    if (lightPdf > 0.0f && lastBsdfPdf > 0.0f) {
+                        weight = powerHeuristic(1, lastBsdfPdf, 1, lightPdf);
+                    }
+                    L += throughput * emitted * weight;
                 }
             }
         }
@@ -110,7 +136,24 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
                 }
 
                 Vec3f shadowOrigin = offsetRayOrigin(isect.point, isect.normal, ls.wi);
-                Ray shadowRay(shadowOrigin, ls.wi, 1e-4f, ls.distance - 1e-4f);
+                Vec3f shadowDir = ls.wi;
+                float shadowEnd = ls.distance - 1e-4f;
+                if (!fromEnv && !lights[lightIndex]->isDelta()) {
+                    // Origin is pushed off the receiver, so a ray along wi meets the
+                    // light plane early and the quad occludes its own NEE sample.
+                    Vec3f pLight = isect.point + ls.wi * ls.distance;
+                    Vec3f delta = pLight - shadowOrigin;
+                    float dist = delta.length();
+                    if (dist > 1e-4f) {
+                        shadowDir = delta / dist;
+                        // ponytail: stop short of the sample; a contact occluder inside the slop is missed until shadow rays skip light prims
+                        float slop = std::max(1e-4f, dist * 1e-4f);
+                        shadowEnd = dist - slop;
+                    }
+                }
+
+                if (shadowEnd <= 1e-4f) continue;
+                Ray shadowRay(shadowOrigin, shadowDir, 1e-4f, shadowEnd);
 
                 if (!scene.intersectAny(shadowRay)) {
                     Color3f brdf = isect.material->eval(-currentRay.direction, ls.wi, isect);
@@ -149,6 +192,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
         throughput *= brdf * cosTheta / pdf;
         lastBsdfPdf = pdf;
         lastNormal = isect.normal;
+        lastPoint = isect.point;
         specularBounce = isect.material->eval(wo, wi, isect).isBlack();
 
         Vec3f nextRayOrigin = offsetRayOrigin(isect.point, isect.normal, wi);

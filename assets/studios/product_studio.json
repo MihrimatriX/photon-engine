@@ -5,6 +5,7 @@
   "camera": { "fov": 35, "radius": 5.5, "yaw": 1.15, "pitch": 0.42 },
   "hdr": "studio_soft",
   "exposure": 0.0,
+  "aoStrength": 0.35,
   "lights": [
     {
       "type": "area",

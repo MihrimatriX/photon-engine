@@ -1,8 +1,11 @@
 #include "engine/renderer.h"
 #include "engine/denoiser.h"
 #include "core/threading/parallel.h"
-#include "samplers/independent_sampler.h"
+#include "samplers/stratified_sampler.h"
 #include "integrators/path_tracer.h"
+#include "materials/disney.h"
+#include "materials/dielectric.h"
+#include "materials/lambertian.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -38,7 +41,61 @@ float luminance(const Color3f& c) {
     return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
 }
 
+void samplerGrid(int spp, int& xs, int& ys) {
+    spp = std::max(1, spp);
+    int root = std::max(1, static_cast<int>(std::lround(std::sqrt(static_cast<double>(spp)))));
+    xs = 1;
+    for (int i = root; i >= 1; --i) {
+        if (spp % i == 0) {
+            xs = i;
+            break;
+        }
+    }
+    ys = spp / xs;
+}
+
+Color3f primaryAlbedo(const SurfaceInteraction& si) {
+    if (!si.material) return Color3f::black();
+    if (const auto* disney = dynamic_cast<const DisneyMaterial*>(si.material))
+        return disney->resolve(si).baseColor;
+    if (const auto* lambert = dynamic_cast<const Lambertian*>(si.material))
+        return lambert->albedo();
+    if (const auto* glass = dynamic_cast<const Dielectric*>(si.material))
+        return glass->tint();
+    return Color3f(0.5f);
+}
+
+void fillPrimaryAovs(const Scene& scene, const Camera& camera, int w, int h,
+                     Image& albedo, Image& normal) {
+    albedo.resize(w, h);
+    normal.resize(w, h);
+    parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
+        for (int y = yBegin; y < yEnd; ++y) {
+            for (int x = xBegin; x < xEnd; ++x) {
+                float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(w);
+                float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(h);
+                Ray ray = camera.generateRay(u, v, Vec2f(0.5f, 0.5f));
+                SurfaceInteraction isect;
+                if (scene.intersect(ray, isect)) {
+                    albedo.addSample(x, y, primaryAlbedo(isect));
+                    Vec3f n = isect.normal;
+                    normal.addSample(x, y, Color3f(n.x, n.y, n.z));
+                } else {
+                    albedo.addSample(x, y, Color3f::black());
+                    normal.addSample(x, y, Color3f(0.0f, 0.0f, 1.0f));
+                }
+            }
+        }
+    }, 32, nullptr);
+}
+
 } // namespace
+
+std::unique_ptr<Sampler> createRenderSampler(int samplesPerPixel, uint64_t seed) {
+    int xs = 1, ys = 1;
+    samplerGrid(std::max(1, samplesPerPixel), xs, ys);
+    return std::make_unique<StratifiedSampler>(xs, ys, seed);
+}
 
 Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSettings& settings) {
     Image img(settings.width, settings.height);
@@ -48,7 +105,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
               << " @ " << settings.samplesPerPixel << " SPP (Tiles: "
               << settings.tileSize << "x" << settings.tileSize << ")" << std::endl;
 
-    std::unique_ptr<Sampler> baseSampler = std::make_unique<IndependentSampler>(12345);
+    std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
     PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
     std::unique_ptr<ThreadPool> ownedPool;
     ThreadPool* pool = makePoolOverride(settings, ownedPool);
@@ -138,7 +195,13 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
     }
 
     if (settings.denoiseEnabled) {
-        denoiseImage(img);
+        if (denoiseAvailable()) {
+            Image albedo, normal;
+            fillPrimaryAovs(scene, camera, w, h, albedo, normal);
+            denoiseImage(img, &albedo, &normal);
+        } else {
+            denoiseImage(img);
+        }
     }
 
     auto endTime = std::chrono::high_resolution_clock::now();
@@ -160,7 +223,13 @@ void Renderer::renderProgressive(const Scene& scene, const Camera& camera, const
     }
 
     if (settings.denoiseEnabled) {
-        denoiseImage(img);
+        if (denoiseAvailable()) {
+            Image albedo, normal;
+            fillPrimaryAovs(scene, camera, settings.width, settings.height, albedo, normal);
+            denoiseImage(img, &albedo, &normal);
+        } else {
+            denoiseImage(img);
+        }
         if (callback) {
             callback(img, settings.samplesPerPixel);
         }
@@ -173,7 +242,7 @@ void Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
         accum.resize(settings.width, settings.height);
     }
 
-    std::unique_ptr<Sampler> baseSampler = std::make_unique<IndependentSampler>(12345);
+    std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
     PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
     std::unique_ptr<ThreadPool> ownedPool;
     ThreadPool* pool = makePoolOverride(settings, ownedPool);

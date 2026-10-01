@@ -51,6 +51,12 @@ bool softBlurDenoise(Image& color) {
 
 } // namespace
 
+Image denoiseCopy(const Image& color) {
+    Image out = color;
+    denoiseImage(out);
+    return out;
+}
+
 bool denoiseAvailable() {
 #if defined(PHOTON_ENABLE_OIDN)
     return true;

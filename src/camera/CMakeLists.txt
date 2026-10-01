@@ -1,6 +1,7 @@
 add_library(photon_camera STATIC
     perspective_camera.cpp
     thin_lens_camera.cpp
+    orthographic_camera.cpp
 )
 
 target_link_libraries(photon_camera PUBLIC photon_core)

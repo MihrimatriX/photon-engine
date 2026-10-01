@@ -1,4 +1,5 @@
 #include "scene/material_library.h"
+#include "materials/dielectric.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -110,6 +111,9 @@ bool MaterialLibrary::loadFile(const std::string& path) {
     p.specular = jsonFloat(json, "specular", 0.5f);
     p.clearCoat = jsonFloat(json, "clearCoat", 0.0f);
     p.emissive = jsonFloat(json, "emissive", 0.0f);
+    p.anisotropy = jsonFloat(json, "anisotropy", 0.0f);
+    p.sheen = jsonFloat(json, "sheen", 0.0f);
+    p.diffuseTransmission = jsonFloat(json, "diffuseTransmission", 0.0f);
     if (p.id.empty()) p.id = p.name;
     m_presets.push_back(std::move(p));
     return true;
@@ -150,9 +154,21 @@ std::vector<const MaterialPreset*> MaterialLibrary::byCategory(const std::string
     return out;
 }
 
-std::shared_ptr<DisneyMaterial> MaterialLibrary::createMaterial(const MaterialPreset& p) const {
+std::shared_ptr<Material> MaterialLibrary::createMaterial(const MaterialPreset& p) const {
+    if (p.id == "clear_glass")
+        return std::make_shared<Dielectric>(1.5f, p.baseColor, 0.0f);
+    if (p.id == "frosted_glass")
+        return std::make_shared<Dielectric>(1.5f, p.baseColor, std::max(0.001f, p.roughness));
     auto m = std::make_shared<DisneyMaterial>(p.baseColor, p.metallic, p.roughness, p.specular);
     m->setClearCoat(p.clearCoat);
+    float aniso = p.anisotropy;
+    if (p.id == "brushed_aluminum" && aniso <= 0.0f) aniso = 0.7f;
+    m->setAnisotropy(aniso);
+    float sheen = p.sheen;
+    if ((p.id == "blue_fabric" || p.id == "linen") && sheen <= 0.0f) sheen = 0.6f;
+    m->setSheen(sheen);
+    m->setDiffuseTransmission(p.diffuseTransmission);
+    if (p.emissive > 0.0f) m->setEmission(p.baseColor * p.emissive);
     return m;
 }
 

@@ -10,6 +10,15 @@
 
 namespace photon {
 
+class TriangleMesh;
+
+/// One shape, or one triangle inside a mesh. Not a heap Triangle.
+struct PrimRef {
+    Shape* shape = nullptr;
+    const TriangleMesh* mesh = nullptr;
+    uint32_t tri = 0;
+};
+
 /// @brief Linear BVH node structure, optimized for cache efficiency (32 bytes).
 struct BVHNode {
     AABB bounds;
@@ -61,8 +70,8 @@ private:
         uint8_t pad[1];       // Padding to keep structure 32-byte aligned
     };
 
-    std::vector<std::shared_ptr<Shape>> m_primitives;
-    std::vector<std::shared_ptr<Shape>> m_orderedPrims;
+    std::vector<std::shared_ptr<Shape>> m_keep;
+    std::vector<PrimRef> m_prims;
     std::vector<BVHNode> m_nodes;
 
     // Helper structures for SAH building
@@ -92,7 +101,8 @@ private:
     BVHBuildNode* recursiveBuild(
         std::vector<BuildPrimitive>& buildPrims,
         int start, int end, int* totalNodes,
-        std::vector<std::shared_ptr<Shape>>& orderedPrims);
+        std::vector<PrimRef>& orderedPrims,
+        const std::vector<PrimRef>& refs);
 
     int flattenBVHTree(BVHBuildNode* node, int* offset);
     void freeBuildTree(BVHBuildNode* node);

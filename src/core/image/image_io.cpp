@@ -152,15 +152,7 @@ std::optional<Image> loadImageEXR(const std::string& path) {
     return img;
 }
 
-std::optional<Image> loadImageLDR(const std::string& path) {
-    int w, h, channels;
-    uint8_t* data = stbi_load(path.c_str(), &w, &h, &channels, 3); // force RGB
-    
-    if (!data) {
-        std::cerr << "LDR Load Error: " << stbi_failure_reason() << " for path: " << path << std::endl;
-        return std::nullopt;
-    }
-    
+std::optional<Image> imageFromRgb8(const uint8_t* data, int w, int h) {
     Image img(w, h);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
@@ -173,7 +165,28 @@ std::optional<Image> loadImageLDR(const std::string& path) {
             img.setPixel(x, y, srgb.sRGBToLinear());
         }
     }
-    
+    return img;
+}
+
+std::optional<Image> loadImageLDR(const std::string& path) {
+    int w, h, channels;
+    uint8_t* data = stbi_load(path.c_str(), &w, &h, &channels, 3); // force RGB
+
+    if (!data) {
+        std::cerr << "LDR Load Error: " << stbi_failure_reason() << " for path: " << path << std::endl;
+        return std::nullopt;
+    }
+    auto img = imageFromRgb8(data, w, h);
+    stbi_image_free(data);
+    return img;
+}
+
+std::optional<Image> loadImageLDRMemory(const unsigned char* bytes, int size) {
+    if (!bytes || size <= 0) return std::nullopt;
+    int w = 0, h = 0, channels = 0;
+    uint8_t* data = stbi_load_from_memory(bytes, size, &w, &h, &channels, 3);
+    if (!data) return std::nullopt;
+    auto img = imageFromRgb8(data, w, h);
     stbi_image_free(data);
     return img;
 }

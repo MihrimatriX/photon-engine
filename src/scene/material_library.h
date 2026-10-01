@@ -1,6 +1,7 @@
 #pragma once
 
 #include "materials/disney.h"
+#include "materials/material.h"
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -18,6 +19,9 @@ struct MaterialPreset {
     float specular = 0.5f;
     float clearCoat = 0.0f;
     float emissive = 0.0f;
+    float anisotropy = 0.0f;
+    float sheen = 0.0f;
+    float diffuseTransmission = 0.0f;
 };
 
 /// CPU-shaded GGX-ish shader ball → RGBA8 size×size (transparent outside circle).
@@ -30,7 +34,7 @@ public:
     const MaterialPreset* findById(const std::string& id) const;
     std::vector<std::string> categories() const;
     std::vector<const MaterialPreset*> byCategory(const std::string& cat) const;
-    std::shared_ptr<DisneyMaterial> createMaterial(const MaterialPreset& p) const;
+    std::shared_ptr<Material> createMaterial(const MaterialPreset& p) const;
 
 private:
     std::vector<MaterialPreset> m_presets;

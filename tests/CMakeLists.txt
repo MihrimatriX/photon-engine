@@ -8,11 +8,21 @@ add_executable(photon_tests
     test_triangle.cpp
     test_bvh.cpp
     test_disney.cpp
+    test_area_light.cpp
+    test_environment.cpp
+    test_dielectric.cpp
+    test_mesh_uv.cpp
+    test_product.cpp
+    test_stratified.cpp
+    test_mesh_light.cpp
+    test_import.cpp
+    test_ortho.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE
     gtest_main
     photon_engine
+    photon_scene
 )
 
 # Set include directory so tests can find core/math/vec.h etc.

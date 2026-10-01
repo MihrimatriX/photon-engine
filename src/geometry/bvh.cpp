@@ -1,30 +1,41 @@
 #include "geometry/bvh.h"
+#include "geometry/mesh.h"
 #include <algorithm>
 #include <iostream>
+#include <vector>
 
 namespace photon {
 
 void BVH::build(std::vector<std::shared_ptr<Shape>> primitives) {
-    m_primitives = std::move(primitives);
+    m_keep = std::move(primitives);
     m_nodes.clear();
-    m_orderedPrims.clear();
+    m_prims.clear();
 
-    if (m_primitives.empty()) {
-        return;
+    std::vector<PrimRef> refs;
+    for (auto& shape : m_keep) {
+        if (auto* mesh = dynamic_cast<TriangleMesh*>(shape.get())) {
+            uint32_t n = static_cast<uint32_t>(mesh->numTriangles());
+            for (uint32_t i = 0; i < n; ++i) refs.push_back(PrimRef{nullptr, mesh, i});
+        } else if (shape) {
+            refs.push_back(PrimRef{shape.get(), nullptr, 0});
+        }
     }
+    if (refs.empty()) return;
 
     std::vector<BuildPrimitive> buildPrims;
-    buildPrims.reserve(m_primitives.size());
-    for (size_t i = 0; i < m_primitives.size(); ++i) {
-        buildPrims.emplace_back(i, m_primitives[i]->bounds());
+    buildPrims.reserve(refs.size());
+    for (size_t i = 0; i < refs.size(); ++i) {
+        AABB bounds = refs[i].mesh ? refs[i].mesh->triangleBounds(refs[i].tri) : refs[i].shape->bounds();
+        buildPrims.emplace_back(i, bounds);
     }
 
     int totalNodes = 0;
-    std::vector<std::shared_ptr<Shape>> orderedPrims;
-    orderedPrims.reserve(m_primitives.size());
+    std::vector<PrimRef> orderedPrims;
+    orderedPrims.reserve(refs.size());
 
-    BVHBuildNode* root = recursiveBuild(buildPrims, 0, static_cast<int>(buildPrims.size()), &totalNodes, orderedPrims);
-    m_primitives = std::move(orderedPrims); // Replace with ordered ones
+    BVHBuildNode* root = recursiveBuild(buildPrims, 0, static_cast<int>(buildPrims.size()),
+                                        &totalNodes, orderedPrims, refs);
+    m_prims = std::move(orderedPrims);
 
     m_nodes.resize(totalNodes);
     int offset = 0;
@@ -40,7 +51,8 @@ struct BucketInfo {
 BVH::BVHBuildNode* BVH::recursiveBuild(
     std::vector<BuildPrimitive>& buildPrims,
     int start, int end, int* totalNodes,
-    std::vector<std::shared_ptr<Shape>>& orderedPrims) {
+    std::vector<PrimRef>& orderedPrims,
+    const std::vector<PrimRef>& refs) {
     
     (*totalNodes)++;
     BVHBuildNode* node = new BVHBuildNode();
@@ -56,7 +68,7 @@ BVH::BVHBuildNode* BVH::recursiveBuild(
         // Create leaf node
         int firstPrimOffset = static_cast<int>(orderedPrims.size());
         for (int i = start; i < end; ++i) {
-            orderedPrims.push_back(m_primitives[buildPrims[i].primIndex]);
+            orderedPrims.push_back(refs[buildPrims[i].primIndex]);
         }
         node->initLeaf(firstPrimOffset, nPrims, bounds);
         return node;
@@ -70,11 +82,19 @@ BVH::BVHBuildNode* BVH::recursiveBuild(
 
     int dim = centroidBounds.maxExtent();
 
-    // Degenerate case: all primitives have same centroid
+    // Degenerate case: all primitives have same centroid. Midpoint so a flat
+    // mesh cannot become one uint16 leaf.
     if (centroidBounds.pMax[dim] == centroidBounds.pMin[dim]) {
+        if (nPrims > 4) {
+            int mid = (start + end) / 2;
+            node->initInterior(dim,
+                               recursiveBuild(buildPrims, start, mid, totalNodes, orderedPrims, refs),
+                               recursiveBuild(buildPrims, mid, end, totalNodes, orderedPrims, refs));
+            return node;
+        }
         int firstPrimOffset = static_cast<int>(orderedPrims.size());
         for (int i = start; i < end; ++i) {
-            orderedPrims.push_back(m_primitives[buildPrims[i].primIndex]);
+            orderedPrims.push_back(refs[buildPrims[i].primIndex]);
         }
         node->initLeaf(firstPrimOffset, nPrims, bounds);
         return node;
@@ -142,8 +162,8 @@ BVH::BVHBuildNode* BVH::recursiveBuild(
             if (mid != start && mid != end) {
                 // Successful split
                 node->initInterior(dim,
-                                   recursiveBuild(buildPrims, start, mid, totalNodes, orderedPrims),
-                                   recursiveBuild(buildPrims, mid, end, totalNodes, orderedPrims));
+                                   recursiveBuild(buildPrims, start, mid, totalNodes, orderedPrims, refs),
+                                   recursiveBuild(buildPrims, mid, end, totalNodes, orderedPrims, refs));
                 return node;
             }
         }
@@ -151,15 +171,15 @@ BVH::BVHBuildNode* BVH::recursiveBuild(
         // If split failed or cost was higher, fall back to creating a leaf
         int firstPrimOffset = static_cast<int>(orderedPrims.size());
         for (int i = start; i < end; ++i) {
-            orderedPrims.push_back(m_primitives[buildPrims[i].primIndex]);
+            orderedPrims.push_back(refs[buildPrims[i].primIndex]);
         }
         node->initLeaf(firstPrimOffset, nPrims, bounds);
         return node;
     }
 
     node->initInterior(dim,
-                       recursiveBuild(buildPrims, start, mid, totalNodes, orderedPrims),
-                       recursiveBuild(buildPrims, mid, end, totalNodes, orderedPrims));
+                       recursiveBuild(buildPrims, start, mid, totalNodes, orderedPrims, refs),
+                       recursiveBuild(buildPrims, mid, end, totalNodes, orderedPrims, refs));
     return node;
 }
 
@@ -187,13 +207,29 @@ void BVH::freeBuildTree(BVHBuildNode* node) {
     delete node;
 }
 
+namespace {
+
+bool hitPrim(const PrimRef& prim, Ray& ray, SurfaceInteraction& isect) {
+    if (prim.mesh) return prim.mesh->intersectTriangle(prim.tri, ray, isect);
+    return prim.shape && prim.shape->intersect(ray, isect);
+}
+
+// ponytail: thread_local heap stack. A fixed 64 overflowed and dropped the branch.
+// Upgrade = a bounded restart stack if you need no per-thread allocation.
+std::vector<int>& traversalStack() {
+    thread_local std::vector<int> stack;
+    stack.clear();
+    return stack;
+}
+
+} // namespace
+
 bool BVH::intersect(Ray& ray, SurfaceInteraction& isect) const {
     if (m_nodes.empty()) return false;
 
     bool hit = false;
-    int toVisitOffset = 0;
+    std::vector<int>& stack = traversalStack();
     int currentNodeIndex = 0;
-    int nodesToVisit[64]; // Fixed-size stack for iterative traversal
 
     Vec3f invDir(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
     int dirIsNeg[3] = { invDir.x < 0.0f ? 1 : 0, invDir.y < 0.0f ? 1 : 0, invDir.z < 0.0f ? 1 : 0 };
@@ -201,33 +237,28 @@ bool BVH::intersect(Ray& ray, SurfaceInteraction& isect) const {
     while (true) {
         const BVHNode& node = m_nodes[currentNodeIndex];
 
-        // Check intersection with node bounds
         float tNear, tFar;
         if (node.bounds.intersect(ray, tNear, tFar)) {
             if (node.isLeaf()) {
-                // Intersect primitives in leaf
                 for (int i = 0; i < node.nPrimitives; ++i) {
-                    if (m_primitives[node.primitivesOffset + i]->intersect(ray, isect)) {
-                        hit = true;
-                    }
+                    if (hitPrim(m_prims[node.primitivesOffset + i], ray, isect)) hit = true;
                 }
-                if (toVisitOffset == 0) break;
-                currentNodeIndex = nodesToVisit[--toVisitOffset];
+                if (stack.empty()) break;
+                currentNodeIndex = stack.back();
+                stack.pop_back();
             } else {
-                // Put far child on stack, traverse near child first
                 if (dirIsNeg[node.splitAxis]) {
-                    if (toVisitOffset >= 64) break;
-                    nodesToVisit[toVisitOffset++] = currentNodeIndex + 1; // left child is near
-                    currentNodeIndex = node.secondChildOffset;            // right child is far
+                    stack.push_back(currentNodeIndex + 1);
+                    currentNodeIndex = node.secondChildOffset;
                 } else {
-                    if (toVisitOffset >= 64) break;
-                    nodesToVisit[toVisitOffset++] = node.secondChildOffset; // right child is far
-                    currentNodeIndex = currentNodeIndex + 1;                // left child is near
+                    stack.push_back(static_cast<int>(node.secondChildOffset));
+                    currentNodeIndex = currentNodeIndex + 1;
                 }
             }
         } else {
-            if (toVisitOffset == 0) break;
-            currentNodeIndex = nodesToVisit[--toVisitOffset];
+            if (stack.empty()) break;
+            currentNodeIndex = stack.back();
+            stack.pop_back();
         }
     }
 
@@ -237,12 +268,9 @@ bool BVH::intersect(Ray& ray, SurfaceInteraction& isect) const {
 bool BVH::intersectAny(const Ray& ray) const {
     if (m_nodes.empty()) return false;
 
-    // Temporary copy of the ray to allow updating tMax locally
     Ray localRay = ray;
-
-    int toVisitOffset = 0;
+    std::vector<int>& stack = traversalStack();
     int currentNodeIndex = 0;
-    int nodesToVisit[64];
 
     Vec3f invDir(1.0f / localRay.direction.x, 1.0f / localRay.direction.y, 1.0f / localRay.direction.z);
     int dirIsNeg[3] = { invDir.x < 0.0f ? 1 : 0, invDir.y < 0.0f ? 1 : 0, invDir.z < 0.0f ? 1 : 0 };
@@ -255,24 +283,24 @@ bool BVH::intersectAny(const Ray& ray) const {
             if (node.isLeaf()) {
                 SurfaceInteraction dummyIsect;
                 for (int i = 0; i < node.nPrimitives; ++i) {
-                    if (m_primitives[node.primitivesOffset + i]->intersect(localRay, dummyIsect)) {
-                        return true; // Shadow ray hit! Fast exit
-                    }
+                    if (hitPrim(m_prims[node.primitivesOffset + i], localRay, dummyIsect)) return true;
                 }
-                if (toVisitOffset == 0) break;
-                currentNodeIndex = nodesToVisit[--toVisitOffset];
+                if (stack.empty()) break;
+                currentNodeIndex = stack.back();
+                stack.pop_back();
             } else {
                 if (dirIsNeg[node.splitAxis]) {
-                    nodesToVisit[toVisitOffset++] = currentNodeIndex + 1;
+                    stack.push_back(currentNodeIndex + 1);
                     currentNodeIndex = node.secondChildOffset;
                 } else {
-                    nodesToVisit[toVisitOffset++] = node.secondChildOffset;
+                    stack.push_back(static_cast<int>(node.secondChildOffset));
                     currentNodeIndex = currentNodeIndex + 1;
                 }
             }
         } else {
-            if (toVisitOffset == 0) break;
-            currentNodeIndex = nodesToVisit[--toVisitOffset];
+            if (stack.empty()) break;
+            currentNodeIndex = stack.back();
+            stack.pop_back();
         }
     }
 

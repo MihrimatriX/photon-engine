@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace photon {
 
@@ -41,6 +42,17 @@ public:
     void setSpecular(float v) { m_specular = v; }
     void setClearCoat(float v) { m_clearCoat = std::clamp(v, 0.0f, 1.0f); }
     void setClearCoatRoughness(float v) { m_clearCoatRoughness = std::max(0.001f, v); }
+    void setAnisotropy(float v) { m_anisotropy = std::clamp(v, 0.0f, 1.0f); }
+    void setSheen(float v) { m_sheen = std::clamp(v, 0.0f, 1.0f); }
+    /// Thin-surface diffuse transmission. Burley random-walk SSS does not fit this BRDF.
+    void setDiffuseTransmission(float v) { m_diffuseTransmission = std::clamp(v, 0.0f, 1.0f); }
+    void setEmission(const Color3f& e) { m_emission = e; }
+    float anisotropy() const { return m_anisotropy; }
+    float sheen() const { return m_sheen; }
+    float diffuseTransmission() const { return m_diffuseTransmission; }
+    void setAlbedoImage(std::shared_ptr<Image> image) { m_albedoTex = std::move(image); }
+
+    Color3f emitted(const SurfaceInteraction&) const override { return m_emission; }
 
     const std::string& albedoMap() const { return m_albedoMap; }
     const std::string& normalMap() const { return m_normalMap; }
@@ -59,7 +71,11 @@ public:
         float specular = 0.5f;
         float clearCoat = 0.0f;
         float clearCoatRoughness = 0.03f;
+        float anisotropy = 0.0f;
+        float sheen = 0.0f;
+        float diffuseTransmission = 0.0f;
         Vec3f normal{0, 1, 0};
+        Vec3f tangent{1, 0, 0};
     };
     ShadingParams resolve(const SurfaceInteraction& si) const;
 
@@ -72,6 +88,10 @@ private:
     float m_specular;
     float m_clearCoat = 0.0f;
     float m_clearCoatRoughness = 0.03f;
+    float m_anisotropy = 0.0f;
+    float m_sheen = 0.0f;
+    float m_diffuseTransmission = 0.0f;
+    Color3f m_emission = Color3f::black();
     std::string m_albedoMap;
     std::string m_normalMap;
     std::string m_roughnessMap;

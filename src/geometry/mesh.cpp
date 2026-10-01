@@ -46,19 +46,63 @@ void TriangleMesh::calculateNormals() {
     }
 }
 
+void TriangleMesh::triangleVertices(size_t index, Vec3f& p0, Vec3f& p1, Vec3f& p2) const {
+    size_t offset = index * 3;
+    p0 = m_positions[m_indices[offset]];
+    p1 = m_positions[m_indices[offset + 1]];
+    p2 = m_positions[m_indices[offset + 2]];
+}
+
+float TriangleMesh::triangleArea(size_t index) const {
+    Vec3f p0, p1, p2;
+    triangleVertices(index, p0, p1, p2);
+    return 0.5f * (p1 - p0).cross(p2 - p0).length();
+}
+
+AABB TriangleMesh::triangleBounds(size_t index) const {
+    Vec3f p0, p1, p2;
+    triangleVertices(index, p0, p1, p2);
+    AABB box;
+    box.pMin = p0.cwiseMin(p1).cwiseMin(p2);
+    box.pMax = p0.cwiseMax(p1).cwiseMax(p2);
+    return box;
+}
+
+bool TriangleMesh::intersectTriangle(size_t index, Ray& ray, SurfaceInteraction& isect) const {
+    size_t offset = index * 3;
+    uint32_t idx0 = m_indices[offset];
+    uint32_t idx1 = m_indices[offset + 1];
+    uint32_t idx2 = m_indices[offset + 2];
+
+    bool hasN = m_normals.size() == m_positions.size();
+    bool hasUV = m_uvs.size() == m_positions.size();
+    Vec3f n0 = hasN ? m_normals[idx0] : Vec3f(0.0f);
+    Vec3f n1 = hasN ? m_normals[idx1] : Vec3f(0.0f);
+    Vec3f n2 = hasN ? m_normals[idx2] : Vec3f(0.0f);
+    Vec2f uv0 = hasUV ? m_uvs[idx0] : Vec2f(0.0f);
+    Vec2f uv1 = hasUV ? m_uvs[idx1] : Vec2f(0.0f);
+    Vec2f uv2 = hasUV ? m_uvs[idx2] : Vec2f(0.0f);
+
+    Triangle tri(m_positions[idx0], m_positions[idx1], m_positions[idx2],
+                 n0, n1, n2, uv0, uv1, uv2, m_material);
+    return tri.intersect(ray, isect);
+}
+
 std::shared_ptr<Triangle> TriangleMesh::getTriangle(size_t index) const {
     size_t offset = index * 3;
     uint32_t idx0 = m_indices[offset];
     uint32_t idx1 = m_indices[offset + 1];
     uint32_t idx2 = m_indices[offset + 2];
 
-    Vec3f n0 = m_normals.empty() ? Vec3f(0.0f) : m_normals[idx0];
-    Vec3f n1 = m_normals.empty() ? Vec3f(0.0f) : m_normals[idx1];
-    Vec3f n2 = m_normals.empty() ? Vec3f(0.0f) : m_normals[idx2];
+    bool hasN = m_normals.size() == m_positions.size();
+    bool hasUV = m_uvs.size() == m_positions.size();
+    Vec3f n0 = hasN ? m_normals[idx0] : Vec3f(0.0f);
+    Vec3f n1 = hasN ? m_normals[idx1] : Vec3f(0.0f);
+    Vec3f n2 = hasN ? m_normals[idx2] : Vec3f(0.0f);
 
-    Vec2f uv0 = m_uvs.empty() ? Vec2f(0.0f) : m_uvs[idx0];
-    Vec2f uv1 = m_uvs.empty() ? Vec2f(0.0f) : m_uvs[idx1];
-    Vec2f uv2 = m_uvs.empty() ? Vec2f(0.0f) : m_uvs[idx2];
+    Vec2f uv0 = hasUV ? m_uvs[idx0] : Vec2f(0.0f);
+    Vec2f uv1 = hasUV ? m_uvs[idx1] : Vec2f(0.0f);
+    Vec2f uv2 = hasUV ? m_uvs[idx2] : Vec2f(0.0f);
 
     return std::make_shared<Triangle>(
         m_positions[idx0], m_positions[idx1], m_positions[idx2],
@@ -69,14 +113,10 @@ std::shared_ptr<Triangle> TriangleMesh::getTriangle(size_t index) const {
 }
 
 bool TriangleMesh::intersect(Ray& ray, SurfaceInteraction& isect) const {
-    // Brute force intersection (only used as fallback, normally BVH is used)
     bool hit = false;
     size_t numTris = numTriangles();
     for (size_t i = 0; i < numTris; ++i) {
-        auto tri = getTriangle(i);
-        if (tri->intersect(ray, isect)) {
-            hit = true;
-        }
+        if (intersectTriangle(i, ray, isect)) hit = true;
     }
     return hit;
 }

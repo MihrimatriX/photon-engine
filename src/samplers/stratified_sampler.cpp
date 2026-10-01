@@ -3,29 +3,28 @@
 namespace photon {
 
 StratifiedSampler::StratifiedSampler(int xSamples, int ySamples, uint64_t seed)
-    : m_xSamples(xSamples), m_ySamples(ySamples), m_baseSeed(seed), m_rng(seed) {}
+    : m_xSamples(xSamples < 1 ? 1 : xSamples)
+    , m_ySamples(ySamples < 1 ? 1 : ySamples)
+    , m_baseSeed(seed)
+    , m_rng(seed) {}
 
 float StratifiedSampler::get1D() {
-    return m_rng.uniformFloat();
+    int dim = m_get1DCallCount++;
+    int n = m_xSamples * m_ySamples;
+    int stratum = (m_currentSampleIndex % n + dim) % n;
+    return (static_cast<float>(stratum) + m_rng.uniformFloat()) / static_cast<float>(n);
 }
 
 Vec2f StratifiedSampler::get2D() {
-    m_get2DCallCount++;
-    
-    // For the first 2D sample (normally used for pixel jitter/anti-aliasing),
-    // we return a stratified sample.
-    if (m_get2DCallCount == 1) {
-        int xStratum = m_currentSampleIndex % m_xSamples;
-        int yStratum = m_currentSampleIndex / m_xSamples;
-        
-        float u = (xStratum + m_rng.uniformFloat()) / static_cast<float>(m_xSamples);
-        float v = (yStratum + m_rng.uniformFloat()) / static_cast<float>(m_ySamples);
-        
-        return {u, v};
-    }
-    
-    // Fallback to independent random sampling for high dimensions
-    return m_rng.uniformFloat2D();
+    int dim = m_get2DCallCount++;
+    int n = m_xSamples * m_ySamples;
+    // dim shifts the stratum; (s + dim) mod n is a bijection, so each dimension is stratified.
+    int s = (m_currentSampleIndex % n + dim) % n;
+    int xStratum = s % m_xSamples;
+    int yStratum = s / m_xSamples;
+    float u = (static_cast<float>(xStratum) + m_rng.uniformFloat()) / static_cast<float>(m_xSamples);
+    float v = (static_cast<float>(yStratum) + m_rng.uniformFloat()) / static_cast<float>(m_ySamples);
+    return {u, v};
 }
 
 std::unique_ptr<Sampler> StratifiedSampler::clone(uint64_t seed) const {
@@ -36,20 +35,21 @@ void StratifiedSampler::startPixel(int x, int y) {
     m_pixelX = x;
     m_pixelY = y;
     m_currentSampleIndex = 0;
-    
-    // Cohrent seed per pixel
+    m_get1DCallCount = 0;
+    m_get2DCallCount = 0;
+
     uint64_t pixelSeed = m_baseSeed ^ (static_cast<uint64_t>(x) * 19123 + static_cast<uint64_t>(y) * 92183);
     m_rng = RNG(pixelSeed);
 }
 
 void StratifiedSampler::startSample(int sampleIndex) {
     m_currentSampleIndex = sampleIndex;
+    m_get1DCallCount = 0;
     m_get2DCallCount = 0;
-    
-    // Seed based on pixel and sample index to keep deterministic stream
-    uint64_t sampleSeed = m_baseSeed ^ 
-        (static_cast<uint64_t>(m_pixelX) * 19123 + 
-         static_cast<uint64_t>(m_pixelY) * 92183 + 
+
+    uint64_t sampleSeed = m_baseSeed ^
+        (static_cast<uint64_t>(m_pixelX) * 19123 +
+         static_cast<uint64_t>(m_pixelY) * 92183 +
          static_cast<uint64_t>(sampleIndex) * 239811);
     m_rng = RNG(sampleSeed);
 }

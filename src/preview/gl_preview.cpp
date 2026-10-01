@@ -1,6 +1,8 @@
 #include "preview/gl_preview.h"
+#include "lights/environment_light.h"
 #include "geometry/sphere.h"
 #include "geometry/mesh.h"
+#include "geometry/triangle.h"
 #include "materials/disney.h"
 #include "materials/lambertian.h"
 #include "materials/mirror.h"
@@ -370,12 +372,9 @@ Vec3f cubeFaceDir(int face, float u, float v) {
 }
 
 Color3f sampleEquirect(const Image& img, const Vec3f& dir) {
-    float theta = std::acos(std::clamp(dir.y, -1.0f, 1.0f));
-    float phi = std::atan2(dir.z, dir.x);
-    float u = (phi + PI) * INV_TWO_PI;
-    float v = theta * INV_PI;
-    int x = std::clamp(static_cast<int>(u * img.width()), 0, img.width() - 1);
-    int y = std::clamp(static_cast<int>(v * img.height()), 0, img.height() - 1);
+    Vec2f uv = directionToEquirect(dir);
+    int x = std::clamp(static_cast<int>(uv.x * static_cast<float>(img.width())), 0, img.width() - 1);
+    int y = std::clamp(static_cast<int>(uv.y * static_cast<float>(img.height())), 0, img.height() - 1);
     return img.getPixel(x, y);
 }
 
@@ -406,19 +405,33 @@ bool pickNode(const SceneNode& node, const Transform& parentXform, Ray& ray,
     if (node.pickId != 0) {
         SurfaceInteraction isect;
         if (node.type == SceneNodeType::Mesh && node.mesh) {
-            std::vector<Vec3f> positions;
-            positions.reserve(node.mesh->positions().size());
-            for (const auto& p : node.mesh->positions()) {
-                positions.push_back(world.transformPoint(p));
-            }
-            TriangleMesh baked(positions, {}, {}, node.mesh->indices(),
-                               node.material ? node.material.get() : node.mesh->material());
-            Ray probe = ray;
-            if (baked.intersect(probe, isect) && isect.t < bestT) {
-                bestT = isect.t;
-                bestId = node.pickId;
-                ray.tMax = bestT;
-                hit = true;
+            const auto& pos = node.mesh->positions();
+            const auto& idx = node.mesh->indices();
+            const auto& nrm = node.mesh->normals();
+            const auto& uvs = node.mesh->uvs();
+            const bool hasN = nrm.size() == pos.size();
+            const bool hasUV = uvs.size() == pos.size();
+            const Material* mat = node.material ? node.material.get() : node.mesh->material();
+            for (size_t i = 0; i + 2 < idx.size(); i += 3) {
+                uint32_t i0 = idx[i], i1 = idx[i + 1], i2 = idx[i + 2];
+                if (i0 >= pos.size() || i1 >= pos.size() || i2 >= pos.size()) continue;
+                Vec3f p0 = world.transformPoint(pos[i0]);
+                Vec3f p1 = world.transformPoint(pos[i1]);
+                Vec3f p2 = world.transformPoint(pos[i2]);
+                Vec3f n0 = hasN ? world.transformNormal(nrm[i0]) : Vec3f(0.0f);
+                Vec3f n1 = hasN ? world.transformNormal(nrm[i1]) : Vec3f(0.0f);
+                Vec3f n2 = hasN ? world.transformNormal(nrm[i2]) : Vec3f(0.0f);
+                Vec2f uv0 = hasUV ? uvs[i0] : Vec2f(0.0f);
+                Vec2f uv1 = hasUV ? uvs[i1] : Vec2f(0.0f);
+                Vec2f uv2 = hasUV ? uvs[i2] : Vec2f(0.0f);
+                Triangle tri(p0, p1, p2, n0, n1, n2, uv0, uv1, uv2, mat);
+                Ray probe = ray;
+                if (tri.intersect(probe, isect) && isect.t < bestT) {
+                    bestT = isect.t;
+                    bestId = node.pickId;
+                    ray.tMax = bestT;
+                    hit = true;
+                }
             }
         } else if (node.type == SceneNodeType::Sphere && node.sphereRadius > 0) {
             Vec3f center = world.transformPoint(Vec3f(0, 0, 0));
@@ -580,8 +593,18 @@ void GLPreview::init() {
     m_ready = true;
 }
 
+void GLPreview::destroyMeshCache() {
+    for (auto& kv : m_meshCache) {
+        if (kv.second.vao) glDeleteVertexArrays(1, &kv.second.vao);
+        if (kv.second.vbo) glDeleteBuffers(1, &kv.second.vbo);
+        if (kv.second.ibo) glDeleteBuffers(1, &kv.second.ibo);
+    }
+    m_meshCache.clear();
+}
+
 void GLPreview::shutdown() {
     if (!m_glLoaded) return;
+    destroyMeshCache();
     if (m_meshProg) glDeleteProgram(m_meshProg);
     if (m_skyProg) glDeleteProgram(m_skyProg);
     if (m_cubeVao) glDeleteVertexArrays(1, &m_cubeVao);
@@ -668,51 +691,58 @@ void GLPreview::drawMesh(const TriangleMesh& mesh, const Mat4f& model,
     const auto& idx = mesh.indices();
     if (pos.empty() || idx.empty()) return;
 
-    std::vector<Vec3f> nrm = mesh.normals();
-    if (nrm.size() != pos.size()) {
-        nrm.assign(pos.size(), Vec3f(0, 1, 0));
-        for (size_t i = 0; i + 2 < idx.size(); i += 3) {
-            Vec3f e1 = pos[idx[i + 1]] - pos[idx[i]];
-            Vec3f e2 = pos[idx[i + 2]] - pos[idx[i]];
-            Vec3f n = e1.cross(e2);
-            nrm[idx[i]] = nrm[idx[i]] + n;
-            nrm[idx[i + 1]] = nrm[idx[i + 1]] + n;
-            nrm[idx[i + 2]] = nrm[idx[i + 2]] + n;
+    auto it = m_meshCache.find(&mesh);
+    if (it == m_meshCache.end()) {
+        std::vector<Vec3f> nrm = mesh.normals();
+        if (nrm.size() != pos.size()) {
+            nrm.assign(pos.size(), Vec3f(0, 1, 0));
+            for (size_t i = 0; i + 2 < idx.size(); i += 3) {
+                Vec3f e1 = pos[idx[i + 1]] - pos[idx[i]];
+                Vec3f e2 = pos[idx[i + 2]] - pos[idx[i]];
+                Vec3f n = e1.cross(e2);
+                nrm[idx[i]] = nrm[idx[i]] + n;
+                nrm[idx[i + 1]] = nrm[idx[i + 1]] + n;
+                nrm[idx[i + 2]] = nrm[idx[i + 2]] + n;
+            }
+            for (auto& n : nrm) {
+                if (n.lengthSquared() > 0) n = n.normalized();
+                else n = Vec3f(0, 1, 0);
+            }
         }
-        for (auto& n : nrm) {
-            if (n.lengthSquared() > 0) n = n.normalized();
-            else n = Vec3f(0, 1, 0);
+
+        std::vector<float> interleaved;
+        interleaved.reserve(pos.size() * 6);
+        for (size_t i = 0; i < pos.size(); ++i) {
+            interleaved.push_back(pos[i].x);
+            interleaved.push_back(pos[i].y);
+            interleaved.push_back(pos[i].z);
+            interleaved.push_back(nrm[i].x);
+            interleaved.push_back(nrm[i].y);
+            interleaved.push_back(nrm[i].z);
         }
+
+        MeshGpu gpu;
+        glGenVertexArrays(1, &gpu.vao);
+        glGenBuffers(1, &gpu.vbo);
+        glGenBuffers(1, &gpu.ibo);
+        glBindVertexArray(gpu.vao);
+        glBindBuffer(GL_ARRAY_BUFFER, gpu.vbo);
+        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(interleaved.size() * sizeof(float)),
+                     interleaved.data(), GL_STATIC_DRAW);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, gpu.ibo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(idx.size() * sizeof(uint32_t)),
+                     idx.data(), GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
+                              reinterpret_cast<void*>(3 * sizeof(float)));
+        glBindVertexArray(0);
+        gpu.indexCount = static_cast<int>(idx.size());
+        it = m_meshCache.emplace(&mesh, gpu).first;
     }
 
-    std::vector<float> interleaved;
-    interleaved.reserve(pos.size() * 6);
-    for (size_t i = 0; i < pos.size(); ++i) {
-        interleaved.push_back(pos[i].x);
-        interleaved.push_back(pos[i].y);
-        interleaved.push_back(pos[i].z);
-        interleaved.push_back(nrm[i].x);
-        interleaved.push_back(nrm[i].y);
-        interleaved.push_back(nrm[i].z);
-    }
-
-    unsigned int vao = 0, vbo = 0, ibo = 0;
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-    glGenBuffers(1, &ibo);
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(interleaved.size() * sizeof(float)),
-                 interleaved.data(), GL_STREAM_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(idx.size() * sizeof(uint32_t)),
-                 idx.data(), GL_STREAM_DRAW);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), nullptr);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float),
-                          reinterpret_cast<void*>(3 * sizeof(float)));
-
+    const MeshGpu& gpu = it->second;
     PreviewMat pm = extractMat(mat);
     glUseProgram(m_meshProg);
     glUniformMatrix4fv(glGetUniformLocation(m_meshProg, "uModel"), 1, GL_TRUE, &model.data[0][0]);
@@ -728,7 +758,7 @@ void GLPreview::drawMesh(const TriangleMesh& mesh, const Mat4f& model,
     glUniform1f(glGetUniformLocation(m_meshProg, "uClearCoat"), pm.clearCoat);
     glUniform1f(glGetUniformLocation(m_meshProg, "uClearCoatRoughness"), pm.clearCoatRoughness);
     glUniform1f(glGetUniformLocation(m_meshProg, "uExposure"), exposure);
-    float ldir[3] = {0.4f, 0.85f, 0.35f};
+    float ldir[3] = {m_lightDir.x, m_lightDir.y, m_lightDir.z};
     float lcol[3] = {3.5f, 3.4f, 3.2f};
     glUniform3fv(glGetUniformLocation(m_meshProg, "uLightDir"), 1, ldir);
     glUniform3fv(glGetUniformLocation(m_meshProg, "uLightColor"), 1, lcol);
@@ -736,12 +766,9 @@ void GLPreview::drawMesh(const TriangleMesh& mesh, const Mat4f& model,
     glBindTexture(GL_TEXTURE_CUBE_MAP, m_envCube);
     glUniform1i(glGetUniformLocation(m_meshProg, "uEnv"), 0);
 
-    glDrawElements(GL_TRIANGLES, static_cast<int>(idx.size()), GL_UNSIGNED_INT, nullptr);
-
+    glBindVertexArray(gpu.vao);
+    glDrawElements(GL_TRIANGLES, gpu.indexCount, GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
-    glDeleteBuffers(1, &vbo);
-    glDeleteBuffers(1, &ibo);
-    glDeleteVertexArrays(1, &vao);
 }
 
 void GLPreview::drawSphere(float radius, const Mat4f& model, const Material* mat,
@@ -763,7 +790,7 @@ void GLPreview::drawSphere(float radius, const Mat4f& model, const Material* mat
     glUniform1f(glGetUniformLocation(m_meshProg, "uClearCoat"), pm.clearCoat);
     glUniform1f(glGetUniformLocation(m_meshProg, "uClearCoatRoughness"), pm.clearCoatRoughness);
     glUniform1f(glGetUniformLocation(m_meshProg, "uExposure"), exposure);
-    float ldir[3] = {0.4f, 0.85f, 0.35f};
+    float ldir[3] = {m_lightDir.x, m_lightDir.y, m_lightDir.z};
     float lcol[3] = {3.5f, 3.4f, 3.2f};
     glUniform3fv(glGetUniformLocation(m_meshProg, "uLightDir"), 1, ldir);
     glUniform3fv(glGetUniformLocation(m_meshProg, "uLightColor"), 1, lcol);
@@ -798,8 +825,14 @@ void GLPreview::drawNode(const SceneNode& node, const Transform& parent,
 void GLPreview::render(const SceneGraph& graph,
                        const Mat4f& view, const Mat4f& proj, const Vec3f& camPos,
                        int width, int height, PreviewQuality quality,
-                       const Image* envMap, float exposure) {
+                       const Image* envMap, float exposure, const Vec3f& lightDir) {
     if (!m_ready || width <= 0 || height <= 0) return;
+    m_lightDir = lightDir;
+    // ponytail: one revision for the whole graph (clear/delete). Per-mesh dirty if a delete shouldn't reupload everything.
+    if (graph.geometryRevision() != m_meshRev) {
+        destroyMeshCache();
+        m_meshRev = graph.geometryRevision();
+    }
 
     int faceSize = (quality == PreviewQuality::Fast) ? 32 : 64;
     ensureEnvCube(envMap && envMap->width() > 0 ? envMap : nullptr, faceSize);

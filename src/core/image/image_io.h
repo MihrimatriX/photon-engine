@@ -25,4 +25,7 @@ std::optional<Image> loadImageEXR(const std::string& path);
 /// Load LDR image (from PNG/JPG/TGA format, converts sRGB to linear automatically)
 std::optional<Image> loadImageLDR(const std::string& path);
 
+/// Decode a PNG/JPG/TGA blob already in memory. Empty if stb cannot read it.
+std::optional<Image> loadImageLDRMemory(const unsigned char* bytes, int size);
+
 } // namespace photon

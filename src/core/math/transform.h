@@ -81,4 +81,12 @@ private:
     Mat4f m_inverse;
 };
 
+inline Transform withTranslation(const Transform& xf, const Vec3f& t) {
+    Mat4f m = xf.matrix();
+    m(0, 3) = t.x;
+    m(1, 3) = t.y;
+    m(2, 3) = t.z;
+    return Transform(m);
+}
+
 } // namespace photon

@@ -13,6 +13,9 @@ namespace photon {
 /// Optional albedo/normal AOVs improve OIDN quality when provided (same resolution).
 bool denoiseImage(Image& color, const Image* albedo = nullptr, const Image* normal = nullptr);
 
+/// Denoise a copy. The source image and its sample counts are left alone.
+Image denoiseCopy(const Image& color);
+
 /// True when this build was compiled with a linked OIDN SDK.
 bool denoiseAvailable();
 

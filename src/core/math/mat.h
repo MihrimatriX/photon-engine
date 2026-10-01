@@ -270,6 +270,25 @@ struct Mat4f {
 
         return result;
     }
+
+    /// Orthographic projection. verticalExtent is the world-space view height.
+    static inline Mat4f ortho(float verticalExtent, float aspect, float zNear, float zFar) {
+        float top = verticalExtent * 0.5f;
+        float bottom = -top;
+        float right = top * aspect;
+        float left = -right;
+        float range = zFar - zNear;
+
+        Mat4f result;
+        result.data[0][0] = 2.0f / (right - left);
+        result.data[1][1] = 2.0f / (top - bottom);
+        result.data[2][2] = -2.0f / range;
+        result.data[0][3] = -(right + left) / (right - left);
+        result.data[1][3] = -(top + bottom) / (top - bottom);
+        result.data[2][3] = -(zFar + zNear) / range;
+        result.data[3][3] = 1.0f;
+        return result;
+    }
 };
 
 } // namespace photon

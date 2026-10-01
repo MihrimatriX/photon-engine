@@ -7,6 +7,7 @@
 #include "ui/file_dialog.h"
 #include "camera/perspective_camera.h"
 #include "camera/thin_lens_camera.h"
+#include "camera/orthographic_camera.h"
 #include "lights/area_light.h"
 #include "lights/directional_light.h"
 #include "materials/disney.h"
@@ -105,6 +106,17 @@ void fillProceduralSky(Image& out, const Color3f& zenith, const Color3f& horizon
             zenith.b * (1.0f - t) + horizon.b * t);
         for (int x = 0; x < W; ++x) out.setPixel(x, y, c);
     }
+    // Two studio windows so chrome reflects a key and a rim without an HDR file.
+    auto stamp = [&](int x0, int y0, int x1, int y1, const Color3f& c) {
+        x0 = std::max(0, x0);
+        y0 = std::max(0, y0);
+        x1 = std::min(W, x1);
+        y1 = std::min(H, y1);
+        for (int y = y0; y < y1; ++y)
+            for (int x = x0; x < x1; ++x) out.setPixel(x, y, c);
+    };
+    stamp(W * 42 / 100, H * 12 / 100, W * 58 / 100, H * 36 / 100, Color3f(48.0f, 46.0f, 40.0f));
+    stamp(W * 6 / 100, H * 18 / 100, W * 18 / 100, H * 40 / 100, Color3f(22.0f, 28.0f, 48.0f));
 }
 
 unsigned int makeEnvThumbTex(const Color3f& zenith, const Color3f& horizon) {
@@ -298,7 +310,8 @@ void Application::exportTurntableSequence() {
     m_state.fullRender.currentSpp = 0;
     m_state.fullRender.status = "Turntable...";
 
-    m_state.fullRender.thread = std::thread([this, outDir, frames, spp, w, h, startPhi, theta, radius, fov, target]() {
+    const bool ortho = m_state.orbitCam.orthographic;
+    m_state.fullRender.thread = std::thread([this, outDir, frames, spp, w, h, startPhi, theta, radius, fov, target, ortho]() {
         try {
             RenderSettings rs = m_state.settings;
             rs.width = w;
@@ -323,8 +336,14 @@ void Application::exportTurntableSequence() {
                     target.x + radius * std::sin(theta) * std::cos(phi),
                     target.y + radius * std::cos(theta),
                     target.z + radius * std::sin(theta) * std::sin(phi));
-                PerspectiveCamera cam(eye, target, Vec3f(0, 1, 0), fov, aspect);
-                Image img = m_state.renderer.render(scene, cam, rs);
+                std::unique_ptr<Camera> cam;
+                if (ortho) {
+                    float height = 2.0f * std::tan(deg2rad(fov) * 0.5f) * std::max(radius, 0.01f);
+                    cam = std::make_unique<OrthographicCamera>(eye, target, Vec3f(0, 1, 0), height, aspect);
+                } else {
+                    cam = std::make_unique<PerspectiveCamera>(eye, target, Vec3f(0, 1, 0), fov, aspect);
+                }
+                Image img = m_state.renderer.render(scene, *cam, rs);
                 char name[64];
                 std::snprintf(name, sizeof(name), "frame_%04d.png", i);
                 saveImagePNG(img, (outDir / name).string(), rs.tmo, rs.exposure);
@@ -358,6 +377,7 @@ void Application::frameProductCamera() {
 
 void Application::loadSampleScene() {
     namespace fs = std::filesystem;
+    m_state.settings.aoStrength = 0.35f;
     m_state.graph.clear();
     m_state.selected = nullptr;
     m_state.lights.clear();
@@ -404,7 +424,34 @@ void Application::loadSampleScene() {
             Vec3f(0.55f, -0.75f, 0.25f), Color3f(2.2f)));
         frameProductCamera();
     }
+    AABB box = AABB::empty();
+    std::function<void(const SceneNode*, const Transform&)> walk =
+        [&](const SceneNode* n, const Transform& parent) {
+            if (!n || !n->visible) return;
+            Transform world = parent * n->localTransform;
+            if (n->mesh) {
+                for (const auto& p : n->mesh->positions())
+                    box.merge(world.transformPoint(p));
+            }
+            for (const auto& c : n->children) walk(c.get(), world);
+        };
+    walk(m_state.graph.root(), Transform{});
+    if (box.pMin.x <= box.pMax.x) {
+        GroundQuad g = placeGroundUnder(box);
+        std::vector<Vec3f> pos = {
+            g.corner, g.corner + g.edgeU, g.corner + g.edgeU + g.edgeV, g.corner + g.edgeV};
+        std::vector<uint32_t> idx = {0, 1, 2, 0, 2, 3};
+        auto mat = std::make_shared<DisneyMaterial>(Color3f(0.55f), 0.0f, 0.9f, 0.15f);
+        auto mesh = std::make_shared<TriangleMesh>(
+            pos, std::vector<Vec3f>{}, std::vector<Vec2f>{}, idx, mat.get());
+        auto node = std::make_unique<SceneNode>("Ground", SceneNodeType::Mesh);
+        node->mesh = mesh;
+        node->material = mat;
+        node->pickId = m_state.graph.allocatePickId();
+        m_state.graph.root()->addChild(std::move(node));
+    }
     frameProductCamera();
+    m_state.orbitCam.focusExplicit = false;
     rebuildScene();
     setStatus("Ornek urun sahnesi yuklendi");
 }
@@ -427,6 +474,8 @@ void Application::loadCornellScene() {
     m_state.lights.push_back(std::make_shared<DirectionalLight>(
         Vec3f(0.6f, -0.7f, 0.2f), Color3f(2.0f)));
     m_state.orbitCam.radius = 1200.0f;
+    m_state.orbitCam.focusExplicit = false;
+    m_state.settings.aoStrength = 0.0f;
     m_state.orbitCam.target[0] = 278.0f;
     m_state.orbitCam.target[1] = 273.0f;
     m_state.orbitCam.target[2] = 277.5f;
@@ -530,6 +579,10 @@ void Application::markDirty() {
 void Application::startRenderThread() {
     m_state.renderThread = std::thread([this]() {
         while (!m_state.shutdown) {
+            if (m_state.fullRender.active.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                continue;
+            }
             if (m_state.renderDirty.load()) {
                 std::lock_guard<std::mutex> lock(m_state.imageMutex);
                 // Progressive preview is capped; full-res lives in Tam Render dialog.
@@ -571,9 +624,15 @@ std::unique_ptr<Camera> Application::makeCamera(float aspect) const {
     m_state.orbitCam.getPosition(pos);
     Vec3f position(pos[0], pos[1], pos[2]);
     Vec3f target(m_state.orbitCam.target[0], m_state.orbitCam.target[1], m_state.orbitCam.target[2]);
+    if (m_state.orbitCam.orthographic) {
+        float height = 2.0f * std::tan(deg2rad(m_state.orbitCam.fov) * 0.5f) *
+                       std::max(m_state.orbitCam.radius, 0.01f);
+        return std::make_unique<OrthographicCamera>(position, target, Vec3f(0, 1, 0), height, aspect);
+    }
     if (m_state.orbitCam.aperture > 0.0f) {
         return std::make_unique<ThinLensCamera>(position, target, Vec3f(0, 1, 0),
-            m_state.orbitCam.fov, aspect, m_state.orbitCam.aperture, m_state.orbitCam.focusDistance);
+            m_state.orbitCam.fov, aspect, m_state.orbitCam.aperture,
+            effectiveFocusDistance(m_state.orbitCam));
     }
     return std::make_unique<PerspectiveCamera>(position, target, Vec3f(0, 1, 0),
         m_state.orbitCam.fov, aspect);
@@ -616,8 +675,13 @@ SceneNode* Application::importModelInternal(const std::string& path) {
     std::vector<std::shared_ptr<Material>> materials;
 
     if (ext == ".obj") {
-        meshes = ObjLoader::load(path, defaultMat.get());
-        for (size_t i = 0; i < meshes.size(); ++i) materials.push_back(defaultMat);
+        auto loaded = ObjLoader::load(path, defaultMat.get());
+        meshes = std::move(loaded.meshes);
+        materials = std::move(loaded.materials);
+        for (size_t i = 0; i < meshes.size(); ++i) {
+            if (i >= materials.size()) materials.push_back(nullptr);
+            if (!materials[i]) materials[i] = defaultMat;
+        }
     } else if (ext == ".gltf" || ext == ".glb") {
         auto r = GltfLoader::load(path, defaultMat.get());
         meshes = std::move(r.meshes);
@@ -646,8 +710,11 @@ std::string Application::serializeCameraJson() const {
        << ",\"theta\":" << c.theta
        << ",\"phi\":" << c.phi
        << ",\"fov\":" << c.fov
+       << ",\"focalLengthMm\":" << c.focalLengthMm
+       << ",\"orthographic\":" << (c.orthographic ? "true" : "false")
        << ",\"aperture\":" << c.aperture
-       << ",\"focusDistance\":" << c.focusDistance << "}";
+       << ",\"focusDistance\":" << c.focusDistance
+       << ",\"focusExplicit\":" << (c.focusExplicit ? "true" : "false") << "}";
     return ss.str();
 }
 
@@ -660,8 +727,27 @@ void Application::applyCameraJson(const std::string& json) {
     c.theta = jsonFloatField(json, "theta", c.theta);
     c.phi = jsonFloatField(json, "phi", c.phi);
     c.fov = jsonFloatField(json, "fov", c.fov);
+    if (json.find("\"focalLengthMm\"") != std::string::npos)
+        c.focalLengthMm = jsonFloatField(json, "focalLengthMm", c.focalLengthMm);
+    else
+        c.focalLengthMm = focalMmFromFovDegrees(c.fov);
+    auto ortho = json.find("\"orthographic\"");
+    if (ortho != std::string::npos) {
+        auto tru = json.find("true", ortho);
+        auto fal = json.find("false", ortho);
+        c.orthographic = tru != std::string::npos && (fal == std::string::npos || tru < fal);
+    }
     c.aperture = jsonFloatField(json, "aperture", c.aperture);
-    c.focusDistance = jsonFloatField(json, "focusDistance", c.focusDistance);
+    if (json.find("\"focusDistance\"") != std::string::npos)
+        c.focusDistance = jsonFloatField(json, "focusDistance", c.focusDistance);
+    auto fe = json.find("\"focusExplicit\"");
+    if (fe != std::string::npos) {
+        auto tru = json.find("true", fe);
+        auto fal = json.find("false", fe);
+        c.focusExplicit = tru != std::string::npos && (fal == std::string::npos || tru < fal);
+    } else {
+        c.focusExplicit = false;
+    }
 }
 
 void Application::applyProjectFile(const ProjectFile& proj) {
@@ -909,6 +995,8 @@ void Application::applyStudioPreset(const std::string& path) {
     m_state.orbitCam.theta = jsonFloatField(json, "yaw", m_state.orbitCam.theta);
     m_state.orbitCam.phi = jsonFloatField(json, "pitch", m_state.orbitCam.phi);
     m_state.settings.exposure = jsonFloatField(json, "exposure", m_state.settings.exposure);
+    if (json.find("\"aoStrength\"") != std::string::npos)
+        m_state.settings.aoStrength = jsonFloatField(json, "aoStrength", m_state.settings.aoStrength);
 
     std::string hdr = jsonStringField(json, "hdr");
     if (!hdr.empty()) {
@@ -1432,9 +1520,21 @@ void Application::drawInspectorPanel() {
     ImGui::Begin("Inceleyici");
 
     if (ImGui::CollapsingHeader("Kamera", ImGuiTreeNodeFlags_DefaultOpen)) {
-        if (ImGui::SliderFloat("FOV", &m_state.orbitCam.fov, 10.0f, 120.0f)) markDirty();
+        if (ImGui::Checkbox("Ortografik", &m_state.orbitCam.orthographic)) markDirty();
+        if (ImGui::SliderFloat("Odak (mm)", &m_state.orbitCam.focalLengthMm, 12.0f, 200.0f)) {
+            m_state.orbitCam.fov = fovDegreesFromFocalMm(m_state.orbitCam.focalLengthMm);
+            markDirty();
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("36mm sensor yuksekligi");
+        if (ImGui::SliderFloat("FOV", &m_state.orbitCam.fov, 10.0f, 120.0f)) {
+            m_state.orbitCam.focalLengthMm = focalMmFromFovDegrees(m_state.orbitCam.fov);
+            markDirty();
+        }
         if (ImGui::SliderFloat("DoF Acikligi", &m_state.orbitCam.aperture, 0, 0.05f)) markDirty();
-        if (ImGui::SliderFloat("Odak Mesafesi", &m_state.orbitCam.focusDistance, 0.1f, 50.0f)) markDirty();
+        if (ImGui::SliderFloat("Odak Mesafesi", &m_state.orbitCam.focusDistance, 0.1f, 50.0f)) {
+            m_state.orbitCam.focusExplicit = true;
+            markDirty();
+        }
         if (ImGui::Checkbox("Turntable", &m_state.orbitCam.turntable)) {}
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Space: otomatik kamera orbit");
         if (m_state.orbitCam.turntable)
@@ -1477,29 +1577,28 @@ void Application::drawInspectorPanel() {
     }
 
     if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-        const Mat4f& m = sel->localTransform.matrix();
+        Transform beforeXf = sel->localTransform;
+        const Mat4f& m = beforeXf.matrix();
         float t[3] = {m(0, 3), m(1, 3), m(2, 3)};
-        static float tBefore[3];
-        float tPre[3] = {t[0], t[1], t[2]};
+        static Transform undoFrom;
         if (ImGui::DragFloat3("Konum", t, 1.0f)) {
-            sel->localTransform = Transform::translate(Vec3f(t[0], t[1], t[2]));
+            sel->localTransform = withTranslation(beforeXf, Vec3f(t[0], t[1], t[2]));
             markDirty();
         }
-        if (ImGui::IsItemActivated()) {
-            tBefore[0] = tPre[0]; tBefore[1] = tPre[1]; tBefore[2] = tPre[2];
-        }
+        if (ImGui::IsItemActivated()) undoFrom = beforeXf;
         if (ImGui::IsItemDeactivatedAfterEdit()) {
-            float after[3] = {t[0], t[1], t[2]};
+            Transform from = undoFrom;
+            Transform to = sel->localTransform;
             SceneNode* node = sel;
             m_state.undo.push(
-                [this, node, bx = tBefore[0], by = tBefore[1], bz = tBefore[2]]() {
+                [this, node, from]() {
                     if (!node) return;
-                    node->localTransform = Transform::translate(Vec3f(bx, by, bz));
+                    node->localTransform = from;
                     rebuildScene();
                 },
-                [this, node, ax = after[0], ay = after[1], az = after[2]]() {
+                [this, node, to]() {
                     if (!node) return;
-                    node->localTransform = Transform::translate(Vec3f(ax, ay, az));
+                    node->localTransform = to;
                     rebuildScene();
                 });
             rebuildScene();
@@ -1776,12 +1875,16 @@ void Application::drawViewportPanel() {
             Mat4f view = Mat4f::lookAt(eye, target, Vec3f(0, 1, 0));
             float zNear = std::max(0.1f, m_state.orbitCam.radius * 0.01f);
             float zFar = std::max(zNear + 1.0f, m_state.orbitCam.radius * 40.0f);
-            Mat4f proj = Mat4f::perspective(m_state.orbitCam.fov * DEG_TO_RAD, aspect, zNear, zFar);
+            float orthoH = 2.0f * std::tan(m_state.orbitCam.fov * DEG_TO_RAD * 0.5f) *
+                           std::max(m_state.orbitCam.radius, 0.01f);
+            Mat4f proj = m_state.orbitCam.orthographic
+                ? Mat4f::ortho(orthoH, aspect, zNear, zFar)
+                : Mat4f::perspective(m_state.orbitCam.fov * DEG_TO_RAD, aspect, zNear, zFar);
             const Image* envImg = (m_state.environment && m_state.envMap.width() > 0)
                 ? &m_state.envMap : nullptr;
             m_state.glPreview.render(
                 m_state.graph, view, proj, eye, w, h, PreviewQuality::Fast,
-                envImg, m_state.settings.exposure);
+                envImg, m_state.settings.exposure, previewLightDirection(m_state.lights));
         }
     }
 
@@ -2005,7 +2108,14 @@ int Application::run() {
         processPendingDrops();
         if (m_state.imageReady.exchange(false)) {
             std::lock_guard<std::mutex> lock(m_state.imageMutex);
-            m_state.cpuTexture.upload(m_state.accumImage, m_state.settings.tmo, m_state.settings.exposure);
+            const int spp = m_state.currentSpp.load();
+            if (m_state.settings.denoiseEnabled && spp > 0 &&
+                spp >= m_state.settings.samplesPerPixel) {
+                Image shown = denoiseCopy(m_state.accumImage);
+                m_state.cpuTexture.upload(shown, m_state.settings.tmo, m_state.settings.exposure);
+            } else {
+                m_state.cpuTexture.upload(m_state.accumImage, m_state.settings.tmo, m_state.settings.exposure);
+            }
         }
         handleShortcuts();
 

@@ -37,6 +37,7 @@ bool Sphere::intersect(Ray& ray, SurfaceInteraction& isect) const {
     
     // Normal at intersection (pointing outwards)
     Vec3f outwardNormal = (isect.point - m_center) / m_radius;
+    isect.ng = outwardNormal;
     isect.setFaceNormal(ray, outwardNormal);
 
     // Compute UV coordinates (spherical coordinates)

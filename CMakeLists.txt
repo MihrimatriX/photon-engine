@@ -117,6 +117,9 @@ add_subdirectory(src/samplers)
 add_subdirectory(src/io)
 add_subdirectory(src/engine)
 
+# Scene graph is CPU-only. Tests use it with the desktop app off.
+add_subdirectory(src/scene)
+
 # GPU backend (optional)
 if(PHOTON_BUILD_GPU)
     add_subdirectory(src/gpu)
@@ -175,7 +178,6 @@ if(PHOTON_BUILD_APP)
     endif()
 
     find_package(OpenGL REQUIRED)
-    add_subdirectory(src/scene)
     add_subdirectory(src/preview)
     add_subdirectory(src/ui)
     add_subdirectory(src/app)

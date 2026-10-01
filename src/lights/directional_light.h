@@ -19,6 +19,9 @@ public:
     bool isDelta() const override { return true; }
     Color3f power() const override;
 
+    /// Direction light travels toward (sampleLi returns the opposite).
+    const Vec3f& direction() const { return m_direction; }
+
 private:
     Vec3f m_direction; // Direction light travels TO
     Color3f m_irradiance;

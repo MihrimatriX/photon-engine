@@ -12,17 +12,20 @@ namespace photon {
 
 class Material;
 
+struct ObjLoadResult {
+    std::vector<std::shared_ptr<TriangleMesh>> meshes;
+    /// Parallel to meshes. Null means the caller-supplied default material.
+    std::vector<std::shared_ptr<Material>> materials;
+};
+
 /// @brief Utility class to load Wavefront .obj files.
 class ObjLoader {
 public:
     /// Load mesh groups from a .obj file.
     ///
     /// @param path Path to the .obj file.
-    /// @param defaultMaterial Material to assign if no material is specified.
-    /// @return Vector of shared pointers to loaded TriangleMesh shapes.
-    static std::vector<std::shared_ptr<TriangleMesh>> load(
-        const std::string& path,
-        const Material* defaultMaterial);
+    /// @param defaultMaterial Material to assign if no MTL Kd is present.
+    static ObjLoadResult load(const std::string& path, const Material* defaultMaterial);
 };
 
 } // namespace photon

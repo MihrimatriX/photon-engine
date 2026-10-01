@@ -6,6 +6,7 @@
 #include "geometry/bvh.h"
 #include "lights/light.h"
 #include "lights/environment_light.h"
+#include "materials/material.h"
 #include <vector>
 #include <memory>
 
@@ -44,6 +45,8 @@ public:
     const EnvironmentLight* environment() const { return m_environment.get(); }
 
 private:
+    // Declared first so light materials outlive the triangles that point at them.
+    std::vector<std::shared_ptr<Material>> m_emissiveMaterials;
     std::vector<std::shared_ptr<Shape>> m_shapes;
     std::vector<std::shared_ptr<Light>> m_lights;
     std::shared_ptr<EnvironmentLight> m_environment;

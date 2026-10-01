@@ -2,6 +2,7 @@
 #include "materials/disney.h"
 #include "core/image/image.h"
 #include "geometry/surface_interaction.h"
+#include <cmath>
 
 using namespace photon;
 
@@ -39,6 +40,52 @@ TEST(DisneyMaterial, ClearCoatAddsEnergy) {
     mat.setClearCoatRoughness(0.05f);
     Color3f coated = mat.eval(wo, wi, si);
     EXPECT_GT(coated.r + coated.g + coated.b, base.r + base.g + base.b);
+}
+
+TEST(DisneyMaterial, AnisotropyFollowsTangent) {
+    DisneyMaterial mat(Color3f(1.0f), 1.0f, 0.4f, 0.5f);
+    mat.setAnisotropy(0.9f);
+    SurfaceInteraction si;
+    si.normal = Vec3f(0, 1, 0);
+    si.ng = si.normal;
+    si.uv = Vec2f(0, 0);
+    Vec3f wo(0, 1, 0);
+    Vec3f wi = Vec3f(0.6f, 0.8f, 0.0f).normalized();
+
+    si.tangent = Vec3f(1, 0, 0);
+    float along = mat.eval(wo, wi, si).luminance();
+    si.tangent = Vec3f(0, 0, 1);
+    float across = mat.eval(wo, wi, si).luminance();
+    EXPECT_GT(std::abs(along - across), 1e-4f);
+}
+
+TEST(DisneyMaterial, SheenAddsAtWideHalfAngle) {
+    DisneyMaterial mat(Color3f(0.2f, 0.3f, 0.8f), 0.0f, 0.8f, 0.3f);
+    SurfaceInteraction si;
+    si.normal = Vec3f(0, 1, 0);
+    si.tangent = Vec3f(1, 0, 0);
+    Vec3f wo = Vec3f(0.95f, 0.1f, 0.0f).normalized();
+    Vec3f wi = Vec3f(-0.95f, 0.1f, 0.0f).normalized();
+    mat.setSheen(0.0f);
+    float plain = mat.eval(wo, wi, si).luminance();
+    mat.setSheen(1.0f);
+    float cloth = mat.eval(wo, wi, si).luminance();
+    EXPECT_GT(cloth, plain);
+}
+
+TEST(DisneyMaterial, DiffuseTransmissionGoesThrough) {
+    DisneyMaterial mat(Color3f(0.8f), 0.0f, 0.5f, 0.5f);
+    mat.setDiffuseTransmission(1.0f);
+    SurfaceInteraction si;
+    si.normal = Vec3f(0, 1, 0);
+    si.tangent = Vec3f(1, 0, 0);
+    Vec3f wo(0, 1, 0);
+    Vec3f wi;
+    Color3f brdf;
+    float pdf = 0.0f;
+    ASSERT_TRUE(mat.sample(wo, si, Vec2f(0.8f, 0.3f), wi, brdf, pdf));
+    EXPECT_LT(wi.dot(si.normal), 0.0f);
+    EXPECT_GT(pdf, 0.0f);
 }
 
 TEST(DisneyMaterial, ResolveUsesBaseWithoutMaps) {

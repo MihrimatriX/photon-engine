@@ -24,12 +24,19 @@ public:
     AABB bounds() const override;
 
     size_t numTriangles() const { return m_indices.size() / 3; }
-    
+
+    /// Stack triangle, no heap shape. BVH leaves index these.
+    bool intersectTriangle(size_t index, Ray& ray, SurfaceInteraction& isect) const;
+    AABB triangleBounds(size_t index) const;
+    float triangleArea(size_t index) const;
+    void triangleVertices(size_t index, Vec3f& p0, Vec3f& p1, Vec3f& p2) const;
+
     /// Get individual triangle shape for acceleration structures
     std::shared_ptr<Triangle> getTriangle(size_t index) const;
 
     const std::vector<Vec3f>& positions() const { return m_positions; }
     const std::vector<Vec3f>& normals() const { return m_normals; }
+    const std::vector<Vec2f>& uvs() const { return m_uvs; }
     const std::vector<uint32_t>& indices() const { return m_indices; }
     const Material* material() const { return m_material; }
 
