@@ -13,3 +13,5 @@ target_link_libraries(photon_integrators PUBLIC
 
 target_include_directories(photon_integrators PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_compile_features(photon_integrators PUBLIC cxx_std_20)
+
+target_link_libraries(photon_integrators PRIVATE photon_build_flags)

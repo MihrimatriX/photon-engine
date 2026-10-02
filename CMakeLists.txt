@@ -18,9 +18,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # ──────────────────────────────────────────────
 option(PHOTON_BUILD_TESTS  "Build unit tests"                    ON)
 option(PHOTON_BUILD_CLI    "Build photon_render CLI (dev only)"  OFF)
-option(PHOTON_BUILD_GPU    "Build GPU (OptiX/Vulkan) backend"    OFF)
 option(PHOTON_ENABLE_SIMD  "Enable AVX2/FMA SIMD instructions"  ON)
 option(PHOTON_ENABLE_ASAN "AddressSanitizer on photon_* targets" OFF)
+# ponytail: MSVC /WX stays off until a clean /W4 build is seen on the owner's
+# machine (this tree is only verified with GCC/Clang). Flip the default then.
+if(MSVC)
+    option(PHOTON_WARNINGS_AS_ERRORS "Treat warnings in photon_* targets as errors" OFF)
+else()
+    option(PHOTON_WARNINGS_AS_ERRORS "Treat warnings in photon_* targets as errors" ON)
+endif()
 # OIDN: auto-enable when the SDK is findable (vcpkg / CMAKE_PREFIX_PATH).
 # Force with -DPHOTON_ENABLE_OIDN=ON; disable with -DPHOTON_ENABLE_OIDN=OFF.
 option(PHOTON_ENABLE_OIDN "Enable Intel Open Image Denoise (AUTO if found)" OFF)
@@ -38,11 +44,28 @@ endif()
 # ──────────────────────────────────────────────
 # Compiler Warnings & Flags
 # ──────────────────────────────────────────────
+# Process-wide definitions only. Warnings and float-model flags live on
+# photon_build_flags so third-party code keeps its own settings.
 if(MSVC)
-    add_compile_options(/W4 /WX- /MP /fp:fast)
+    add_compile_options(/MP)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
+endif()
+
+# Linked PRIVATE by every photon_* target.
+add_library(photon_build_flags INTERFACE)
+if(MSVC)
+    target_compile_options(photon_build_flags INTERFACE /W4 /utf-8 /fp:fast)
+    if(PHOTON_WARNINGS_AS_ERRORS)
+        target_compile_options(photon_build_flags INTERFACE /WX)
+    endif()
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter -ffast-math)
+    # Fast math, but keep NaN/Inf semantics: the sample path must be able to
+    # reject non-finite radiance (see core/math/float_bits.h).
+    target_compile_options(photon_build_flags INTERFACE
+        -Wall -Wextra -Wpedantic -ffast-math -fno-finite-math-only)
+    if(PHOTON_WARNINGS_AS_ERRORS)
+        target_compile_options(photon_build_flags INTERFACE -Werror)
+    endif()
 endif()
 
 # ──────────────────────────────────────────────
@@ -63,10 +86,13 @@ include(FetchContent)
 
 # stb – single-file image I/O headers
 # Pinned 2026-10-01 from branch master.
+# SOURCE_SUBDIR points at a folder with no CMakeLists.txt: the headers are
+# fetched but the projects' own library/sample targets are never configured.
 FetchContent_Declare(
     stb
     GIT_REPOSITORY https://github.com/nothings/stb.git
     GIT_TAG        2c980bb59875b0d32144a71867fbdebb2f77cd20
+    SOURCE_SUBDIR  photon-headers-only
 )
 
 # tinyobjloader – Wavefront OBJ loader
@@ -74,6 +100,7 @@ FetchContent_Declare(
     tinyobjloader
     GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
     GIT_TAG        v2.0.0rc13
+    SOURCE_SUBDIR  photon-headers-only
 )
 
 # tinyexr – EXR image loader/writer
@@ -81,6 +108,7 @@ FetchContent_Declare(
     tinyexr
     GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
     GIT_TAG        v1.0.8
+    SOURCE_SUBDIR  photon-headers-only
 )
 
 FetchContent_MakeAvailable(stb tinyobjloader tinyexr)
@@ -90,6 +118,7 @@ FetchContent_Declare(
     cgltf
     GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
     GIT_TAG        v1.13
+    SOURCE_SUBDIR  photon-headers-only
 )
 FetchContent_MakeAvailable(cgltf)
 
@@ -122,17 +151,11 @@ add_subdirectory(src/engine)
 # Scene graph is CPU-only. Tests use it with the desktop app off.
 add_subdirectory(src/scene)
 
-# GPU backend (optional)
-if(PHOTON_BUILD_GPU)
-    add_subdirectory(src/gpu)
-endif()
-
 # Desktop UI application (GLFW + ImGui)
 option(PHOTON_BUILD_APP "Build photon_app desktop UI" ON)
 if(PHOTON_BUILD_APP)
     find_package(glfw3 CONFIG QUIET)
     find_package(imgui CONFIG QUIET)
-    find_package(glm CONFIG QUIET)
 
     if(NOT glfw3_FOUND)
         FetchContent_Declare(
@@ -162,22 +185,12 @@ if(PHOTON_BUILD_APP)
             ${imgui_fc_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
             ${imgui_fc_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
         )
-        target_include_directories(imgui_app PUBLIC
+        target_include_directories(imgui_app SYSTEM PUBLIC
             ${imgui_fc_SOURCE_DIR}
             ${imgui_fc_SOURCE_DIR}/backends
         )
-        target_compile_definitions(imgui_app PUBLIC IMGUI_HAS_DOCK)
         target_link_libraries(imgui_app PUBLIC glfw)
         add_library(imgui::imgui ALIAS imgui_app)
-    endif()
-
-    if(NOT glm_FOUND)
-        FetchContent_Declare(
-            glm
-            GIT_REPOSITORY https://github.com/g-truc/glm.git
-            GIT_TAG        1.0.1
-        )
-        FetchContent_MakeAvailable(glm)
     endif()
 
     find_package(OpenGL REQUIRED)
@@ -196,12 +209,12 @@ endif()
 # ──────────────────────────────────────────────
 if(PHOTON_BUILD_CLI)
     add_executable(photon_render src/main.cpp)
-    target_link_libraries(photon_render PRIVATE photon_engine)
+    target_link_libraries(photon_render PRIVATE photon_engine photon_build_flags)
 endif()
 
 # ponytail: ASan instruments photon_* only. vcpkg and FetchContent stay
 # uninstrumented. Upgrade: an ASan vcpkg triplet if those libs must be checked.
-if(PHOTON_ENABLE_ASAN AND MSVC)
+if(PHOTON_ENABLE_ASAN)
     function(_photon_apply_asan dir)
         get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
         foreach(_t IN LISTS _targets)
@@ -212,10 +225,18 @@ if(PHOTON_ENABLE_ASAN AND MSVC)
             if(_kind STREQUAL "INTERFACE_LIBRARY" OR _kind STREQUAL "UTILITY")
                 continue()
             endif()
-            # /RTC1 (Debug default) is incompatible with /fsanitize=address.
-            target_compile_options("${_t}" PRIVATE /fsanitize=address /RTC1-)
-            if(_kind STREQUAL "EXECUTABLE" OR _kind STREQUAL "SHARED_LIBRARY")
-                target_link_options("${_t}" PRIVATE /INCREMENTAL:NO)
+            if(MSVC)
+                # /RTC1 (Debug default) is incompatible with /fsanitize=address.
+                target_compile_options("${_t}" PRIVATE /fsanitize=address /RTC1-)
+                if(_kind STREQUAL "EXECUTABLE" OR _kind STREQUAL "SHARED_LIBRARY")
+                    target_link_options("${_t}" PRIVATE /INCREMENTAL:NO)
+                endif()
+            else()
+                target_compile_options("${_t}" PRIVATE
+                    -fsanitize=address,undefined -fno-omit-frame-pointer)
+                if(_kind STREQUAL "EXECUTABLE" OR _kind STREQUAL "SHARED_LIBRARY")
+                    target_link_options("${_t}" PRIVATE -fsanitize=address,undefined)
+                endif()
             endif()
         endforeach()
         get_property(_subs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)

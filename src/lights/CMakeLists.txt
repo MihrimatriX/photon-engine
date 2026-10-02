@@ -8,3 +8,5 @@ add_library(photon_lights STATIC
 target_link_libraries(photon_lights PUBLIC photon_core photon_geometry)
 target_include_directories(photon_lights PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_compile_features(photon_lights PUBLIC cxx_std_20)
+
+target_link_libraries(photon_lights PRIVATE photon_build_flags)

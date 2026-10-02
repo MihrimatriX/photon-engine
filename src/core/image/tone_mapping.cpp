@@ -55,17 +55,16 @@ Color3f toneMapFilmic(const Color3f& hdr) {
     );
 }
 
-Color3f toneMapExposure(const Color3f& hdr, float exposure) {
-    float scale = std::pow(2.0f, exposure);
+Color3f toneMapExposure(const Color3f& hdr, float exposureEV) {
+    float scale = std::exp2(exposureEV);
     return hdr * scale;
 }
 
-Color3f applyGamma(const Color3f& linear, float gamma) {
-    return linear.gammaCorrect(gamma);
-}
-
-Color3f toneMap(const Color3f& hdr, ToneMapOperator op, float exposure) {
-    Color3f exposed = toneMapExposure(hdr, exposure);
+Color3f toneMapLinear(const Color3f& hdr, ToneMapOperator op, float exposureEV) {
+    Color3f exposed = toneMapExposure(hdr, exposureEV);
+    // NaN fails every comparison, so max(0, NaN) style clamping is not enough.
+    auto sane = [](float v) { return finiteFloat(v) && v > 0.0f ? v : 0.0f; };
+    exposed = Color3f(sane(exposed.r), sane(exposed.g), sane(exposed.b));
     Color3f ldr;
     switch (op) {
         case ToneMapOperator::Reinhard:
@@ -81,7 +80,11 @@ Color3f toneMap(const Color3f& hdr, ToneMapOperator op, float exposure) {
             ldr = toneMapFilmic(exposed);
             break;
     }
-    return applyGamma(ldr, 2.2f);
+    return ldr.clamp(0.0f, 1.0f);
+}
+
+Color3f toneMap(const Color3f& hdr, ToneMapOperator op, float exposureEV) {
+    return toneMapLinear(hdr, op, exposureEV).linearToSRGB();
 }
 
 } // namespace photon

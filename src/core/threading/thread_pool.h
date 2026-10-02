@@ -43,8 +43,9 @@ auto ThreadPool::submit(F&& f, Args&&... args) -> std::future<std::invoke_result
     using ReturnType = std::invoke_result_t<F, Args...>;
 
     auto task = std::make_shared<std::packaged_task<ReturnType()>>(
-        std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-    );
+        [fn = std::forward<F>(f), ... bound = std::forward<Args>(args)]() mutable {
+            return std::invoke(fn, bound...);
+        });
 
     std::future<ReturnType> result = task->get_future();
     {

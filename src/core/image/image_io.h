@@ -2,6 +2,8 @@
 
 /// @file image_io.h
 /// @brief Image loading and saving utilities for PhotonEngine.
+///
+/// All paths are UTF-8. All images are top row first.
 
 #include "core/image/image.h"
 #include "core/image/tone_mapping.h"
@@ -10,22 +12,34 @@
 
 namespace photon {
 
-/// Save Image to PNG file (applies exposure, tone mapping and gamma correction)
-bool saveImagePNG(const Image& img, const std::string& path, ToneMapOperator tmo = ToneMapOperator::ACES, float exposure = 1.0f);
+/// How the 8-bit values of an LDR file map to numbers.
+enum class TextureEncoding {
+    SRGB,   ///< Color: base color, emission. Decoded with the sRGB EOTF.
+    Linear, ///< Data: normal, roughness, metalness, masks. Value / 255, no curve.
+};
 
-/// Save raw HDR Image to OpenEXR file
+/// Save a resolved image as 8-bit PNG: exposure (EV) -> tone map -> sRGB encode
+/// -> round to 8 bits. With @p dither, a deterministic ±1 LSB triangular dither
+/// is added before rounding to hide banding.
+bool saveImagePNG(const Image& img, const std::string& path,
+                  ToneMapOperator tmo = ToneMapOperator::ACES, float exposureEV = 0.0f,
+                  bool dither = true);
+
+/// Save scene-linear radiance as OpenEXR (half float RGB, ZIP compression).
 bool saveImageEXR(const Image& img, const std::string& path);
 
-/// Load HDR image (from Radiance .hdr format)
+/// Load a Radiance .hdr file. Fails for any non-HDR format.
 std::optional<Image> loadImageHDR(const std::string& path);
 
 /// Load EXR image (from OpenEXR .exr format)
 std::optional<Image> loadImageEXR(const std::string& path);
 
-/// Load LDR image (from PNG/JPG/TGA format, converts sRGB to linear automatically)
-std::optional<Image> loadImageLDR(const std::string& path);
+/// Load an 8-bit PNG/JPG/TGA/BMP file. Fails for .hdr (use loadImageHDR).
+std::optional<Image> loadImageLDR(const std::string& path,
+                                  TextureEncoding encoding = TextureEncoding::SRGB);
 
 /// Decode a PNG/JPG/TGA blob already in memory. Empty if stb cannot read it.
-std::optional<Image> loadImageLDRMemory(const unsigned char* bytes, int size);
+std::optional<Image> loadImageLDRMemory(const unsigned char* bytes, int size,
+                                        TextureEncoding encoding = TextureEncoding::SRGB);
 
 } // namespace photon

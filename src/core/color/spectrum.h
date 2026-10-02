@@ -3,6 +3,9 @@
 /// @file spectrum.h
 /// @brief RGB color spectrum class (Color3f) for the PhotonEngine.
 
+#include "core/color/transfer.h"
+#include "core/math/float_bits.h"
+
 #include <cmath>
 #include <algorithm>
 #include <ostream>
@@ -65,37 +68,28 @@ struct Color3f {
         return r == 0.0f && g == 0.0f && b == 0.0f;
     }
 
-    inline bool hasNaNs() const {
-        return std::isnan(r) || std::isnan(g) || std::isnan(b);
+    /// No NaN or Inf in any channel (bit test, safe under fast-math).
+    inline bool isFinite() const {
+        return finite3(r, g, b);
     }
 
+    /// Finite and non-negative: a radiance value the film will accept.
     inline bool isValid() const {
-        return !hasNaNs() && r >= 0.0f && g >= 0.0f && b >= 0.0f;
+        return isFinite() && r >= 0.0f && g >= 0.0f && b >= 0.0f;
     }
 
     inline Color3f cwiseExp() const {
         return {std::exp(r), std::exp(g), std::exp(b)};
     }
 
-    inline Color3f gammaCorrect(float gamma = 2.2f) const {
-        float invGamma = 1.0f / gamma;
-        return {std::pow(r, invGamma), std::pow(g, invGamma), std::pow(b, invGamma)};
-    }
-
+    /// Per-channel sRGB encode (OETF), see core/color/transfer.h.
     inline Color3f linearToSRGB() const {
-        auto toSRGB = [](float val) {
-            if (val <= 0.0031308f) return 12.92f * val;
-            return 1.055f * std::pow(val, 1.0f / 2.4f) - 0.055f;
-        };
-        return {toSRGB(r), toSRGB(g), toSRGB(b)};
+        return {srgbEncode(r), srgbEncode(g), srgbEncode(b)};
     }
 
+    /// Per-channel sRGB decode (EOTF), see core/color/transfer.h.
     inline Color3f sRGBToLinear() const {
-        auto toLinear = [](float val) {
-            if (val <= 0.04045f) return val / 12.92f;
-            return std::pow((val + 0.055f) / 1.055f, 2.4f);
-        };
-        return {toLinear(r), toLinear(g), toLinear(b)};
+        return {srgbDecode(r), srgbDecode(g), srgbDecode(b)};
     }
 
     // ── Static Factories ─────────────────────────────────────

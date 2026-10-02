@@ -13,15 +13,15 @@ Offline-friendly content for the desktop app. Paths are resolved relative to thi
 
 ## Sample models (`models/`)
 
-All meshes below are **procedurally generated in-repo** (no third-party downloads). Treat as public domain / CC0.
+All meshes below are **procedurally generated in-repo** (no third-party downloads) by `scripts/gen_sample_models.py`. Treat as public domain / CC0. Units are meters, Y is up.
 
 | File | Format | Notes |
 |------|--------|-------|
-| `cube.obj` | OBJ | Unit-ish product cube (1×1×1, sits on Y=0) |
-| `sphere.obj` | OBJ | UV sphere (r≈0.5) |
-| `product_stand.obj` | OBJ | Pedestal for product viz |
+| `cube.obj` | OBJ | Product cube, 1×1×1 m, sits on y = 0 |
+| `sphere.obj` | OBJ | UV sphere, r = 0.5 m, centred at the origin |
+| `product_stand.obj` | OBJ | Round pedestal, r = 0.6 m, top at y = 0.45 m |
 | `sample_box.gltf` | glTF 2.0 | Soft-white PBR box with embedded buffer |
-| `floor.obj` | OBJ | Large ground plane |
+| `floor.obj` | OBJ | Ground plane, 12×12 m at y = 0 |
 
 ## FBX
 

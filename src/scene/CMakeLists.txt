@@ -11,3 +11,5 @@ target_link_libraries(photon_scene PUBLIC
 
 target_include_directories(photon_scene PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_compile_features(photon_scene PUBLIC cxx_std_20)
+
+target_link_libraries(photon_scene PRIVATE photon_build_flags)

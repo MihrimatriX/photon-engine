@@ -213,9 +213,9 @@ float pdfLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingPa
 
 } // namespace
 
-std::shared_ptr<Image> DisneyMaterial::loadMap(const std::string& path) {
+std::shared_ptr<Image> DisneyMaterial::loadMap(const std::string& path, TextureEncoding encoding) {
     if (path.empty()) return nullptr;
-    if (auto ldr = loadImageLDR(path)) {
+    if (auto ldr = loadImageLDR(path, encoding)) {
         return std::make_shared<Image>(std::move(*ldr));
     }
     if (auto hdr = loadImageHDR(path)) {
@@ -229,22 +229,22 @@ std::shared_ptr<Image> DisneyMaterial::loadMap(const std::string& path) {
 
 void DisneyMaterial::setAlbedoMap(const std::string& p) {
     m_albedoMap = p;
-    m_albedoTex = loadMap(p);
+    m_albedoTex = loadMap(p, TextureEncoding::SRGB);
 }
 
 void DisneyMaterial::setNormalMap(const std::string& p) {
     m_normalMap = p;
-    m_normalTex = loadMap(p);
+    m_normalTex = loadMap(p, TextureEncoding::Linear);
 }
 
 void DisneyMaterial::setRoughnessMap(const std::string& p) {
     m_roughnessMap = p;
-    m_roughnessTex = loadMap(p);
+    m_roughnessTex = loadMap(p, TextureEncoding::Linear);
 }
 
 void DisneyMaterial::setMetalnessMap(const std::string& p) {
     m_metalnessMap = p;
-    m_metalnessTex = loadMap(p);
+    m_metalnessTex = loadMap(p, TextureEncoding::Linear);
 }
 
 DisneyMaterial::ShadingParams DisneyMaterial::resolve(const SurfaceInteraction& si) const {

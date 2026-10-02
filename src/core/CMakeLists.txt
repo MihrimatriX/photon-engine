@@ -6,6 +6,8 @@ add_library(photon_core STATIC)
 target_sources(photon_core PRIVATE
     math/vec.cpp
     math/transform.cpp
+    color/transfer.cpp
+    image/film.cpp
     image/image.cpp
     image/image_io.cpp
     image/tone_mapping.cpp
@@ -24,8 +26,10 @@ target_include_directories(photon_core
 target_compile_features(photon_core PUBLIC cxx_std_20)
 
 # Private include dirs for third-party header-only libraries
-target_include_directories(photon_core
+target_include_directories(photon_core SYSTEM
     PRIVATE
         ${stb_SOURCE_DIR}
         ${tinyexr_SOURCE_DIR}
 )
+
+target_link_libraries(photon_core PRIVATE photon_build_flags)

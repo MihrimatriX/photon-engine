@@ -8,6 +8,7 @@
 #include "preview/gl_preview.h"
 #include "engine/renderer.h"
 #include "engine/render_settings.h"
+#include "core/image/film.h"
 #include "core/image/image.h"
 #include "lights/light.h"
 #include "lights/environment_light.h"
@@ -60,16 +61,18 @@ struct AppState {
     Renderer renderer;
 
     ViewportTexture cpuTexture;
-    ViewportTexture gpuTexture;
     GLPreview glPreview;
     PickingPass picking;
     UndoStack undo;
 
-    Image accumImage;
+    Film accumFilm;              ///< Preview accumulator, written by the render thread.
+    Image displayImage;          ///< Last resolved (and maybe denoised) preview, UI thread only.
+                                 ///< The viewport shows it and Export saves it.
     std::atomic<int> currentSpp{0};
     std::atomic<bool> renderDirty{true};
     std::atomic<bool> shutdown{false};
-    std::atomic<bool> imageReady{false};
+    std::atomic<bool> imageReady{false};   ///< A new pass landed in accumFilm.
+    bool displayDirty = false;             ///< Re-upload displayImage (tone map / exposure changed).
     std::mutex imageMutex;
     std::thread renderThread;
 

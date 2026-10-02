@@ -2,6 +2,7 @@
 #include "cgltf.h"
 
 #include "io/gltf_loader.h"
+#include "core/math/float_bits.h"
 #include "materials/disney.h"
 #include "materials/lambertian.h"
 #include "core/image/image_io.h"
@@ -55,16 +56,6 @@ bool parentChainFinite(const cgltf_data* data, const cgltf_node* node) {
         p = p->parent;
     }
     return true;
-}
-
-bool finiteFloat(float x) {
-    uint32_t bits = 0;
-    std::memcpy(&bits, &x, sizeof(bits));
-    return (bits & 0x7f800000u) != 0x7f800000u;
-}
-
-bool finite3(float x, float y, float z) {
-    return finiteFloat(x) && finiteFloat(y) && finiteFloat(z);
 }
 
 uint64_t accessorElemBytes(const cgltf_accessor* acc) {

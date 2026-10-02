@@ -11,19 +11,22 @@ Nasıl okunur:
 
 ## Faz 0 — Zemin (2–3 gün)
 
-- [ ] **F0.1** Baz commit: 13 değişmiş ve 6 izlenmeyen dosya. **Kullanıcı onayı gerekli.** Commit dışında kalacaklara karar ver: `photon_ui.ini.bak`, `Testing/`, `app_stdout.txt`, `app_stderr.txt`. `[build-1]`
+- [x] **F0.1** Baz commit: 13 değişmiş ve 6 izlenmeyen dosya. **Kullanıcı onayı gerekli.** Commit dışında kalacaklara karar ver: `photon_ui.ini.bak`, `Testing/`, `app_stdout.txt`, `app_stderr.txt`. `[build-1]`
+  - 2026-10-02: baz commit `299f357`. Dört dosya sonra git'ten çıkarıldı ve `.gitignore`'a eklendi.
 - [ ] **F0.2** vcpkg'yi düzelt. `VCPKG_ROOT=C:\vcpkg` gösteriyor ama klasör yok.
   - A: VS 18'in kendi vcpkg'si (`C:\Program Files\Microsoft Visual Studio\18\Community\VC\vcpkg`). `VCPKG_ROOT`'u ona çevir.
   - B: `git clone https://github.com/microsoft/vcpkg C:\vcpkg` ve ardından `bootstrap-vcpkg.bat`.
   - Hangisi seçilirse seçilsin `build-vcpkg/` ve `build/release/` temizden yapılandırılır.
 - [ ] **F0.3** `. .\scripts\devshell.ps1`, ardından `cmake --preset release`, `cmake --build --preset release` ve `ctest --preset release`. Hepsi yeşil olmalı. `[build-3]`
-- [ ] **F0.4** Tek doğruluk kaynağını seç. Öneri: bu klasör çalışma listesi olur; `docs/ROADMAP.md` fazları özetleyen kısa bir belgeye iner, ticari maddeler eke taşınır, durum bölümü gerçeğe göre yazılır. `[build-15]` `[build-16]`
-- [ ] **F0.5** README, `docs/architecture.md` ve `docs/file-reference.md`'deki yanlış iddiaları düzelt: "unbiased", "work-stealing", Halton/Sobol, DirectLighting/AO integratörleri, `src/gpu`, `vcpkg install openimagedenoise`, "Metal" malzemesi. `[build-4]` `[build-5]`
-- [ ] **F0.6** `.gitignore`'a `!assets/models/*.obj`, `Testing/` ve `photon_ui.ini` ekle. `[build-14]` `[build-m1]` `[io-7]`
-- [ ] **F0.7** `PHOTON_BUILD_GPU=ON` var olmayan `src/gpu`'yu gösteriyor. Şimdilik ya kaldır ya da dizin varsa ekle. `[build-6]`
-- [ ] **F0.8** `memory-bank/` git'e commit edilecek mi, karar ver.
+  - 2026-10-02: `testPresets` eklendi. Linux'ta (GCC 13 ve Clang 18, `fetch-release` preset'i, `-Werror`) derleme ve testler yeşil. Windows/MSVC'de çalıştırılması bekliyor (F0.2'ye bağlı).
+- [x] **F0.4** Tek doğruluk kaynağını seç. Öneri: bu klasör çalışma listesi olur; `docs/ROADMAP.md` fazları özetleyen kısa bir belgeye iner, ticari maddeler eke taşınır, durum bölümü gerçeğe göre yazılır. `[build-15]` `[build-16]`
+- [x] **F0.5** README, `docs/architecture.md` ve `docs/file-reference.md`'deki yanlış iddiaları düzelt: "unbiased", "work-stealing", Halton/Sobol, DirectLighting/AO integratörleri, `src/gpu`, `vcpkg install openimagedenoise`, "Metal" malzemesi. `[build-4]` `[build-5]`
+- [x] **F0.6** `.gitignore`'a `!assets/models/*.obj`, `Testing/` ve `photon_ui.ini` ekle. `[build-14]` `[build-m1]` `[io-7]`
+- [x] **F0.7** `PHOTON_BUILD_GPU=ON` var olmayan `src/gpu`'yu gösteriyor. Şimdilik ya kaldır ya da dizin varsa ekle. `[build-6]`
+- [x] **F0.8** `memory-bank/` git'e commit edilecek mi, karar ver. Evet; `299f357` ile girdi.
 - [ ] **F0.9** Uyarılar: motor kütüphanelerinde `/W4 /WX`; üçüncü taraf kodu hariç tutulur. Bilinen iki uyarı çalışma ağacında zaten düzeltildi. `[build-11]`
-- [ ] **F0.10** FetchContent kullanılmayan üçüncü taraf hedeflerini de derliyor; `THIRD_PARTY.md`'deki miniz satırı yanlış. `[build-13]`
+  - 2026-10-02: `photon_build_flags` arayüz hedefi; üçüncü taraf include'ları `SYSTEM`. GCC/Clang'da `-Werror` varsayılan açık ve temiz. MSVC'de `PHOTON_WARNINGS_AS_ERRORS` varsayılanı **kapalı**: temiz bir `/W4` derlemesi görülünce açılacak.
+- [x] **F0.10** FetchContent kullanılmayan üçüncü taraf hedeflerini de derliyor; `THIRD_PARTY.md`'deki miniz satırı yanlış. `[build-13]`
 - **Öğrenme:** *Ray Tracing in One Weekend* 1. kitap (2–3 akşam) ve Scratchapixel'de kamera ışınları üretimi.
 
 ## Faz 1 — Çökme yok, görüntü doğru (2–3 hafta)

@@ -24,7 +24,6 @@ private:
 
     Vec3f m_u, m_v, m_w;
     float m_lensRadius;
-    float m_focusDistance;
 };
 
 } // namespace photon

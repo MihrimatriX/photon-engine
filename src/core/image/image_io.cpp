@@ -1,6 +1,9 @@
+// Narrow paths are UTF-8 on every platform; on Windows stb converts them to UTF-16.
+#define STBI_WINDOWS_UTF8
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+#define STBIW_WINDOWS_UTF8
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
@@ -10,7 +13,10 @@
 #include "tinyexr.h"
 
 #include "core/image/image_io.h"
+#include "core/color/transfer.h"
+#include "core/platform/path.h"
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <vector>
@@ -24,7 +30,7 @@ constexpr int kMaxImageDim = 16384;
 
 bool imageFileOk(const std::string& path) {
     std::error_code ec;
-    auto sz = std::filesystem::file_size(std::filesystem::path(path), ec);
+    auto sz = std::filesystem::file_size(pathFromUtf8(path), ec);
     return !ec && sz <= kMaxImageFileBytes;
 }
 
@@ -35,86 +41,69 @@ bool imageDimsOk(int w, int h) {
 } // namespace
 
 
-bool saveImagePNG(const Image& img, const std::string& path, ToneMapOperator tmo, float exposure) {
-    int w = img.width();
-    int h = img.height();
-    
-    std::vector<uint8_t> ldrData(w * h * 3);
-    
+bool saveImagePNG(const Image& img, const std::string& path, ToneMapOperator tmo, float exposureEV,
+                  bool dither) {
+    const int w = img.width();
+    const int h = img.height();
+    if (w <= 0 || h <= 0) return false;
+
+    std::vector<uint8_t> ldrData(static_cast<size_t>(w) * static_cast<size_t>(h) * 3);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            Color3f hdrColor = img.getPixel(x, y);
-            Color3f ldrColor = toneMap(hdrColor, tmo, exposure);
-            
-            int idx = (y * w + x) * 3;
-            ldrData[idx + 0] = static_cast<uint8_t>(std::clamp(ldrColor.r * 255.0f, 0.0f, 255.0f));
-            ldrData[idx + 1] = static_cast<uint8_t>(std::clamp(ldrColor.g * 255.0f, 0.0f, 255.0f));
-            ldrData[idx + 2] = static_cast<uint8_t>(std::clamp(ldrColor.b * 255.0f, 0.0f, 255.0f));
+            const Color3f display = toneMap(img.getPixel(x, y), tmo, exposureEV);
+            const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3;
+            for (int c = 0; c < 3; ++c) {
+                const float d = dither ? tpdfDither(x, y, c) : 0.0f;
+                ldrData[idx + static_cast<size_t>(c)] = quantizeUnorm8(display[c], d);
+            }
         }
     }
-    
-    int stride = w * 3;
-    int success = stbi_write_png(path.c_str(), w, h, 3, ldrData.data(), stride);
-    return success != 0;
+
+    // Image rows are top first, which is also PNG's order.
+    return stbi_write_png(path.c_str(), w, h, 3, ldrData.data(), w * 3) != 0;
 }
 
 bool saveImageEXR(const Image& img, const std::string& path) {
-    int w = img.width();
-    int h = img.height();
-    
-    // TinyEXR requires separate channels
-    std::vector<float> r(w * h);
-    std::vector<float> g(w * h);
-    std::vector<float> b(w * h);
-    
-    for (int i = 0; i < w * h; ++i) {
-        // Retrieve pixel from Image data buffer directly for performance
-        // Image data layout: RGBRGB...
-        r[i] = img.data()[i * 3 + 0];
-        g[i] = img.data()[i * 3 + 1];
-        b[i] = img.data()[i * 3 + 2];
+    const int w = img.width();
+    const int h = img.height();
+    if (w <= 0 || h <= 0) return false;
+    const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
+
+    // EXR stores planar channels; readers expect them sorted by name: B, G, R.
+    std::vector<float> r(n), g(n), b(n);
+    const float* px = img.data();
+    for (size_t i = 0; i < n; ++i) {
+        r[i] = px[i * 3 + 0];
+        g[i] = px[i * 3 + 1];
+        b[i] = px[i * 3 + 2];
     }
-    
+
     EXRHeader header;
     InitEXRHeader(&header);
-    
     EXRImage exrImage;
     InitEXRImage(&exrImage);
-    
+
+    float* planes[3] = {b.data(), g.data(), r.data()};
     exrImage.num_channels = 3;
-    
-    std::vector<float*> images(3);
-    images[0] = b.data(); // EXR expects BGR order often but channels specify names
-    images[1] = g.data();
-    images[2] = r.data();
-    exrImage.images = reinterpret_cast<unsigned char**>(images.data());
+    exrImage.images = reinterpret_cast<unsigned char**>(planes);
     exrImage.width = w;
     exrImage.height = h;
-    
+
+    EXRChannelInfo channels[3];
+    std::memset(channels, 0, sizeof(channels));
+    channels[0].name[0] = 'B';
+    channels[1].name[0] = 'G';
+    channels[2].name[0] = 'R';
     header.num_channels = 3;
-    EXRChannelInfo channelInfos[3];
-    header.channels = channelInfos;
-    
-    // Channel names must be B, G, R
-    strncpy(header.channels[0].name, "B", 255);
-    header.channels[0].name[255] = '\0';
-    strncpy(header.channels[1].name, "G", 255);
-    header.channels[1].name[255] = '\0';
-    strncpy(header.channels[2].name, "R", 255);
-    header.channels[2].name[255] = '\0';
-    
-    int pixelTypes[3];
-    int requestedPixelTypes[3];
-    pixelTypes[0] = TINYEXR_PIXELTYPE_FLOAT;
-    pixelTypes[1] = TINYEXR_PIXELTYPE_FLOAT;
-    pixelTypes[2] = TINYEXR_PIXELTYPE_FLOAT;
-    requestedPixelTypes[0] = TINYEXR_PIXELTYPE_FLOAT;
-    requestedPixelTypes[1] = TINYEXR_PIXELTYPE_FLOAT;
-    requestedPixelTypes[2] = TINYEXR_PIXELTYPE_FLOAT;
-    
+    header.channels = channels;
+
+    // Input is float; stored as half (ample for radiance, half the size).
+    int pixelTypes[3] = {TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT};
+    int storedTypes[3] = {TINYEXR_PIXELTYPE_HALF, TINYEXR_PIXELTYPE_HALF, TINYEXR_PIXELTYPE_HALF};
     header.pixel_types = pixelTypes;
-    header.requested_pixel_types = requestedPixelTypes;
-    
+    header.requested_pixel_types = storedTypes;
+    header.compression_type = TINYEXR_COMPRESSIONTYPE_ZIP;
+
     const char* err = nullptr;
     int ret = SaveEXRImageToFile(&exrImage, &header, path.c_str(), &err);
     if (ret != TINYEXR_SUCCESS) {
@@ -133,6 +122,11 @@ std::optional<Image> loadImageHDR(const std::string& path) {
     int w = 0, h = 0, channels = 0;
     if (!stbi_info(path.c_str(), &w, &h, &channels)) {
         std::cerr << "HDR Load Error: " << stbi_failure_reason() << " for path: " << path << std::endl;
+        return std::nullopt;
+    }
+    // stbi_loadf would also accept a PNG and decode it with a pow-2.2 guess.
+    if (!stbi_is_hdr(path.c_str())) {
+        std::cerr << "HDR Load Error: not a Radiance HDR file: " << path << std::endl;
         return std::nullopt;
     }
     if (!imageDimsOk(w, h)) {
@@ -218,24 +212,28 @@ std::optional<Image> loadImageEXR(const std::string& path) {
     return img;
 }
 
-std::optional<Image> imageFromRgb8(const uint8_t* data, int w, int h) {
+namespace {
+
+std::optional<Image> imageFromRgb8(const uint8_t* data, int w, int h, TextureEncoding encoding) {
     if (!data || !imageDimsOk(w, h)) return std::nullopt;
+    float lut[256];
+    for (int i = 0; i < 256; ++i) {
+        const float v = static_cast<float>(i) / 255.0f;
+        lut[i] = encoding == TextureEncoding::SRGB ? srgbDecode(v) : v;
+    }
     Image img(w, h);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            int idx = (y * w + x) * 3;
-            Color3f srgb(
-                data[idx + 0] / 255.0f,
-                data[idx + 1] / 255.0f,
-                data[idx + 2] / 255.0f
-            );
-            img.setPixel(x, y, srgb.sRGBToLinear());
+            const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3;
+            img.setPixel(x, y, Color3f(lut[data[idx + 0]], lut[data[idx + 1]], lut[data[idx + 2]]));
         }
     }
     return img;
 }
 
-std::optional<Image> loadImageLDR(const std::string& path) {
+} // namespace
+
+std::optional<Image> loadImageLDR(const std::string& path, TextureEncoding encoding) {
     if (!imageFileOk(path)) {
         std::cerr << "LDR Load Error: missing or oversized file: " << path << std::endl;
         return std::nullopt;
@@ -243,6 +241,11 @@ std::optional<Image> loadImageLDR(const std::string& path) {
     int w = 0, h = 0, channels = 0;
     if (!stbi_info(path.c_str(), &w, &h, &channels)) {
         std::cerr << "LDR Load Error: " << stbi_failure_reason() << " for path: " << path << std::endl;
+        return std::nullopt;
+    }
+    // stbi_load would clip an .hdr to 8 bits; HDR goes through loadImageHDR.
+    if (stbi_is_hdr(path.c_str())) {
+        std::cerr << "LDR Load Error: HDR file, use loadImageHDR: " << path << std::endl;
         return std::nullopt;
     }
     if (!imageDimsOk(w, h)) {
@@ -255,19 +258,20 @@ std::optional<Image> loadImageLDR(const std::string& path) {
         std::cerr << "LDR Load Error: " << stbi_failure_reason() << " for path: " << path << std::endl;
         return std::nullopt;
     }
-    auto img = imageFromRgb8(data, w, h);
+    auto img = imageFromRgb8(data, w, h, encoding);
     stbi_image_free(data);
     return img;
 }
 
-std::optional<Image> loadImageLDRMemory(const unsigned char* bytes, int size) {
+std::optional<Image> loadImageLDRMemory(const unsigned char* bytes, int size, TextureEncoding encoding) {
     if (!bytes || size <= 0) return std::nullopt;
     if (static_cast<uint64_t>(size) > kMaxImageFileBytes) return std::nullopt;
     int w = 0, h = 0, channels = 0;
     if (!stbi_info_from_memory(bytes, size, &w, &h, &channels) || !imageDimsOk(w, h)) return std::nullopt;
+    if (stbi_is_hdr_from_memory(bytes, size)) return std::nullopt;
     uint8_t* data = stbi_load_from_memory(bytes, size, &w, &h, &channels, 3);
     if (!data) return std::nullopt;
-    auto img = imageFromRgb8(data, w, h);
+    auto img = imageFromRgb8(data, w, h, encoding);
     stbi_image_free(data);
     return img;
 }

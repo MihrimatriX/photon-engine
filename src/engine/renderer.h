@@ -6,6 +6,7 @@
 #include "engine/scene.h"
 #include "engine/render_settings.h"
 #include "camera/camera.h"
+#include "core/image/film.h"
 #include "core/image/image.h"
 #include <cstdint>
 #include <functional>
@@ -23,26 +24,22 @@ class Renderer {
 public:
     Renderer() = default;
 
-    /// @brief Synchronously render the scene.
-    ///
-    /// @param scene The 3D scene.
-    /// @param camera The camera viewing the scene.
-    /// @param settings Config settings.
-    /// @return Rendered HDR image.
+    /// @brief Synchronously render the scene, all samples of a tile at a time.
+    /// @return The resolved (averaged) HDR image, denoised when settings ask for it.
     Image render(const Scene& scene, const Camera& camera, const RenderSettings& settings);
 
-    /// @brief Progressively render the scene, calling a callback function periodically.
+    /// @brief Render one sample per pixel per pass until samplesPerPixel is reached.
     ///
-    /// @param scene The 3D scene.
-    /// @param camera The camera.
-    /// @param settings Config settings.
-    /// @param callback Callback invoked after each sample pass per pixel, receives (image, currentSPP).
-    void renderProgressive(const Scene& scene, const Camera& camera, const RenderSettings& settings,
-                           std::function<void(const Image&, int)> callback);
+    /// @param onPass Called after every pass with the film and the samples per
+    ///               pixel so far. Return false to stop early (cancel).
+    /// @return The resolved image of the last completed pass, denoised when
+    ///         settings ask for it and the render was not cancelled.
+    Image renderProgressive(const Scene& scene, const Camera& camera, const RenderSettings& settings,
+                            const std::function<bool(const Film&, int)>& onPass);
 
-    /// @brief Render a single sample pass into an existing accumulation buffer.
+    /// @brief Render a single sample pass into an existing film.
     void renderSamplePass(const Scene& scene, const Camera& camera, const RenderSettings& settings,
-                          Image& accum, int passIndex);
+                          Film& accum, int passIndex);
 };
 
 } // namespace photon

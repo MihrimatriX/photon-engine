@@ -23,6 +23,11 @@ ThreadPool* makePoolOverride(const RenderSettings& settings, std::unique_ptr<Thr
     return owned.get();
 }
 
+// Raster (x, y) has y = 0 at the TOP; camera screen space has v = 0 at the bottom.
+Vec2f rasterToScreen(float x, float y, int width, int height) {
+    return Vec2f(x / static_cast<float>(width), 1.0f - y / static_cast<float>(height));
+}
+
 Color3f samplePixel(const Scene& scene, const Camera& camera, PathTracer& integrator,
                     Sampler& sampler, int x, int y, int sampleIndex,
                     int width, int height) {
@@ -30,8 +35,10 @@ Color3f samplePixel(const Scene& scene, const Camera& camera, PathTracer& integr
     sampler.startSample(sampleIndex);
 
     Vec2f jitter = sampler.get2D();
-    float u = (static_cast<float>(x) + jitter.x) / static_cast<float>(width);
-    float v = (static_cast<float>(y) + jitter.y) / static_cast<float>(height);
+    Vec2f screen = rasterToScreen(static_cast<float>(x) + jitter.x, static_cast<float>(y) + jitter.y,
+                                  width, height);
+    const float u = screen.x;
+    const float v = screen.y;
     Vec2f lensSample = sampler.get2D();
     Ray ray = camera.generateRay(u, v, lensSample);
     return integrator.Li(ray, scene, sampler);
@@ -72,17 +79,16 @@ void fillPrimaryAovs(const Scene& scene, const Camera& camera, int w, int h,
     parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
         for (int y = yBegin; y < yEnd; ++y) {
             for (int x = xBegin; x < xEnd; ++x) {
-                float u = (static_cast<float>(x) + 0.5f) / static_cast<float>(w);
-                float v = (static_cast<float>(y) + 0.5f) / static_cast<float>(h);
-                Ray ray = camera.generateRay(u, v, Vec2f(0.5f, 0.5f));
+                Vec2f screen = rasterToScreen(static_cast<float>(x) + 0.5f, static_cast<float>(y) + 0.5f, w, h);
+                Ray ray = camera.generateRay(screen.x, screen.y, Vec2f(0.5f, 0.5f));
                 SurfaceInteraction isect;
                 if (scene.intersect(ray, isect)) {
-                    albedo.addSample(x, y, primaryAlbedo(isect));
+                    albedo.setPixel(x, y, primaryAlbedo(isect));
                     Vec3f n = isect.normal;
-                    normal.addSample(x, y, Color3f(n.x, n.y, n.z));
+                    normal.setPixel(x, y, Color3f(n.x, n.y, n.z));
                 } else {
-                    albedo.addSample(x, y, Color3f::black());
-                    normal.addSample(x, y, Color3f(0.0f, 0.0f, 1.0f));
+                    albedo.setPixel(x, y, Color3f::black());
+                    normal.setPixel(x, y, Color3f(0.0f, 0.0f, 1.0f));
                 }
             }
         }
@@ -98,7 +104,7 @@ std::unique_ptr<Sampler> createRenderSampler(int samplesPerPixel, uint64_t seed)
 }
 
 Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSettings& settings) {
-    Image img(settings.width, settings.height);
+    Film film(settings.width, settings.height);
 
     auto startTime = std::chrono::high_resolution_clock::now();
     std::cout << "Starting render: " << settings.width << "x" << settings.height
@@ -122,7 +128,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
             for (int y = yBegin; y < yEnd; ++y) {
                 for (int x = xBegin; x < xEnd; ++x) {
                     for (int s = 0; s < spp; ++s) {
-                        img.addSample(x, y, samplePixel(scene, camera, integrator, *tileSampler, x, y, s, w, h));
+                        film.addSample(x, y, samplePixel(scene, camera, integrator, *tileSampler, x, y, s, w, h));
                     }
                 }
             }
@@ -145,7 +151,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
                     const size_t flat = static_cast<size_t>(y) * w + x;
                     for (int s = 0; s < baseSpp; ++s) {
                         Color3f Li = samplePixel(scene, camera, integrator, *tileSampler, x, y, s, w, h);
-                        img.addSample(x, y, Li);
+                        film.addSample(x, y, Li);
                         float L = luminance(Li);
                         sumL[flat] += L;
                         sumL2[flat] += L * L;
@@ -186,7 +192,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
                         for (int s = 0; s < extras; ++s) {
                             Color3f Li = samplePixel(scene, camera, integrator, *tileSampler,
                                                     x, y, baseSpp + s, w, h);
-                            img.addSample(x, y, Li);
+                            film.addSample(x, y, Li);
                         }
                     }
                 }
@@ -194,13 +200,17 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
         }
     }
 
+    Image out = film.resolve();
+    if (film.rejectedSamples() > 0) {
+        std::cerr << "Rejected " << film.rejectedSamples() << " non-finite or negative samples." << std::endl;
+    }
     if (settings.denoiseEnabled) {
         if (denoiseAvailable()) {
             Image albedo, normal;
             fillPrimaryAovs(scene, camera, w, h, albedo, normal);
-            denoiseImage(img, &albedo, &normal);
+            denoiseImage(out, &albedo, &normal);
         } else {
-            denoiseImage(img);
+            denoiseImage(out);
         }
     }
 
@@ -208,36 +218,37 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
     std::chrono::duration<double> elapsed = endTime - startTime;
     std::cout << "Render finished in " << elapsed.count() << " seconds." << std::endl;
 
-    return img;
+    return out;
 }
 
-void Renderer::renderProgressive(const Scene& scene, const Camera& camera, const RenderSettings& settings,
-                                 std::function<void(const Image&, int)> callback) {
-    Image img(settings.width, settings.height);
+Image Renderer::renderProgressive(const Scene& scene, const Camera& camera, const RenderSettings& settings,
+                                  const std::function<bool(const Film&, int)>& onPass) {
+    Film film(settings.width, settings.height);
 
+    bool cancelled = false;
     for (int s = 0; s < settings.samplesPerPixel; ++s) {
-        renderSamplePass(scene, camera, settings, img, s);
-        if (callback) {
-            callback(img, s + 1);
+        renderSamplePass(scene, camera, settings, film, s);
+        if (onPass && !onPass(film, s + 1)) {
+            cancelled = true;
+            break;
         }
     }
 
-    if (settings.denoiseEnabled) {
+    Image out = film.resolve();
+    if (settings.denoiseEnabled && !cancelled) {
         if (denoiseAvailable()) {
             Image albedo, normal;
             fillPrimaryAovs(scene, camera, settings.width, settings.height, albedo, normal);
-            denoiseImage(img, &albedo, &normal);
+            denoiseImage(out, &albedo, &normal);
         } else {
-            denoiseImage(img);
-        }
-        if (callback) {
-            callback(img, settings.samplesPerPixel);
+            denoiseImage(out);
         }
     }
+    return out;
 }
 
 void Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const RenderSettings& settings,
-                                Image& accum, int passIndex) {
+                                Film& accum, int passIndex) {
     if (accum.width() != settings.width || accum.height() != settings.height) {
         accum.resize(settings.width, settings.height);
     }
@@ -258,7 +269,7 @@ void Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
         skipMask.assign(static_cast<size_t>(w) * static_cast<size_t>(h), 0);
         for (int y = 0; y < h; ++y) {
             for (int x = 0; x < w; ++x) {
-                Color3f c = accum.getAveragedPixel(x, y);
+                Color3f c = accum.resolvedPixel(x, y);
                 float L = luminance(c);
                 float neighbor = 0.0f;
                 int n = 0;
@@ -266,7 +277,7 @@ void Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
                     for (int dx = -1; dx <= 1; ++dx) {
                         int nx = x + dx, ny = y + dy;
                         if (nx < 0 || ny < 0 || nx >= w || ny >= h || (dx == 0 && dy == 0)) continue;
-                        neighbor += luminance(accum.getAveragedPixel(nx, ny));
+                        neighbor += luminance(accum.resolvedPixel(nx, ny));
                         ++n;
                     }
                 }

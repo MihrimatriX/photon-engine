@@ -16,3 +16,5 @@ endif()
 
 target_include_directories(photon_preview PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_compile_features(photon_preview PUBLIC cxx_std_20)
+
+target_link_libraries(photon_preview PRIVATE photon_build_flags)

@@ -30,3 +30,5 @@ add_custom_command(TARGET photon_app POST_BUILD
         ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:photon_app>/assets
     COMMENT "Copying assets to output directory"
 )
+
+target_link_libraries(photon_app PRIVATE photon_build_flags)

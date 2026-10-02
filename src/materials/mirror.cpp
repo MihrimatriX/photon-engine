@@ -3,7 +3,7 @@
 
 namespace photon {
 
-bool Mirror::sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& sample,
+bool Mirror::sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& /*sample*/,
                     Vec3f& wi, Color3f& brdf, float& pdf) const {
     Frame frame(si.normal);
     Vec3f woLocal = frame.toLocal(wo);
@@ -26,12 +26,12 @@ bool Mirror::sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& 
     return true;
 }
 
-Color3f Mirror::eval(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {
+Color3f Mirror::eval(const Vec3f& /*wo*/, const Vec3f& /*wi*/, const SurfaceInteraction& /*si*/) const {
     // Probability of matching the perfect reflection angle is zero
     return Color3f::black();
 }
 
-float Mirror::pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {
+float Mirror::pdf(const Vec3f& /*wo*/, const Vec3f& /*wi*/, const SurfaceInteraction& /*si*/) const {
     return 0.0f;
 }
 

@@ -9,6 +9,9 @@
 
 namespace photon {
 
+/// Plain float RGB image: textures, environment maps, resolved renders, AOVs.
+/// Rows are stored top to bottom: (0, 0) is the top-left pixel.
+/// Sample accumulation lives in Film (core/image/film.h).
 class Image {
 public:
     Image() = default;
@@ -23,11 +26,6 @@ public:
     /// Bilinear sample with wrap UV in [0,1]. Uses raw pixel values (not accumulation averages).
     Color3f sampleBilinear(float u, float v) const;
 
-    // Sample accumulation (tile renderer writes disjoint pixels per pass)
-    void addSample(int x, int y, const Color3f& color);
-    Color3f getAveragedPixel(int x, int y) const;
-    int getSampleCount(int x, int y) const;
-
     int width() const { return m_width; }
     int height() const { return m_height; }
     const float* data() const { return m_data.data(); }
@@ -38,14 +36,10 @@ private:
     int m_width = 0;
     int m_height = 0;
     std::vector<float> m_data;   // w * h * 3 (RGB)
-    std::vector<int> m_sampleCounts;
 
     size_t pixelIndex(int x, int y) const {
         assert(x >= 0 && x < m_width && y >= 0 && y < m_height);
         return (static_cast<size_t>(y) * m_width + x) * 3;
-    }
-    size_t flatIndex(int x, int y) const {
-        return static_cast<size_t>(y) * m_width + x;
     }
 };
 
