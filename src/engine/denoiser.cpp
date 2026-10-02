@@ -22,11 +22,10 @@ bool softBlurDenoise(Image& color) {
     std::vector<Color3f> src(static_cast<size_t>(w) * h);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            src[static_cast<size_t>(y) * w + x] = color.getAveragedPixel(x, y);
+            src[static_cast<size_t>(y) * w + x] = color.getPixel(x, y);
         }
     }
 
-    color.clear();
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             Color3f sum(0.0f);
@@ -43,7 +42,7 @@ bool softBlurDenoise(Image& color) {
                     wsum += weight;
                 }
             }
-            color.addSample(x, y, sum / std::max(wsum, 1e-6f));
+            color.setPixel(x, y, sum / std::max(wsum, 1e-6f));
         }
     }
     return true;
@@ -78,7 +77,7 @@ bool denoiseImage(Image& color, const Image* albedo, const Image* normal) {
     std::vector<float> beauty(static_cast<size_t>(w) * h * 3);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            Color3f c = color.getAveragedPixel(x, y);
+            Color3f c = color.getPixel(x, y);
             const size_t i = (static_cast<size_t>(y) * w + x) * 3;
             beauty[i + 0] = c.r;
             beauty[i + 1] = c.g;
@@ -99,7 +98,7 @@ bool denoiseImage(Image& color, const Image* albedo, const Image* normal) {
             albedoBuf.resize(beauty.size());
             for (int y = 0; y < h; ++y) {
                 for (int x = 0; x < w; ++x) {
-                    Color3f c = albedo->getAveragedPixel(x, y);
+                    Color3f c = albedo->getPixel(x, y);
                     const size_t i = (static_cast<size_t>(y) * w + x) * 3;
                     albedoBuf[i + 0] = c.r;
                     albedoBuf[i + 1] = c.g;
@@ -112,7 +111,7 @@ bool denoiseImage(Image& color, const Image* albedo, const Image* normal) {
             normalBuf.resize(beauty.size());
             for (int y = 0; y < h; ++y) {
                 for (int x = 0; x < w; ++x) {
-                    Color3f c = normal->getAveragedPixel(x, y);
+                    Color3f c = normal->getPixel(x, y);
                     const size_t i = (static_cast<size_t>(y) * w + x) * 3;
                     normalBuf[i + 0] = c.r;
                     normalBuf[i + 1] = c.g;
@@ -133,11 +132,10 @@ bool denoiseImage(Image& color, const Image* albedo, const Image* normal) {
             return softBlurDenoise(color);
         }
 
-        color.clear();
         for (int y = 0; y < h; ++y) {
             for (int x = 0; x < w; ++x) {
                 const size_t i = (static_cast<size_t>(y) * w + x) * 3;
-                color.addSample(x, y, Color3f(beauty[i], beauty[i + 1], beauty[i + 2]));
+                color.setPixel(x, y, Color3f(beauty[i], beauty[i + 1], beauty[i + 2]));
             }
         }
         return true;

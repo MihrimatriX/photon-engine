@@ -56,6 +56,11 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
 - **2026-10-02:**
   - 22 ajanlı tarama bitti ve plan onaylandı. Bu memory bank yazıldı.
   - **Henüz hiçbir kod değişikliği yapılmadı.**
+- **2026-10-02 (oturum 2, bulut):**
+  - Faz 0 bitti ve push edildi (`4a97845`). F0.2/F0.3 Windows'ta doğrulanacak; MSVC `/WX` varsayılanı kapalı (F0.9).
+  - Faz 1b **yarım (WIP commit, derlenmiyor)**. Yapılanlar: `core/math/float_bits.h`, `core/color/transfer.{h,cpp}` (sRGB; `srgbEncode` TODO(human), şimdilik gamma 2.2), `core/image/film.{h,cpp}` (toplam+sayı, NaN/negatif reddi), `core/platform/path.h` (UTF-8 yollar), `Image` artık yalnız düz RGB, `image_io` (ortalama + dither'lı PNG, half+ZIP EXR, `TextureEncoding` sRGB/Linear, LDR/HDR biçim kontrolü, STBI UTF-8), tone mapping (EV varsayılanı 0, sRGB encode), denoiser ve renderer `Film`'e geçti (y=0 üstte, `renderProgressive` iptal edilebilir ve `Image` döner), OBJ'de V çevrildi, Disney veri haritaları doğrusal, viewport_texture sadeleşti.
+  - **Kalan (derlemeyi tamamlamak için):** `application.{h,cpp}`: `accumImage` → `Film accumFilm` + `Image displayImage` + `displayDirty`; render thread `accumFilm.resize`; UI upload'ta kilit altında `resolve()`, denoise ve upload kilit dışında; export `displayImage`'ı yazar; tam render `renderProgressive` dönüş değerini kaydeder; ton eşleme/pozlama `markDirty` yerine `displayDirty`; CPU dokusu UV (0,0)-(1,1), GL önizleme (0,1)-(1,0); `gpuTexture` silinir. `tests/test_product.cpp` Denoise testleri `Image`/`Film`'e göre güncellenir. Ardından yeni testler: `test_export_roundtrip`, `test_texture_colorspace`; `tests/learning/test_srgb_oetf.cpp` ayrı `photon_learning_tests` hedefinde, ctest etiketi `todo_human`.
+  - Sonra Faz 1c (cam: `refractVec` gövdesi TODO(human) olarak kalır, kırmızı `test_snell` learning hedefine), 1d ve 1a.
 - **Sıradaki adımlar:**
   - `F0.1` baz commit. Onay gerekiyor: 13 değişmiş ve 6 izlenmeyen dosya var.
   - `F0.2` vcpkg seçimi: VS'in kendi vcpkg'si mi, yoksa `C:\vcpkg`'ye yeniden kurulum mu.

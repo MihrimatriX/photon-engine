@@ -6,6 +6,8 @@ add_library(photon_core STATIC)
 target_sources(photon_core PRIVATE
     math/vec.cpp
     math/transform.cpp
+    color/transfer.cpp
+    image/film.cpp
     image/image.cpp
     image/image_io.cpp
     image/tone_mapping.cpp

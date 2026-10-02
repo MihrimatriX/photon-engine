@@ -2,6 +2,7 @@
 #include "tiny_obj_loader.h"
 
 #include "io/obj_loader.h"
+#include "core/math/float_bits.h"
 #include "materials/lambertian.h"
 #include <cctype>
 #include <cstdint>
@@ -59,17 +60,6 @@ bool indexElemOk(int index, size_t cap, int comps, size_t srcSize) {
     if (i >= cap) return false;
     size_t base = i * static_cast<size_t>(comps);
     return base + static_cast<size_t>(comps) <= srcSize;
-}
-
-bool finiteFloat(float x) {
-    // Bit test so /fp:fast cannot fold NaN/Inf away.
-    uint32_t bits = 0;
-    std::memcpy(&bits, &x, sizeof(bits));
-    return (bits & 0x7f800000u) != 0x7f800000u;
-}
-
-bool finite3(float x, float y, float z) {
-    return finiteFloat(x) && finiteFloat(y) && finiteFloat(z);
 }
 
 } // namespace
@@ -177,7 +167,8 @@ ObjLoadResult ObjLoader::load(const std::string& path, const Material* defaultMa
                     float u = attrib.texcoords[2 * ti + 0];
                     float v = attrib.texcoords[2 * ti + 1];
                     if (!finiteFloat(u) || !finiteFloat(v)) return false;
-                    bucket.uvs.push_back(Vec2f(u, v));
+                    // OBJ puts v = 0 at the bottom of the image; Image rows start at the top.
+                    bucket.uvs.push_back(Vec2f(u, 1.0f - v));
                 }
                 bucket.indices.push_back(static_cast<uint32_t>(bucket.indices.size()));
                 return true;

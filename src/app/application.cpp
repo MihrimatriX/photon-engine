@@ -596,8 +596,7 @@ void Application::startRenderThread() {
                 const int th = std::max(64, static_cast<int>(vh * scale));
                 m_state.settings.width = tw;
                 m_state.settings.height = th;
-                m_state.accumImage.resize(tw, th);
-                m_state.accumImage.clear();
+                m_state.accumFilm.resize(tw, th);
                 m_state.currentSpp = 0;
                 m_state.renderDirty = false;
             }
@@ -612,7 +611,7 @@ void Application::startRenderThread() {
                     cam = makeCamera(aspect);
                     // Hold scene lock for the pass so rebuildScene can't free BVH under us.
                     m_state.renderer.renderSamplePass(m_state.flatScene, *cam, rs,
-                                                      m_state.accumImage, spp);
+                                                      m_state.accumFilm, spp);
                     m_state.currentSpp = spp + 1;
                     m_state.imageReady = true;
                 }
@@ -1089,10 +1088,20 @@ void Application::exportImage(bool exr) {
         {"Tum Dosyalar", "*.*"},
     };
     if (!showFileDialog(path, FileDialogMode::Save, exr ? "EXR Kaydet" : "PNG Kaydet", filters, 1)) return;
-    std::lock_guard<std::mutex> lock(m_state.imageMutex);
-    if (exr) saveImageEXR(m_state.accumImage, path);
-    else saveImagePNG(m_state.accumImage, path, m_state.settings.tmo, m_state.settings.exposure);
+    // Save exactly what the viewport shows: the same resolved, maybe denoised, image.
+    const Image& shown = m_state.displayImage;
+    if (shown.width() <= 0) {
+        setStatus("Kaydedilecek goruntu yok");
+        return;
+    }
+    const bool ok = exr ? saveImageEXR(shown, path)
+                        : saveImagePNG(shown, path, m_state.settings.tmo, m_state.settings.exposure);
+    if (!ok) {
+        setStatus("Kaydedilemedi: " + path);
+        return;
+    }
     if (!exr) m_state.exportPath = path;
+    setStatus("Kaydedildi: " + path);
 }
 
 void Application::startFullRender() {
@@ -1128,10 +1137,9 @@ void Application::startFullRender() {
                 cam = makeCamera(aspect);
             }
 
-            Image img(rs.width, rs.height);
-            m_state.renderer.renderProgressive(scene, *cam, rs, [&](const Image& partial, int spp) {
+            Image img = m_state.renderer.renderProgressive(scene, *cam, rs, [&](const Film&, int spp) {
                 m_state.fullRender.currentSpp = spp;
-                img = partial;
+                return !m_state.shutdown.load();
             });
 
             // renderProgressive already denoises when enabled; note stub vs real OIDN in status.
@@ -1771,11 +1779,13 @@ void Application::drawRenderPanel() {
 
     if (ImGui::CollapsingHeader("Tonlama")) {
         int tmo = static_cast<int>(m_state.settings.tmo);
+        // Display-only: re-tone-map the converged image, keep the samples.
         if (ImGui::Combo("Operator", &tmo, "Reinhard\0Reinhard Extended\0ACES\0Filmic\0")) {
             m_state.settings.tmo = static_cast<ToneMapOperator>(tmo);
-            markDirty();
+            m_state.displayDirty = true;
         }
-        if (ImGui::SliderFloat("Pozlama (EV)", &m_state.settings.exposure, -3.0f, 3.0f)) markDirty();
+        if (ImGui::SliderFloat("Pozlama (EV)", &m_state.settings.exposure, -3.0f, 3.0f))
+            m_state.displayDirty = true;
     }
 
     if (m_state.advancedMode && ImGui::CollapsingHeader("Gelismis")) {
@@ -1905,12 +1915,14 @@ void Application::drawViewportPanel() {
     }
 
     ImVec2 imageSize(static_cast<float>(w), static_cast<float>(h));
-    ImVec2 uv0(0, 1), uv1(1, 0);
+    // The CPU texture is top row first; the GL preview FBO is bottom row first.
+    const ImVec2 cpuUv0(0, 0), cpuUv1(1, 1);
+    const ImVec2 glUv0(0, 1), glUv1(1, 0);
 
     // CPU progressive as base (always under GPU when blending)
     if (m_state.cpuTexture.textureId() && spp > 0) {
         ImGui::Image((ImTextureID)(intptr_t)m_state.cpuTexture.textureId(),
-                     imageSize, uv0, uv1);
+                     imageSize, cpuUv0, cpuUv1);
     } else {
         // Empty placeholder until first CPU sample (or when GPU-only)
         ImGui::Dummy(imageSize);
@@ -1920,7 +1932,7 @@ void Application::drawViewportPanel() {
         ImVec2 rmin = ImGui::GetItemRectMin();
         ImGui::SetCursorScreenPos(rmin);
         ImGui::Image((ImTextureID)(intptr_t)m_state.glPreview.colorTexture(),
-                     imageSize, uv0, uv1,
+                     imageSize, glUv0, glUv1,
                      ImVec4(1, 1, 1, gpuAlpha), ImVec4(0, 0, 0, 0));
     }
 
@@ -2136,15 +2148,22 @@ int Application::run() {
         }
         processPendingDrops();
         if (m_state.imageReady.exchange(false)) {
-            std::lock_guard<std::mutex> lock(m_state.imageMutex);
-            const int spp = m_state.currentSpp.load();
-            if (m_state.settings.denoiseEnabled && spp > 0 &&
-                spp >= m_state.settings.samplesPerPixel) {
-                Image shown = denoiseCopy(m_state.accumImage);
-                m_state.cpuTexture.upload(shown, m_state.settings.tmo, m_state.settings.exposure);
-            } else {
-                m_state.cpuTexture.upload(m_state.accumImage, m_state.settings.tmo, m_state.settings.exposure);
+            Image resolved;
+            int spp = 0;
+            {
+                std::lock_guard<std::mutex> lock(m_state.imageMutex);
+                resolved = m_state.accumFilm.resolve();
+                spp = m_state.currentSpp.load();
             }
+            if (m_state.settings.denoiseEnabled && spp > 0 && spp >= m_state.settings.samplesPerPixel)
+                denoiseImage(resolved);
+            m_state.displayImage = std::move(resolved);
+            m_state.displayDirty = true;
+        }
+        if (m_state.displayDirty) {
+            m_state.displayDirty = false;
+            if (m_state.displayImage.width() > 0)
+                m_state.cpuTexture.upload(m_state.displayImage, m_state.settings.tmo, m_state.settings.exposure);
         }
         handleShortcuts();
 

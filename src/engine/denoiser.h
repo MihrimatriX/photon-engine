@@ -7,13 +7,13 @@
 
 namespace photon {
 
-/// Denoise an HDR color buffer in-place.
-/// Uses Intel OIDN when linked (PHOTON_ENABLE_OIDN). Otherwise applies a
-/// cheap firefly-suppressing blur so "Denoise" still does something for full-res.
+/// Denoise a resolved (averaged) HDR image in place.
+/// Uses Intel OIDN when linked (PHOTON_ENABLE_OIDN). Otherwise applies a 3x3
+/// luminance-weighted blur: it softens fireflies but is not a denoiser.
 /// Optional albedo/normal AOVs improve OIDN quality when provided (same resolution).
 bool denoiseImage(Image& color, const Image* albedo = nullptr, const Image* normal = nullptr);
 
-/// Denoise a copy. The source image and its sample counts are left alone.
+/// Denoise a copy; the source is left alone.
 Image denoiseCopy(const Image& color);
 
 /// True when this build was compiled with a linked OIDN SDK.

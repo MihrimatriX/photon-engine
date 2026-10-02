@@ -5,6 +5,7 @@
 
 #include "materials/material.h"
 #include "core/image/image.h"
+#include "core/image/image_io.h"
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -80,7 +81,7 @@ public:
     ShadingParams resolve(const SurfaceInteraction& si) const;
 
 private:
-    static std::shared_ptr<Image> loadMap(const std::string& path);
+    static std::shared_ptr<Image> loadMap(const std::string& path, TextureEncoding encoding);
 
     Color3f m_baseColor;
     float m_metallic;
