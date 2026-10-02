@@ -28,6 +28,7 @@
 #include <sstream>
 #include <cstdlib>
 #include <cctype>
+#include <cstdio>
 #include <functional>
 #include <stdexcept>
 #include <cstdio>
@@ -480,8 +481,10 @@ void Application::loadCornellScene() {
     m_state.orbitCam.target[1] = 273.0f;
     m_state.orbitCam.target[2] = 277.5f;
     m_state.orbitCam.fov = 40.0f;
-    m_state.orbitCam.theta = 0.0f;
-    m_state.orbitCam.phi = 0.0f;
+    // theta=0 puts the eye on +Y, parallel to world up, so lookAt/camera basis
+    // collapses and every ray misses the open face. Sit outside z=0 looking in.
+    m_state.orbitCam.theta = 1.5708f;
+    m_state.orbitCam.phi = -1.5708f;
     rebuildScene();
     setStatus("Cornell Box yuklendi");
 }
@@ -969,7 +972,7 @@ void Application::setupDocking() {
         ImGui::DockBuilderDockWindow("Durum", bottom);
         ImGui::DockBuilderFinish(dockId);
     }
-    ImGui::DockSpace(dockId, ImVec2(0, 0), ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::DockSpace(dockId, ImVec2(0, 0), ImGuiDockNodeFlags_None);
     if (ImGui::BeginMenuBar()) {
         drawMenubar();
         ImGui::EndMenuBar();
@@ -1861,6 +1864,19 @@ void Application::drawViewportPanel() {
 
     const int spp = m_state.currentSpp.load();
     const float aspect = static_cast<float>(w) / static_cast<float>(h);
+    {
+        static int once = 0;
+        if (once < 4) {
+            ++once;
+            ImGuiWindow* win = ImGui::GetCurrentWindow();
+            std::fprintf(stderr,
+                         "vp skip=%d pos=%.0f,%.0f size=%.0f,%.0f clip=%.0f,%.0f-%.0f,%.0f content=%d,%d spp=%d\n",
+                         win->SkipItems ? 1 : 0, win->Pos.x, win->Pos.y, win->Size.x, win->Size.y,
+                         win->ClipRect.Min.x, win->ClipRect.Min.y, win->ClipRect.Max.x, win->ClipRect.Max.y,
+                         w, h, spp);
+            std::fflush(stderr);
+        }
+    }
 
     // Dual-layer: GPU instant preview fades out as CPU SPP accumulates (fast mode).
     float gpuAlpha = 0.0f;
@@ -2007,6 +2023,19 @@ void Application::drawViewportPanel() {
     }
 
     ImGui::End();
+    {
+        static int once = 0;
+        if (once < 3) {
+            ++once;
+            ImGuiWindow* win = ImGui::FindWindowByName("Viewport");
+            std::fprintf(stderr, "after cmds=%d vtx=%d hidden=%d ch=%d\n",
+                         win ? win->DrawList->CmdBuffer.Size : -1,
+                         win ? win->DrawList->VtxBuffer.Size : -1,
+                         win && win->Hidden ? 1 : 0,
+                         win ? win->DrawList->_Splitter._Count : -1);
+            std::fflush(stderr);
+        }
+    }
     ImGui::PopStyleVar();
 }
 
@@ -2030,7 +2059,7 @@ void Application::drawStatusBar() {
         ImGui::TextColored(ImVec4(0.55f, 0.75f, 0.95f, 1), "Tam render %d/%d",
             m_state.fullRender.currentSpp.load(), m_state.fullRender.targetSpp.load());
     } else {
-        ImGui::TextDisabled("%s", m_state.fastPreview ? "GPU + progressive" : "Kalite onizleme");
+        ImGui::TextDisabled("%s", m_state.fastPreview ? "Hizli onizleme" : "Kalite onizleme");
     }
     if (!m_state.statusMessage.empty()) {
         ImGui::SameLine(620);
@@ -2131,6 +2160,19 @@ int Application::run() {
         drawStatusBar();
         drawOnboarding();
         drawFullRenderDialog();
+
+        {
+            static int once = 0;
+            if (once < 2) {
+                ++once;
+                ImGuiWindow* win = ImGui::FindWindowByName("Viewport");
+                std::fprintf(stderr, "render cmds=%d ch=%d hidden=%d\n",
+                             win ? win->DrawList->CmdBuffer.Size : -1,
+                             win ? win->DrawList->_Splitter._Count : -1,
+                             win && win->Hidden ? 1 : 0);
+                std::fflush(stderr);
+            }
+        }
 
         ImGui::Render();
         int dw, dh;

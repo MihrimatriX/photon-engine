@@ -20,6 +20,7 @@ option(PHOTON_BUILD_TESTS  "Build unit tests"                    ON)
 option(PHOTON_BUILD_CLI    "Build photon_render CLI (dev only)"  OFF)
 option(PHOTON_BUILD_GPU    "Build GPU (OptiX/Vulkan) backend"    OFF)
 option(PHOTON_ENABLE_SIMD  "Enable AVX2/FMA SIMD instructions"  ON)
+option(PHOTON_ENABLE_ASAN "AddressSanitizer on photon_* targets" OFF)
 # OIDN: auto-enable when the SDK is findable (vcpkg / CMAKE_PREFIX_PATH).
 # Force with -DPHOTON_ENABLE_OIDN=ON; disable with -DPHOTON_ENABLE_OIDN=OFF.
 option(PHOTON_ENABLE_OIDN "Enable Intel Open Image Denoise (AUTO if found)" OFF)
@@ -61,10 +62,11 @@ endif()
 include(FetchContent)
 
 # stb – single-file image I/O headers
+# Pinned 2026-10-01 from branch master.
 FetchContent_Declare(
     stb
     GIT_REPOSITORY https://github.com/nothings/stb.git
-    GIT_TAG        master
+    GIT_TAG        2c980bb59875b0d32144a71867fbdebb2f77cd20
 )
 
 # tinyobjloader – Wavefront OBJ loader
@@ -148,7 +150,8 @@ if(PHOTON_BUILD_APP)
         FetchContent_Declare(
             imgui_fc
             GIT_REPOSITORY https://github.com/ocornut/imgui.git
-            GIT_TAG        docking
+            # Pinned 2026-10-01 from branch docking.
+            GIT_TAG        64944b4520b30772de8dbf0b37d0311746477a32
         )
         FetchContent_MakeAvailable(imgui_fc)
         add_library(imgui_app STATIC
@@ -194,4 +197,31 @@ endif()
 if(PHOTON_BUILD_CLI)
     add_executable(photon_render src/main.cpp)
     target_link_libraries(photon_render PRIVATE photon_engine)
+endif()
+
+# ponytail: ASan instruments photon_* only. vcpkg and FetchContent stay
+# uninstrumented. Upgrade: an ASan vcpkg triplet if those libs must be checked.
+if(PHOTON_ENABLE_ASAN AND MSVC)
+    function(_photon_apply_asan dir)
+        get_property(_targets DIRECTORY "${dir}" PROPERTY BUILDSYSTEM_TARGETS)
+        foreach(_t IN LISTS _targets)
+            if(NOT _t MATCHES "^photon_")
+                continue()
+            endif()
+            get_target_property(_kind "${_t}" TYPE)
+            if(_kind STREQUAL "INTERFACE_LIBRARY" OR _kind STREQUAL "UTILITY")
+                continue()
+            endif()
+            # /RTC1 (Debug default) is incompatible with /fsanitize=address.
+            target_compile_options("${_t}" PRIVATE /fsanitize=address /RTC1-)
+            if(_kind STREQUAL "EXECUTABLE" OR _kind STREQUAL "SHARED_LIBRARY")
+                target_link_options("${_t}" PRIVATE /INCREMENTAL:NO)
+            endif()
+        endforeach()
+        get_property(_subs DIRECTORY "${dir}" PROPERTY SUBDIRECTORIES)
+        foreach(_sub IN LISTS _subs)
+            _photon_apply_asan("${_sub}")
+        endforeach()
+    endfunction()
+    _photon_apply_asan("${CMAKE_SOURCE_DIR}")
 endif()

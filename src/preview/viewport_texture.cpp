@@ -30,20 +30,26 @@ void ViewportTexture::upload(const Image& img, ToneMapOperator tmo, float exposu
     if (img.width() != m_width || img.height() != m_height) {
         resize(img.width(), img.height());
     }
-    std::vector<uint8_t> pixels(static_cast<size_t>(img.width() * img.height() * 3));
-    for (int y = 0; y < img.height(); ++y) {
-        for (int x = 0; x < img.width(); ++x) {
+    const int w = img.width();
+    const int h = img.height();
+    // RGBA so rows stay 4-byte aligned (GL_UNPACK_ALIGNMENT default is 4). Tight RGB
+    // makes the driver read past the buffer and corrupt the heap; ImGui then dies
+    // in ImDrawListSplitter::SetCurrentChannel.
+    std::vector<uint8_t> pixels(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
             Color3f hdr = img.getAveragedPixel(x, y);
+            // toneMap() already applies gamma.
             Color3f ldr = toneMap(hdr, tmo, exposure);
-            ldr = applyGamma(ldr, 2.2f);
-            size_t i = static_cast<size_t>((y * img.width() + x) * 3);
+            size_t i = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4;
             pixels[i] = static_cast<uint8_t>(std::clamp(ldr.r * 255.0f, 0.0f, 255.0f));
             pixels[i + 1] = static_cast<uint8_t>(std::clamp(ldr.g * 255.0f, 0.0f, 255.0f));
             pixels[i + 2] = static_cast<uint8_t>(std::clamp(ldr.b * 255.0f, 0.0f, 255.0f));
+            pixels[i + 3] = 255;
         }
     }
     glBindTexture(GL_TEXTURE_2D, m_tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, img.width(), img.height(), 0, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 

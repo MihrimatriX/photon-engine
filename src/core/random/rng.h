@@ -20,7 +20,7 @@ public:
         m_state = oldState * 6364136223846793005ULL + m_inc;
         uint32_t xorShifted = static_cast<uint32_t>(((oldState >> 18u) ^ oldState) >> 27u);
         uint32_t rot = static_cast<uint32_t>(oldState >> 59u);
-        return (xorShifted >> rot) | (xorShifted << ((-rot) & 31));
+        return (xorShifted >> rot) | (xorShifted << ((0u - rot) & 31));
     }
 
     float uniformFloat() {

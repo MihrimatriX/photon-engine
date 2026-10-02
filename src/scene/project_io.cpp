@@ -2,13 +2,19 @@
 #include "materials/disney.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
 namespace photon {
 namespace {
+
+// ponytail: ceiling — 512MB file, 1M imports/materials/transforms. Bigger projects need a real parser.
+constexpr uintmax_t kMaxProjectFileBytes = 512ull * 1024ull * 1024ull;
+constexpr size_t kMaxProjectEntries = 1'000'000;
 
 float jsonFloatField(const std::string& json, const std::string& key, float def) {
     std::string needle = "\"" + key + "\"";
@@ -223,6 +229,10 @@ std::string buildProjectJson(const SceneGraph& graph, const std::string& cameraJ
 
 bool parseProjectJson(const std::string& json, ProjectFile& out) {
     out = ProjectFile{};
+    if (json.empty() || json.size() > kMaxProjectFileBytes
+        || json.find('{') == std::string::npos || json.find('}') == std::string::npos) {
+        return false;
+    }
     out.version = static_cast<int>(jsonFloatField(json, "version", 1.0f));
     out.includeCornell = jsonBoolField(json, "includeCornell", true);
     out.environmentPath = jsonStringField(json, "environment");
@@ -255,6 +265,10 @@ bool parseProjectJson(const std::string& json, ProjectFile& out) {
                 if (q0 == std::string::npos || q0 >= arrEnd) break;
                 auto q1 = json.find('"', q0 + 1);
                 if (q1 == std::string::npos || q1 >= arrEnd) break;
+                if (out.imports.size() >= kMaxProjectEntries) {
+                    out = ProjectFile{};
+                    return false;
+                }
                 out.imports.push_back({json.substr(q0 + 1, q1 - q0 - 1)});
                 i = q1 + 1;
             }
@@ -283,6 +297,10 @@ bool parseProjectJson(const std::string& json, ProjectFile& out) {
             m.normalMap = jsonStringField(obj, "normalMap");
             m.roughnessMap = jsonStringField(obj, "roughnessMap");
             m.metalnessMap = jsonStringField(obj, "metalnessMap");
+            if (out.materials.size() >= kMaxProjectEntries) {
+                out = ProjectFile{};
+                return false;
+            }
             out.materials.push_back(m);
         } else if (obj.find("\"translate\"") != std::string::npos || obj.find("\"rotate\"") != std::string::npos
                    || obj.find("\"scale\"") != std::string::npos) {
@@ -310,6 +328,10 @@ bool parseProjectJson(const std::string& json, ProjectFile& out) {
                     t.hasRotateScale = true;
                 }
             }
+            if (out.transforms.size() >= kMaxProjectEntries) {
+                out = ProjectFile{};
+                return false;
+            }
             out.transforms.push_back(t);
         }
         search = objEnd + 1;
@@ -327,10 +349,13 @@ bool saveProject(const std::string& path, const SceneGraph& graph, const std::st
 
 bool loadProject(const std::string& path, SceneGraph& graph, std::string& cameraJson) {
     (void)graph;
-    std::ifstream in(path);
+    std::error_code ec;
+    auto sz = std::filesystem::file_size(std::filesystem::path(path), ec);
+    if (ec || sz == 0 || sz > kMaxProjectFileBytes) return false;
+    std::ifstream in(path, std::ios::binary);
     if (!in) return false;
     cameraJson.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    return !cameraJson.empty();
+    return !cameraJson.empty() && cameraJson.size() <= kMaxProjectFileBytes;
 }
 
 } // namespace photon

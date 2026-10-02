@@ -1,0 +1,71 @@
+[Window][Kutuphane]
+Pos=0,28
+Size=335,693
+Collapsed=0
+DockId=0x00000001,0
+LastUsed=20261001
+
+[Window][Sahne]
+Pos=862,28
+Size=322,263
+Collapsed=0
+DockId=0x00000007,0
+LastUsed=20261001
+
+[Window][Inceleyici]
+Pos=862,293
+Size=322,428
+Collapsed=0
+DockId=0x00000008,0
+LastUsed=20261001
+
+[Window][Render]
+Pos=862,293
+Size=322,428
+Collapsed=0
+DockId=0x00000008,1
+LastUsed=20261001
+
+[Window][Viewport]
+Pos=0,0
+Size=32,33
+Collapsed=0
+DockId=0x00000005
+LastUsed=20261001
+
+[Window][Durum]
+Pos=337,624
+Size=523,97
+Collapsed=0
+DockId=0x00000006,0
+LastUsed=20261001
+
+[Window][DockRoot]
+Pos=0,0
+Size=1184,721
+Collapsed=0
+LastUsed=20261001
+
+[Window][Debug##Default]
+Pos=60,60
+Size=400,400
+Collapsed=0
+LastUsed=20261001
+
+[Window][Hosgeldiniz]
+Pos=681,279
+Size=318,401
+Collapsed=0
+LastUsed=20261001
+
+[Docking][Data]
+DockSpace       ID=0x7F09CF6C Window=0xFB32D03B Pos=0,28 Size=1184,693 Split=X
+  DockNode      ID=0x00000001 Parent=0x7F09CF6C SizeRef=335,960 Selected=0xCEA2D403
+  DockNode      ID=0x00000002 Parent=0x7F09CF6C SizeRef=1343,960 Split=X
+    DockNode    ID=0x00000003 Parent=0x00000002 SizeRef=1019,960 Split=Y
+      DockSpace ID=0x00000005 Parent=0x00000003 SizeRef=1680,833 CentralNode=1 Selected=0xC450F867
+      DockNode  ID=0x00000006 Parent=0x00000003 SizeRef=1019,97 Selected=0xB3163F38
+    DockNode    ID=0x00000004 Parent=0x00000002 SizeRef=322,960 Split=Y
+      DockNode  ID=0x00000007 Parent=0x00000004 SizeRef=322,364 Selected=0xF7B75F2B
+      DockNode  ID=0x00000008 Parent=0x00000004 SizeRef=322,594 Selected=0xF325F7C8
+

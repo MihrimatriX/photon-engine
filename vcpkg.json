@@ -5,7 +5,14 @@
   "dependencies": [
     "glm",
     "glfw3",
-    "imgui",
-    "openimagedenoise"
-  ]
+    {
+      "name": "imgui",
+      "features": [
+        "docking-experimental",
+        "glfw-binding",
+        "opengl3-binding"
+      ]
+    }
+  ],
+  "builtin-baseline": "eb2d3a3279fd019cb7733072d86900d0ad2a1aef"
 }

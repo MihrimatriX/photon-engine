@@ -36,7 +36,7 @@ public:
     virtual float pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const = 0;
 
     /// @brief Returns emitted radiance from the surface (for light sources).
-    virtual Color3f emitted(const SurfaceInteraction& si) const {
+    virtual Color3f emitted(const SurfaceInteraction&) const {
         return Color3f::black();
     }
 };

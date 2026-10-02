@@ -17,6 +17,7 @@ add_executable(photon_tests
     test_mesh_light.cpp
     test_import.cpp
     test_ortho.cpp
+    test_loader_limits.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE

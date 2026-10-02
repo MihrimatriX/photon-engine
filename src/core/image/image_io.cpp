@@ -10,10 +10,30 @@
 #include "tinyexr.h"
 
 #include "core/image/image_io.h"
+#include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <vector>
 
 namespace photon {
+namespace {
+
+// ponytail: ceiling — 512MB file, 16384 on a side. A larger texture needs tiling.
+constexpr uintmax_t kMaxImageFileBytes = 512ull * 1024ull * 1024ull;
+constexpr int kMaxImageDim = 16384;
+
+bool imageFileOk(const std::string& path) {
+    std::error_code ec;
+    auto sz = std::filesystem::file_size(std::filesystem::path(path), ec);
+    return !ec && sz <= kMaxImageFileBytes;
+}
+
+bool imageDimsOk(int w, int h) {
+    return w > 0 && h > 0 && w <= kMaxImageDim && h <= kMaxImageDim;
+}
+
+} // namespace
+
 
 bool saveImagePNG(const Image& img, const std::string& path, ToneMapOperator tmo, float exposure) {
     int w = img.width();
@@ -106,11 +126,27 @@ bool saveImageEXR(const Image& img, const std::string& path) {
 }
 
 std::optional<Image> loadImageHDR(const std::string& path) {
-    int w, h, channels;
+    if (!imageFileOk(path)) {
+        std::cerr << "HDR Load Error: missing or oversized file: " << path << std::endl;
+        return std::nullopt;
+    }
+    int w = 0, h = 0, channels = 0;
+    if (!stbi_info(path.c_str(), &w, &h, &channels)) {
+        std::cerr << "HDR Load Error: " << stbi_failure_reason() << " for path: " << path << std::endl;
+        return std::nullopt;
+    }
+    if (!imageDimsOk(w, h)) {
+        std::cerr << "HDR Load Error: dimensions exceed limit for path: " << path << std::endl;
+        return std::nullopt;
+    }
     float* data = stbi_loadf(path.c_str(), &w, &h, &channels, 3); // force 3 channels (RGB)
     
     if (!data) {
         std::cerr << "HDR Load Error: " << stbi_failure_reason() << " for path: " << path << std::endl;
+        return std::nullopt;
+    }
+    if (!imageDimsOk(w, h)) {
+        stbi_image_free(data);
         return std::nullopt;
     }
     
@@ -128,6 +164,32 @@ std::optional<Image> loadImageHDR(const std::string& path) {
 }
 
 std::optional<Image> loadImageEXR(const std::string& path) {
+    if (!imageFileOk(path)) {
+        std::cerr << "EXR Load Error: missing or oversized file: " << path << std::endl;
+        return std::nullopt;
+    }
+    EXRVersion version{};
+    if (ParseEXRVersionFromFile(&version, path.c_str()) != TINYEXR_SUCCESS || version.multipart || version.non_image) {
+        std::cerr << "EXR Load Error: unreadable or unsupported: " << path << std::endl;
+        return std::nullopt;
+    }
+    EXRHeader header;
+    InitEXRHeader(&header);
+    const char* hdrErr = nullptr;
+    if (ParseEXRHeaderFromFile(&header, &version, path.c_str(), &hdrErr) != TINYEXR_SUCCESS) {
+        std::cerr << "EXR Load Error: " << (hdrErr ? hdrErr : "unknown") << std::endl;
+        FreeEXRErrorMessage(hdrErr);
+        FreeEXRHeader(&header);
+        return std::nullopt;
+    }
+    int64_t w64 = static_cast<int64_t>(header.data_window.max_x) - header.data_window.min_x + 1;
+    int64_t h64 = static_cast<int64_t>(header.data_window.max_y) - header.data_window.min_y + 1;
+    FreeEXRHeader(&header);
+    if (w64 <= 0 || h64 <= 0 || w64 > kMaxImageDim || h64 > kMaxImageDim) {
+        std::cerr << "EXR Load Error: dimensions exceed limit: " << path << std::endl;
+        return std::nullopt;
+    }
+
     float* out_rgba = nullptr;
     int w = 0;
     int h = 0;
@@ -137,6 +199,10 @@ std::optional<Image> loadImageEXR(const std::string& path) {
     if (ret != TINYEXR_SUCCESS) {
         std::cerr << "EXR Load Error: " << (err ? err : "unknown") << std::endl;
         FreeEXRErrorMessage(err);
+        return std::nullopt;
+    }
+    if (!imageDimsOk(w, h)) {
+        free(out_rgba);
         return std::nullopt;
     }
     
@@ -153,6 +219,7 @@ std::optional<Image> loadImageEXR(const std::string& path) {
 }
 
 std::optional<Image> imageFromRgb8(const uint8_t* data, int w, int h) {
+    if (!data || !imageDimsOk(w, h)) return std::nullopt;
     Image img(w, h);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
@@ -169,7 +236,19 @@ std::optional<Image> imageFromRgb8(const uint8_t* data, int w, int h) {
 }
 
 std::optional<Image> loadImageLDR(const std::string& path) {
-    int w, h, channels;
+    if (!imageFileOk(path)) {
+        std::cerr << "LDR Load Error: missing or oversized file: " << path << std::endl;
+        return std::nullopt;
+    }
+    int w = 0, h = 0, channels = 0;
+    if (!stbi_info(path.c_str(), &w, &h, &channels)) {
+        std::cerr << "LDR Load Error: " << stbi_failure_reason() << " for path: " << path << std::endl;
+        return std::nullopt;
+    }
+    if (!imageDimsOk(w, h)) {
+        std::cerr << "LDR Load Error: dimensions exceed limit for path: " << path << std::endl;
+        return std::nullopt;
+    }
     uint8_t* data = stbi_load(path.c_str(), &w, &h, &channels, 3); // force RGB
 
     if (!data) {
@@ -183,7 +262,9 @@ std::optional<Image> loadImageLDR(const std::string& path) {
 
 std::optional<Image> loadImageLDRMemory(const unsigned char* bytes, int size) {
     if (!bytes || size <= 0) return std::nullopt;
+    if (static_cast<uint64_t>(size) > kMaxImageFileBytes) return std::nullopt;
     int w = 0, h = 0, channels = 0;
+    if (!stbi_info_from_memory(bytes, size, &w, &h, &channels) || !imageDimsOk(w, h)) return std::nullopt;
     uint8_t* data = stbi_load_from_memory(bytes, size, &w, &h, &channels, 3);
     if (!data) return std::nullopt;
     auto img = imageFromRgb8(data, w, h);

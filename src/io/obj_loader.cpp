@@ -3,12 +3,83 @@
 
 #include "io/obj_loader.h"
 #include "materials/lambertian.h"
+#include <cctype>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 
 namespace photon {
+namespace {
+
+// ponytail: ceiling — 512MB per input, 50M source verts, 50M triangles.
+// A bigger mesh needs a streaming loader, not a larger alloc.
+constexpr uintmax_t kMaxObjFileBytes = 512ull * 1024ull * 1024ull;
+constexpr size_t kMaxObjVertices = 50'000'000;
+constexpr size_t kMaxObjTriangles = 50'000'000;
+constexpr size_t kMaxObjCorners = kMaxObjTriangles * 3;
+
+bool regularFileWithin(const std::filesystem::path& p, uintmax_t cap) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(p, ec) || ec) return false;
+    auto sz = std::filesystem::file_size(p, ec);
+    return !ec && sz <= cap;
+}
+
+bool objInputsOk(const std::filesystem::path& objPath) {
+    if (!regularFileWithin(objPath, kMaxObjFileBytes)) return false;
+    std::ifstream in(objPath);
+    if (!in) return false;
+    std::string line;
+    while (std::getline(in, line)) {
+        size_t i = 0;
+        while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
+        if (i + 6 > line.size() || line.compare(i, 6, "mtllib") != 0) continue;
+        size_t j = i + 6;
+        if (j >= line.size() || !std::isspace(static_cast<unsigned char>(line[j]))) continue;
+        while (j < line.size()) {
+            while (j < line.size() && std::isspace(static_cast<unsigned char>(line[j]))) ++j;
+            if (j >= line.size()) break;
+            size_t k = j;
+            while (k < line.size() && !std::isspace(static_cast<unsigned char>(line[k]))) ++k;
+            std::filesystem::path mtl(line.substr(j, k - j));
+            if (mtl.is_relative()) mtl = objPath.parent_path() / mtl;
+            std::error_code ec;
+            if (std::filesystem::exists(mtl, ec) && !regularFileWithin(mtl, kMaxObjFileBytes)) return false;
+            j = k;
+        }
+    }
+    return true;
+}
+
+bool indexElemOk(int index, size_t cap, int comps, size_t srcSize) {
+    if (index < 0 || comps <= 0) return false;
+    size_t i = static_cast<size_t>(index);
+    if (i >= cap) return false;
+    size_t base = i * static_cast<size_t>(comps);
+    return base + static_cast<size_t>(comps) <= srcSize;
+}
+
+bool finiteFloat(float x) {
+    // Bit test so /fp:fast cannot fold NaN/Inf away.
+    uint32_t bits = 0;
+    std::memcpy(&bits, &x, sizeof(bits));
+    return (bits & 0x7f800000u) != 0x7f800000u;
+}
+
+bool finite3(float x, float y, float z) {
+    return finiteFloat(x) && finiteFloat(y) && finiteFloat(z);
+}
+
+} // namespace
 
 ObjLoadResult ObjLoader::load(const std::string& path, const Material* defaultMaterial) {
+    if (!objInputsOk(path)) {
+        std::cerr << "OBJ Loader Error: missing or oversized file: " << path << std::endl;
+        return {};
+    }
+
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
     std::vector<tinyobj::material_t> materials;
@@ -28,6 +99,16 @@ ObjLoadResult ObjLoader::load(const std::string& path, const Material* defaultMa
 
     ObjLoadResult result;
     if (!ret) return result;
+
+    if (attrib.vertices.size() / 3 > kMaxObjVertices
+        || attrib.normals.size() / 3 > kMaxObjVertices
+        || attrib.texcoords.size() / 2 > kMaxObjVertices) {
+        std::cerr << "OBJ Loader Error: vertex count exceeds limit" << std::endl;
+        return {};
+    }
+
+    size_t triCount = 0;
+    size_t cornerCount = 0;
 
     for (const auto& shape : shapes) {
         struct Bucket {
@@ -49,35 +130,67 @@ ObjLoadResult ObjLoader::load(const std::string& path, const Material* defaultMa
         size_t index_offset = 0;
         for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
             size_t fv = size_t(shape.mesh.num_face_vertices[f]);
+            if (index_offset > shape.mesh.indices.size()
+                || fv > shape.mesh.indices.size() - index_offset) {
+                std::cerr << "OBJ Loader Error: face index out of range" << std::endl;
+                return {};
+            }
             if (fv < 3) {
                 index_offset += fv;
                 continue;
             }
+            size_t addTris = fv - 2;
+            if (addTris > kMaxObjTriangles || triCount > kMaxObjTriangles - addTris
+                || addTris > kMaxObjCorners / 3
+                || cornerCount > kMaxObjCorners - addTris * 3) {
+                std::cerr << "OBJ Loader Error: triangle count exceeds limit" << std::endl;
+                return {};
+            }
+            triCount += addTris;
+            cornerCount += addTris * 3;
+
             int matId = (f < shape.mesh.material_ids.size()) ? shape.mesh.material_ids[f] : -1;
             Bucket& bucket = bucketFor(matId);
-            auto pushVert = [&](const tinyobj::index_t& idx) {
-                bucket.positions.push_back(Vec3f(
-                    attrib.vertices[3 * size_t(idx.vertex_index) + 0],
-                    attrib.vertices[3 * size_t(idx.vertex_index) + 1],
-                    attrib.vertices[3 * size_t(idx.vertex_index) + 2]));
+            auto pushVert = [&](const tinyobj::index_t& idx) -> bool {
+                if (!indexElemOk(idx.vertex_index, kMaxObjVertices, 3, attrib.vertices.size()))
+                    return false;
+                size_t vi = static_cast<size_t>(idx.vertex_index);
+                float x = attrib.vertices[3 * vi + 0];
+                float y = attrib.vertices[3 * vi + 1];
+                float z = attrib.vertices[3 * vi + 2];
+                if (!finite3(x, y, z)) return false;
+                bucket.positions.push_back(Vec3f(x, y, z));
                 if (idx.normal_index >= 0) {
-                    bucket.normals.push_back(Vec3f(
-                        attrib.normals[3 * size_t(idx.normal_index) + 0],
-                        attrib.normals[3 * size_t(idx.normal_index) + 1],
-                        attrib.normals[3 * size_t(idx.normal_index) + 2]));
+                    if (!indexElemOk(idx.normal_index, kMaxObjVertices, 3, attrib.normals.size()))
+                        return false;
+                    size_t ni = static_cast<size_t>(idx.normal_index);
+                    float nx = attrib.normals[3 * ni + 0];
+                    float ny = attrib.normals[3 * ni + 1];
+                    float nz = attrib.normals[3 * ni + 2];
+                    if (!finite3(nx, ny, nz)) return false;
+                    bucket.normals.push_back(Vec3f(nx, ny, nz));
                 }
                 if (idx.texcoord_index >= 0) {
-                    bucket.uvs.push_back(Vec2f(
-                        attrib.texcoords[2 * size_t(idx.texcoord_index) + 0],
-                        attrib.texcoords[2 * size_t(idx.texcoord_index) + 1]));
+                    if (!indexElemOk(idx.texcoord_index, kMaxObjVertices, 2, attrib.texcoords.size()))
+                        return false;
+                    size_t ti = static_cast<size_t>(idx.texcoord_index);
+                    float u = attrib.texcoords[2 * ti + 0];
+                    float v = attrib.texcoords[2 * ti + 1];
+                    if (!finiteFloat(u) || !finiteFloat(v)) return false;
+                    bucket.uvs.push_back(Vec2f(u, v));
                 }
                 bucket.indices.push_back(static_cast<uint32_t>(bucket.indices.size()));
+                return true;
             };
             // ponytail: fan from vertex 0. Concave faces need an ear clip, not this.
             for (size_t i = 1; i + 1 < fv; ++i) {
-                pushVert(shape.mesh.indices[index_offset]);
-                pushVert(shape.mesh.indices[index_offset + i]);
-                pushVert(shape.mesh.indices[index_offset + i + 1]);
+                if (index_offset + i + 1 >= shape.mesh.indices.size()) return {};
+                if (!pushVert(shape.mesh.indices[index_offset])
+                    || !pushVert(shape.mesh.indices[index_offset + i])
+                    || !pushVert(shape.mesh.indices[index_offset + i + 1])) {
+                    std::cerr << "OBJ Loader Error: index out of range or non-finite position" << std::endl;
+                    return {};
+                }
             }
             index_offset += fv;
         }
