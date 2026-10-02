@@ -26,3 +26,5 @@ if(PHOTON_OIDN_FOUND)
         target_link_libraries(photon_engine PUBLIC OpenImageDenoise)
     endif()
 endif()
+
+target_link_libraries(photon_engine PRIVATE photon_build_flags)

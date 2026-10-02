@@ -3,7 +3,7 @@
 
 namespace photon {
 
-LightSample DirectionalLight::sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const {
+LightSample DirectionalLight::sampleLi(const SurfaceInteraction& /*si*/, const Vec2f& /*sample*/) const {
     LightSample ls;
     ls.wi = -m_direction;
     ls.Li = m_irradiance;

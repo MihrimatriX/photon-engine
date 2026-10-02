@@ -44,6 +44,32 @@
         "CMAKE_CXX_FLAGS_DEBUG": "/Zi /Ob0 /Od",
         "CMAKE_EXE_LINKER_FLAGS_DEBUG": "/DEBUG /INCREMENTAL:NO"
       }
+    },
+    {
+      "name": "fetch-base",
+      "hidden": true,
+      "description": "No vcpkg: every dependency comes from the pinned FetchContent fallbacks.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "fetch-release",
+      "displayName": "Release (FetchContent, no vcpkg)",
+      "inherits": "fetch-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "PHOTON_BUILD_CLI": "ON"
+      }
+    },
+    {
+      "name": "fetch-asan",
+      "displayName": "ASan + UBSan (GCC/Clang, FetchContent)",
+      "inherits": "fetch-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "PHOTON_ENABLE_ASAN": "ON",
+        "PHOTON_BUILD_CLI": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -58,6 +84,48 @@
     {
       "name": "asan",
       "configurePreset": "asan"
+    },
+    {
+      "name": "fetch-release",
+      "configurePreset": "fetch-release"
+    },
+    {
+      "name": "fetch-asan",
+      "configurePreset": "fetch-asan"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "test-base",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "inherits": "test-base",
+      "configurePreset": "release"
+    },
+    {
+      "name": "asan",
+      "inherits": "test-base",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "fetch-release",
+      "inherits": "test-base",
+      "configurePreset": "fetch-release"
+    },
+    {
+      "name": "fetch-asan",
+      "inherits": "test-base",
+      "configurePreset": "fetch-asan"
     }
   ]
 }

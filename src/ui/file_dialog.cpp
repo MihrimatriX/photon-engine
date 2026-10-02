@@ -54,6 +54,7 @@ bool showFileDialog(std::string& inOutPath, FileDialogMode mode, const char* tit
     inOutPath = buffer;
     return true;
 #else
+    (void)inOutPath;
     (void)mode;
     (void)title;
     (void)filters;

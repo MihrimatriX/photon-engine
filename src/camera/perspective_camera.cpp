@@ -25,7 +25,7 @@ PerspectiveCamera::PerspectiveCamera(const Vec3f& position, const Vec3f& target,
     m_lowerLeft = m_position - m_horizontal * 0.5f - m_vertical * 0.5f - m_w;
 }
 
-Ray PerspectiveCamera::generateRay(float u, float v, const Vec2f& lensSample) const {
+Ray PerspectiveCamera::generateRay(float u, float v, const Vec2f& /*lensSample*/) const {
     Vec3f targetPoint = m_lowerLeft + u * m_horizontal + v * m_vertical;
     Vec3f direction = (targetPoint - m_position).normalized();
     return Ray(m_position, direction);

@@ -98,7 +98,7 @@ Tüm modüllerin üzerine inşa edildiği temel katman. Matematik, bellek, rastg
 
 | Dosya | Açıklama | Ana tipler / fonksiyonlar |
 |-------|----------|---------------------------|
-| `image.h` | HDR görüntü tamponu; thread-safe örnek biriktirme. | `Image` |
+| `image.h` | HDR görüntü tamponu ve örnek biriktirme. Kilit yok: karolar ayrık piksellere yazar. | `Image` |
 | `image.cpp` | Piksel okuma/yazma, örnek ortalaması ve temizleme. | `addSample()`, `getAveragedPixel()` |
 | `image_io.h` | PNG, EXR ve HDR görüntü yükleme/kaydetme arayüzü. | `saveImagePNG()`, `loadImageHDR()` |
 | `image_io.cpp` | stb ve tinyexr kütüphaneleriyle görüntü I/O uygulaması. | — |
@@ -192,6 +192,7 @@ Birincil ışın üreten kamera modelleri.
 | `camera.h` | Kamera soyut temel sınıfı. | `Camera`, `generateRay()` |
 | `perspective_camera.h` / `.cpp` | İdeal iğne deliği perspektif kamera. | `PerspectiveCamera` |
 | `thin_lens_camera.h` / `.cpp` | Alan derinliği simülasyonlu ince lens kamera. | `ThinLensCamera` |
+| `orthographic_camera.h` / `.cpp` | Paralel izdüşüm; odak uzaklığı ↔ FOV dönüşümü. | `OrthographicCamera` |
 
 ---
 
@@ -242,6 +243,7 @@ Sahne yönetimi ve çok iş parçacıklı render orkestrasyonu.
 | `scene.h` / `scene.cpp` | Render sahnesi; geometri, ışıklar, BVH ve ortam haritası. | `Scene::addShape()`, `buildAccelerator()` |
 | `render_settings.h` | Render kalite ve çıktı ayarları (çözünürlük, SPP, ton eşleme). | `RenderSettings` |
 | `renderer.h` / `renderer.cpp` | Karo tabanlı çok iş parçacıklı renderer. | `render()`, `renderProgressive()`, `renderSamplePass()` |
+| `denoiser.h` / `denoiser.cpp` | OIDN bulunursa OIDN; yoksa 3×3 yumuşatma (gerçek denoise değil). | `denoiseImage()`, `denoiseAvailable()` |
 
 ---
 
@@ -270,7 +272,7 @@ Render çıktısının viewport'ta gösterilmesi ve nesne seçimi.
 | `gl_preview.h` / `.cpp` | GPU hızlı önizleme ve nesne seçme (picking) geçişleri. | `GLPreview`, `PickingPass` |
 | `viewport_texture.h` / `.cpp` | Render çıktısını OpenGL dokuya yükleyip çizer; ton eşleme + gamma. | `ViewportTexture::upload()`, `draw()` |
 
-> **Not:** `GLPreview` şu an stub durumunda; gerçek GPU rasterizasyon yolu henüz açık değil.
+> **Not:** `GLPreview` çalışan bir GGX/IBL rasterizasyon önizlemesi; gölge, doku ve cam henüz yok (Faz 8).
 
 ---
 
@@ -282,6 +284,7 @@ ImGui tabanlı masaüstü arayüz yardımcıları.
 |-------|----------|---------------------------|
 | `CMakeLists.txt` | `photon_ui` statik kütüphanesini tanımlar. | — |
 | `theme.h` / `.cpp` | ImGui KeyShot benzeri koyu tema uygulayıcı. | `applyKeyShotTheme()` |
+| `file_dialog.h` / `.cpp` | Windows dosya diyaloğu; diğer platformlarda `false` döner. | `showFileDialog()` |
 | `drag_drop.h` | Sürükle-bırak payload sabitleri (malzeme, model, doku, HDR). | `kPayloadMaterial`, `kPayloadModel` |
 | `orbit_camera.h` / `.cpp` | Küresel koordinatlı orbit kamera kontrolcüsü. | `OrbitCamera::orbit()`, `pan()`, `zoom()` |
 
@@ -343,15 +346,25 @@ Google Test ile yazılmış birim testleri. `photon_engine` kütüphanesine bağ
 | Dosya | Açıklama |
 |-------|----------|
 | `CMakeLists.txt` | `photon_tests` çalıştırılabilir hedefini ve CTest kaydını tanımlar. |
-| `test_vec.cpp` | Vektör aritmetiği testleri. |
-| `test_ray.cpp` | Işın oluşturma ve parametrizasyon testleri. |
-| `test_aabb.cpp` | AABB kesişim ve genişletme testleri. |
-| `test_color.cpp` | Renk/spektrum işlemleri testleri. |
-| `test_sampling.cpp` | Monte Carlo örnekleme fonksiyonları testleri. |
-| `test_sphere.cpp` | Küre–ışın kesişim testleri. |
-| `test_triangle.cpp` | Üçgen–ışın kesişim testleri. |
-| `test_bvh.cpp` | BVH inşa ve kesişim testleri. |
-
+| `test_vec.cpp` | Vektör aritmetiği. |
+| `test_ray.cpp` | Işın oluşturma ve parametrizasyon. |
+| `test_aabb.cpp` | AABB kesişim ve genişletme. |
+| `test_color.cpp` | Renk/spektrum işlemleri. |
+| `test_sampling.cpp` | Monte Carlo örnekleme warp'ları ve pdf'leri. |
+| `test_sphere.cpp` | Küre–ışın kesişimi. |
+| `test_triangle.cpp` | Üçgen–ışın kesişimi. |
+| `test_bvh.cpp` | BVH inşası ve kesişimi. |
+| `test_disney.cpp` | Disney BRDF değerlendirme ve örnekleme. |
+| `test_area_light.cpp` | Alan ışığı örnekleme/pdf tutarlılığı; `ScriptedSampler` düzeneği. |
+| `test_environment.cpp` | Ortam ışığı CDF'si ve pdf'i. |
+| `test_dielectric.cpp` | Cam malzemesi. |
+| `test_mesh_uv.cpp` | Mesh UV ve tangent. |
+| `test_product.cpp` | Ürün sahnesi (zemin, malzeme) uçtan uca. |
+| `test_stratified.cpp` | Katmanlı örnekleyici. |
+| `test_mesh_light.cpp` | Mesh ışıkları. |
+| `test_import.cpp` | OBJ/glTF içe aktarma. |
+| `test_ortho.cpp` | Ortografik kamera. |
+| `test_loader_limits.cpp` | Bozuk ve aşırı büyük dosyalara karşı yükleyici sınırları. |
 ---
 
 ## docs/ — Dokümantasyon
@@ -365,9 +378,10 @@ Google Test ile yazılmış birim testleri. `photon_engine` kütüphanesine bağ
 
 ## Bilinen sınırlamalar
 
+Güncel ve ayrıntılı liste `memory-bank/02-bulgular.md` ve `memory-bank/01-gorevler.md` içinde.
+
 | Alan | Durum |
 |------|-------|
-| `GLPreview` | Stub; gerçek GPU rasterizasyon henüz yok. |
-| `saveProject` / `loadProject` | Minimal stub; şimdilik yalnızca kamera JSON'u. |
-| `DisneyMaterial` doku yolları | Saklanır ama CPU integrator henüz kullanmaz. |
-| `gpu/` modülü | `PHOTON_BUILD_GPU=ON` ile opsiyonel; henüz plan aşamasında. |
+| `GLPreview` | GGX/IBL rasterizasyon var; gölge, doku, cam yok (Faz 8). |
+| `saveProject` / `loadProject` | Kamera, içe aktarmalar, Disney temel parametreleri ve dönüşümler. Işıklar, cam ve render ayarları kaydedilmez (Faz 2). |
+| GPU render | Yok. Plan: GTX 1080 için CUDA 12.x (Faz 9). |

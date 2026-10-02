@@ -23,7 +23,7 @@ void IndependentSampler::startPixel(int x, int y) {
     m_rng = RNG(pixelSeed);
 }
 
-void IndependentSampler::startSample(int sampleIndex) {
+void IndependentSampler::startSample(int /*sampleIndex*/) {
     // No-op for independent sampler as it just continues random stream
 }
 

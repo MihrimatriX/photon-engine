@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "description": "Physically-based render engine inspired by KeyShot",
   "dependencies": [
-    "glm",
     "glfw3",
     {
       "name": "imgui",

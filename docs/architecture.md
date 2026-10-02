@@ -1,125 +1,81 @@
 # PhotonEngine – Architecture
 
-## Overview
+Each subsystem is a static library under `src/<module>/`. Every target exports `src/` as its include root, so includes read `#include "core/math/vec.h"`.
 
-PhotonEngine follows a **modular, layered architecture** where each subsystem is isolated into its own static library. Modules communicate through well-defined interfaces, making it easy to swap implementations (e.g., replacing the BVH with a GPU-accelerated structure) without affecting the rest of the engine.
+This page describes the tree as it is. Planned changes (a two-level BVH, a `Film` type, a `RenderDevice` interface, CUDA) are in [`plan.md`](../plan.md) and [`memory-bank/01-gorevler.md`](../memory-bank/01-gorevler.md).
 
 ---
 
-## Module Dependency Graph
+## Link graph (from the CMake files)
 
 ```
-                    ┌──────────┐
-                    │  engine   │  ← orchestrates rendering
-                    └────┬─────┘
-           ┌─────────┬──┴──┬──────────┬──────────┐
-           ▼         ▼     ▼          ▼          ▼
-      integrators  camera lights  materials   samplers
-           │         │     │          │          │
-           └─────────┴──┬──┴──────────┘          │
-                        ▼                        │
-                    geometry  ◄──────────────────┘
-                        │
-                        ▼
-                      core
+photon_app ──► photon_ui ──► photon_preview ──► photon_scene ──► photon_engine
+     │                                                │                │
+     └──────────────► photon_scene, photon_engine     └─► photon_io    ├─► photon_integrators ─┐
+                                                                       ├─► photon_io           │
+photon_render (CLI) ──► photon_engine                                  ├─► photon_camera       │
+photon_tests ──► photon_engine, photon_scene, gtest_main               ├─► photon_samplers     │
+                                                                       ├─► photon_lights       │
+                                                                       ├─► photon_materials    │
+                                                                       ├─► photon_geometry     │
+                                                                       └─► photon_core         │
+                                                                                               │
+photon_integrators ──► materials, lights, camera, samplers, geometry, core ◄───────────────────┘
+photon_io          ──► materials, geometry, core
+photon_materials   ──► geometry, core
+photon_lights      ──► geometry, core
+photon_camera, photon_samplers, photon_geometry ──► photon_core
 ```
+
+Known wart: `integrators/path_tracer.cpp` includes `engine/scene.h` but `photon_integrators` does not link `photon_engine`. It only links because both are static and the final executable pulls in both. Fixing this (moving the render `Scene` below the integrator) is task F2.3.
+
+Every `photon_*` target also links `photon_build_flags` privately: warnings (`/W4` or `-Wall -Wextra -Wpedantic`), optional warnings-as-errors, `/utf-8`, and the float model (`/fp:fast`, or `-ffast-math -fno-finite-math-only`). Third-party code does not get these flags.
 
 ---
 
 ## Modules
 
-### `core`
-Foundation layer providing math primitives (`Vec3`, `Mat4`, `Ray`, `AABB`), spectrum representation, random number generators, and common utilities. Every other module depends on `core`.
-
-### `geometry`
-Defines geometric primitives (`Sphere`, `Triangle`, `Mesh`) and acceleration structures (`BVH`). Responsible for ray–scene intersection queries.
-
-### `materials`
-Implements physically-based shading models:
-- **Lambertian** – ideal diffuse reflection
-- **Disney Principled BRDF** – metallic/roughness workflow
-- **Glass** – specular transmission with Fresnel
-- **Metal** – conductor reflection with microfacet GGX
-
-Each material implements a common `Material` interface with `evaluate()`, `sample()`, and `pdf()` methods.
-
-### `lights`
-Light source abstractions including point lights, directional lights, area lights (mesh emitters), and HDR environment maps with importance-sampled lookup.
-
-### `camera`
-Camera models that generate primary rays:
-- **Pinhole** – standard perspective projection
-- **ThinLens** – depth-of-field with configurable aperture and focus distance
-- **Orthographic** – parallel projection for technical rendering
-
-### `integrators`
-Light transport algorithms that compute pixel radiance:
-- **PathTracer** – unbiased Monte Carlo path tracing with Russian roulette
-- **DirectLighting** – single-bounce direct illumination (fast preview)
-- **AmbientOcclusion** – geometry-only visibility estimator
-
-### `samplers`
-Quasi-random and stratified sampling strategies for variance reduction:
-- **Stratified** – jittered grid samples
-- **Halton** – low-discrepancy sequence
-- **Sobol** – scrambled Sobol' quasi-random sequence
-
-### `io`
-File I/O for images and scenes:
-- **Image** – PNG read/write (via stb), EXR read/write (via tinyexr)
-- **Scene** – OBJ loading (via tinyobjloader), glTF loading (planned)
-
-### `engine`
-Top-level orchestration layer:
-- **RenderScheduler** – divides the image into tiles and dispatches work across threads
-- **ToneMapper** – converts HDR radiance to LDR output (ACES, Reinhard, filmic)
-- **Denoiser** – optional OIDN integration for noise-free output at low sample counts
-
-### `gpu` *(optional)*
-GPU compute backend for accelerated ray tracing. Planned targets:
-- NVIDIA OptiX (RTX hardware)
-- Vulkan Ray Tracing
+| Module | Contents |
+|---|---|
+| `core` | `Vec2f/Vec3f/Vec4f`, `Mat4f`, `Transform`, `Ray`, `AABB`, `Frame` (Duff 2017 ONB), `Quaternion`; `Color3f`; `Image` (float RGB + per-pixel sample counts), PNG/EXR/HDR I/O via stb and tinyexr, tone mapping; PCG32 `RNG`; sampling warps; `ThreadPool` and `parallelFor2D`; an unused arena allocator. |
+| `geometry` | `Shape` interface, `Sphere`, `Triangle` (Möller–Trumbore), `TriangleMesh`, single-level binned-SAH `BVH` with 32-byte nodes. |
+| `materials` | `Material` interface (`sample`, `eval`, `pdf`, `emitted`), `Lambertian`, `Mirror`, `Dielectric` (smooth and GGX rough), `DisneyMaterial` with texture maps. |
+| `lights` | `Light` interface, `PointLight`, `DirectionalLight`, `AreaLight` (two-sided rectangle), `MeshLight`, `EnvironmentLight` (equirectangular, luminance·sinθ CDF). |
+| `camera` | `PerspectiveCamera`, `ThinLensCamera`, `OrthographicCamera`. |
+| `samplers` | `IndependentSampler`, `StratifiedSampler` (default for rendering). |
+| `integrators` | `PathTracer`: NEE + BSDF sampling with the power heuristic, Russian roulette, optional (non-physical) contact AO. |
+| `io` | `ObjLoader`, `GltfLoader`, with size and index limits on untrusted input. |
+| `engine` | Render `Scene` (shapes, lights, environment, BVH), `Renderer` (tile-major `render`, pass-major `renderSamplePass`/`renderProgressive`), `denoiser` (OIDN or a 3×3 blur). |
+| `scene` | Editable `SceneGraph` of `SceneNode`s, compiled into a render `Scene`; `MaterialLibrary` (JSON presets); project files; `UndoStack`; Cornell box builder. |
+| `preview` | `GLPreview` (OpenGL GGX/IBL raster preview), `PickingPass`, `ViewportTexture`. |
+| `ui` | ImGui theme, `OrbitCamera`, Windows file dialog, drag-and-drop payload ids. |
+| `app` | `Application`: window, panels, preview render thread, full render and turntable jobs. |
 
 ---
 
-## Data Flow
+## Data flow (desktop app)
 
 ```
-Scene File (JSON/OBJ)
-        │
-        ▼
-    io::SceneLoader  →  Scene { geometries, materials, lights, camera }
-        │
-        ▼
-    engine::RenderScheduler
-        │
-        ├── for each tile:
-        │       sampler  →  generate samples
-        │       camera   →  generate primary ray
-        │       integrator  →  trace ray, evaluate materials/lights
-        │       accumulate radiance
-        │
-        ▼
-    engine::ToneMapper  →  LDR image
-        │
-        ▼
-    io::ImageWriter  →  output.png / output.exr
+SceneGraph (UI thread)
+   │  SceneGraph::compile — bakes meshes to world space, builds the BVH
+   ▼
+render Scene  ──►  Renderer::renderSamplePass (preview thread + ThreadPool tiles)
+                       per pixel: sampler → camera ray → PathTracer::Li → Image::addSample
+   ▼
+Image (sum + count) ──► ViewportTexture::upload (average, tone map, sRGB) ──► ImGui viewport
+                    └─► saveImagePNG / saveImageEXR
 ```
+
+The threading model, its single `imageMutex`, and the races it allows are described in the "UI → render veri akışı" section of [`memory-bank/02-bulgular.md`](../memory-bank/02-bulgular.md).
 
 ---
 
-## Build Targets
+## Build targets
 
-| Target            | Type       | Description                        |
-|-------------------|------------|------------------------------------|
-| `photon_core`     | STATIC_LIB | Math, ray, spectrum, RNG           |
-| `photon_geometry` | STATIC_LIB | Shapes, BVH                        |
-| `photon_materials`| STATIC_LIB | BRDF models                        |
-| `photon_lights`   | STATIC_LIB | Light sources                      |
-| `photon_camera`   | STATIC_LIB | Camera models                      |
-| `photon_integrators` | STATIC_LIB | Path tracer, direct lighting    |
-| `photon_samplers` | STATIC_LIB | Random samplers                    |
-| `photon_io`       | STATIC_LIB | Image & scene I/O                  |
-| `photon_engine`   | STATIC_LIB | Scheduler, tone mapping, denoise   |
-| `photon_gpu`      | STATIC_LIB | GPU backend *(optional)*           |
-| `photon_render`   | EXECUTABLE | CLI renderer                       |
+| Target | Type | Notes |
+|---|---|---|
+| `photon_core` … `photon_ui` | static library | one per `src/` folder |
+| `photon_build_flags` | interface | warnings and float model for `photon_*` |
+| `photon_app` | executable | desktop editor, `PHOTON_BUILD_APP` |
+| `photon_render` | executable | CLI, `PHOTON_BUILD_CLI` |
+| `photon_tests` | executable | GoogleTest suite, registered with CTest |

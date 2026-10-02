@@ -3,7 +3,7 @@
 
 namespace photon {
 
-LightSample PointLight::sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const {
+LightSample PointLight::sampleLi(const SurfaceInteraction& si, const Vec2f& /*sample*/) const {
     LightSample ls;
     Vec3f toLight = m_position - si.point;
     float distSq = toLight.lengthSquared();

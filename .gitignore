@@ -36,6 +36,10 @@ compile_commands.json
 *.dylib
 *.o
 *.obj
+# Sample and test meshes are source, not build output.
+!assets/**/*.obj
+!tests/**/*.obj
+!bench/**/*.obj
 *.pdb
 *.ilk
 *.lib
@@ -50,3 +54,10 @@ output.exr
 # Local onboarding flag
 assets/.onboarded
 imgui.ini
+photon_ui.ini*
+
+# CTest / run leftovers
+Testing/
+app_stdout.txt
+app_stderr.txt
+build-*.log

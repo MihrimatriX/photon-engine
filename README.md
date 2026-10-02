@@ -1,121 +1,108 @@
-# 🔥 PhotonEngine
+# PhotonEngine
 
-**Physically-based render engine with CPU/GPU path tracing, inspired by KeyShot.**
+**A physically based CPU path tracer with a desktop editor for product visualization.**
 
-PhotonEngine is a modern C++20 rendering engine built for photorealistic image synthesis. It implements physically-based light transport algorithms with a focus on material accuracy, performance, and extensibility.
-
----
-
-## ✨ Features
-
-- **Path Tracing** with global illumination (unbiased Monte Carlo)
-- **Disney Principled BRDF** for versatile material authoring
-- **HDR Environment Lighting** with importance sampling
-- **BVH Acceleration** structure for fast ray–scene intersection
-- **Multi-threaded Tile-based Rendering** with work-stealing scheduler
-- **Denoising** via Intel Open Image Denoise (OIDN) integration
-- **Multiple Camera Models** – pinhole, thin-lens (DoF), orthographic
-- **Scene Import** – OBJ and glTF file formats
-- **Desktop Editor** – GLFW + ImGui with drag-and-drop workflow
-- **Web Version** *(planned)* – WebAssembly + WebGPU target
+PhotonEngine is a C++20 renderer and a learning project: the goal is a fast, physically correct, easy-to-use engine, built while learning the whole computer-graphics pipeline. The work plan is in [`plan.md`](plan.md); the task list and the audit it is based on are in [`memory-bank/`](memory-bank/).
 
 ---
 
-## 🛠️ Build Instructions
+## What exists today
 
-### Prerequisites
+- **Path tracer** with next-event estimation and MIS (power heuristic), Russian roulette, environment and area-light importance sampling.
+- **Materials:** Lambertian, mirror, smooth and rough glass (GGX), and a simplified Disney principled BRDF (Burley diffuse, GGX specular, clearcoat, anisotropy, sheen, thin diffuse transmission).
+- **Lights:** rectangular area lights, emissive meshes, point, directional, and an equirectangular HDR environment with a luminance CDF.
+- **Geometry:** triangle meshes and spheres in a single-level binned-SAH BVH.
+- **Cameras:** pinhole, thin lens (depth of field), orthographic.
+- **Sampling:** stratified (default) and independent samplers.
+- **Import:** OBJ (tinyobjloader) and glTF 2.0 (cgltf), with base-color, normal, roughness and metalness maps.
+- **Image I/O:** PNG, JPG, HDR, EXR in; PNG and EXR out.
+- **Denoising:** Intel Open Image Denoise when it is found at configure time. Without it, the "denoise" switch is only a 3×3 blur.
+- **Desktop editor:** GLFW + ImGui with docking, drag and drop, a material library, an OpenGL raster preview and progressive path-traced viewport.
 
-- **CMake** ≥ 3.20
-- **C++20** compatible compiler (MSVC 2022, GCC 12+, Clang 15+)
-- **vcpkg** *(optional, for glm/glfw3/imgui)*
+Known gaps and bugs are listed with file and line in [`memory-bank/02-bulgular.md`](memory-bank/02-bulgular.md). Nothing has been benchmarked yet.
 
-### Build
+---
 
-```bash
-# Clone the repository
-git clone https://github.com/your-org/PhotonEngine.git
-cd PhotonEngine
+## Build
 
-# Configure
-cmake -B build -DCMAKE_BUILD_TYPE=Release
+Requirements: CMake ≥ 3.21, Ninja, and a C++20 compiler (MSVC 19.4x+, GCC 12+, Clang 15+).
 
-# Build
-cmake --build build --config Release -j
+### Windows (MSVC + vcpkg)
 
-# Run tests (optional)
-cd build && ctest --output-on-failure
+`VCPKG_ROOT` must point at a vcpkg checkout. glfw3 and imgui come from vcpkg (`vcpkg.json`).
+
+```powershell
+. .\scripts\devshell.ps1          # VS developer shell at the repo root
+cmake --preset release
+cmake --build --preset release
+ctest --preset release
 ```
 
-### CMake Options
+`dev` (Debug) and `asan` (AddressSanitizer) presets work the same way.
 
-| Option                | Default | Description                          |
-|-----------------------|---------|--------------------------------------|
-| `PHOTON_BUILD_APP`    | `ON`    | Build `photon_app` desktop editor    |
-| `PHOTON_BUILD_CLI`    | `OFF`   | Build `photon_render` CLI *(dev only)* |
-| `PHOTON_BUILD_TESTS`  | `ON`    | Build unit tests (Google Test)       |
-| `PHOTON_BUILD_GPU`    | `OFF`   | Build GPU backend (OptiX/Vulkan)     |
-| `PHOTON_ENABLE_SIMD`  | `ON`    | Enable AVX2/FMA SIMD instructions    |
-| `PHOTON_ENABLE_OIDN`  | `OFF*` | Auto-links OIDN if found via vcpkg/`find_package`; set `ON` to warn when missing |
+### Without vcpkg (Linux or Windows)
 
-\*OIDN is enabled automatically whenever `OpenImageDenoise` is discoverable at configure time, even if the option is `OFF`. Install with:
+Every dependency has a pinned FetchContent fallback, so no package manager is needed:
 
 ```bash
-vcpkg install openimagedenoise
-cmake -B build -DCMAKE_TOOLCHAIN_FILE=[vcpkg]/scripts/buildsystems/vcpkg.cmake
+cmake --preset fetch-release
+cmake --build --preset fetch-release
+ctest --preset fetch-release
 ```
 
-Without OIDN, enabling Denoise in the UI still applies a soft firefly blur on full-res export.
+`fetch-asan` builds the same tree with AddressSanitizer and UBSan (GCC/Clang). On Linux, GLFW needs the X11 and Wayland development packages (`libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl-dev libwayland-dev libxkbcommon-dev`).
+
+### CMake options
+
+| Option | Default | Description |
+|---|---|---|
+| `PHOTON_BUILD_APP` | `ON` | Build the `photon_app` desktop editor |
+| `PHOTON_BUILD_CLI` | `OFF` (`ON` in `fetch-*`) | Build the `photon_render` command-line renderer |
+| `PHOTON_BUILD_TESTS` | `ON` | Build the GoogleTest suite |
+| `PHOTON_ENABLE_SIMD` | `ON` | Compile with AVX2/FMA |
+| `PHOTON_ENABLE_ASAN` | `OFF` | Instrument `photon_*` targets with AddressSanitizer |
+| `PHOTON_WARNINGS_AS_ERRORS` | `ON` (GCC/Clang), `OFF` (MSVC) | Warnings in `photon_*` targets fail the build |
+| `PHOTON_ENABLE_OIDN` | `OFF` | OIDN is linked automatically when `find_package(OpenImageDenoise)` succeeds; `ON` only adds a warning when it does not |
+
+OIDN is not in vcpkg. The plan (Phase 3) is to take the official prebuilt package into `third_party/oidn/`.
+
+Every third-party dependency and its license is listed in [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).
 
 ---
 
-## 🚀 Usage
-
-Launch the desktop editor:
+## Usage
 
 ```bash
-./build/photon_app
-# Windows: build\photon_app.exe
+./build/fetch-release/src/app/photon_app      # or build\release\src\app\photon_app.exe
 ```
 
-**Workflow:**
+1. Drag an OBJ or glTF model into the viewport, or use **Dosya → Ornek Sahne**.
+2. Drag materials from the library (left) onto parts.
+3. Pick an environment or a studio preset.
+4. **Render → Tam Cozunurluk** renders at full resolution; **Dosya → Disa Aktar** saves PNG or EXR.
 
-1. Drag an OBJ or glTF model into the viewport
-2. Assign materials from the library (left panel)
-3. Adjust camera and render settings in the inspector / Render panel
-4. Use **Render → Tam Cozunurluk** for full-resolution export
-5. Export PNG or EXR via **Dosya → Disa Aktar**
-
-> **Note:** The CLI renderer (`photon_render`) is optional and disabled by default. Enable with `-DPHOTON_BUILD_CLI=ON` for development only.
+`photon_render` currently renders a fixed Cornell box; command-line arguments come in Phase 2.
 
 ---
 
-## 🏗️ Architecture
-
-PhotonEngine is organized into focused, decoupled modules:
+## Layout
 
 ```
 src/
-├── core/          Math primitives, ray, spectrum, RNG
-├── geometry/      Shapes, meshes, BVH acceleration
-├── materials/     BRDF models (Lambert, Disney, Glass, Metal)
-├── lights/        Point, area, directional, HDR environment
-├── camera/        Pinhole, thin-lens, orthographic cameras
-├── integrators/   Path tracer, direct lighting, ambient occlusion
-├── samplers/      Stratified, Halton, Sobol quasi-random samplers
-├── io/            Image I/O (PNG, EXR), scene loaders (OBJ, glTF)
-├── engine/        Render scheduler, tile manager, tone mapping
-├── app/           photon_app entry point and UI application
-├── ui/            ImGui theme, orbit camera, file dialogs
-├── scene/         Scene graph, material library, project I/O
-├── preview/       OpenGL viewport preview
-├── gpu/           GPU compute backend (optional)
-└── main.cpp       CLI entry point (dev only, PHOTON_BUILD_CLI)
+├── core/          math, color, image + I/O, tone mapping, RNG, sampling warps, thread pool
+├── geometry/      sphere, triangle, mesh, BVH
+├── materials/     Lambertian, mirror, dielectric, Disney
+├── lights/        point, directional, area, mesh, environment
+├── camera/        perspective, thin lens, orthographic
+├── samplers/      independent, stratified
+├── integrators/   path tracer
+├── io/            OBJ and glTF loaders
+├── engine/        render Scene, Renderer, denoiser
+├── scene/         editable SceneGraph, material library, project files, undo
+├── preview/       OpenGL raster preview, picking, viewport texture
+├── ui/            theme, orbit camera, file dialog
+├── app/           photon_app
+└── main.cpp       photon_render
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for a detailed breakdown.
-
----
-
-<p align="center">
-  Built with ❤️ and physics.
-</p>
+See [`docs/architecture.md`](docs/architecture.md) for the module graph.

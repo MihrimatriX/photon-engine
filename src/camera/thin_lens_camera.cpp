@@ -8,7 +8,7 @@ namespace photon {
 
 ThinLensCamera::ThinLensCamera(const Vec3f& position, const Vec3f& target, const Vec3f& up,
                                float vFovDegrees, float aspectRatio, float apertureRadius, float focusDistance)
-    : m_position(position), m_lensRadius(apertureRadius), m_focusDistance(focusDistance) {
+    : m_position(position), m_lensRadius(apertureRadius) {
     
     float theta = deg2rad(vFovDegrees);
     float h = std::tan(theta * 0.5f);

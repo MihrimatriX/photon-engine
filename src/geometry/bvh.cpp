@@ -190,9 +190,9 @@ int BVH::flattenBVHTree(BVHBuildNode* node, int* offset) {
 
     if (node->nPrimitives > 0) {
         linearNode.primitivesOffset = node->firstPrimOffset;
-        linearNode.nPrimitives = node->nPrimitives;
+        linearNode.nPrimitives = static_cast<uint16_t>(node->nPrimitives);
     } else {
-        linearNode.splitAxis = node->splitAxis;
+        linearNode.splitAxis = static_cast<uint8_t>(node->splitAxis);
         linearNode.nPrimitives = 0;
         flattenBVHTree(node->children[0], offset);
         linearNode.secondChildOffset = flattenBVHTree(node->children[1], offset);
