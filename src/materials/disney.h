@@ -1,3 +1,5 @@
+// Disney Principled BRDF malzemesinin arayüzü: parametreler (metallic, roughness, specular,
+// clearcoat, sheen, anizotropi, difüz geçirgenlik) ve doku haritaları. Matematik disney.cpp'de.
 #pragma once
 
 /// @file disney.h

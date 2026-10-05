@@ -1,3 +1,7 @@
+// Çok sekmeli yol izleyici (path tracer): her yüzey noktasında ışık örneklemesi (NEE)
+// ve BSDF örneklemesi yapılır, ikisi Veach'in güç sezgiseli (MIS) ile birleştirilir.
+// Rus ruleti, NaN/Inf koruması ve isteğe bağlı kontak AO da burada.
+
 #include "integrators/path_tracer.h"
 #include "materials/material.h"
 #include "lights/light.h"
@@ -52,6 +56,20 @@ float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sam
 
 } // namespace
 
+/// Bir kamera ışını boyunca gelen radyansın tek örnekli tahmini.
+///
+/// MIS (Veach 1997 §9.2): Aynı ışık yolu iki stratejiyle bulunabilir:
+///   (a) NEE: ışıktan bir nokta seç, pdf_l = P(ışık seçimi) · pdf_ışık(ω)
+///   (b) BSDF: BSDF'den yön seç ve ışığa çarp, pdf_b = pdf_bsdf(ω)
+/// Her katkı güç sezgiseli w = (n_a p_a)² / ((n_a p_a)² + (n_b p_b)²) ile tartılır;
+/// iki ağırlığın toplamı 1 olduğu için hiçbir şey iki kez sayılmaz. Bunun için İKİ
+/// tarafta da AYNI pdf_l kullanılmalıdır: ışık seçim olasılığı (1/ışıkSayısı) ve NEE
+/// örnek sayısı (shadowSamples) her iki ağırlıkta da vardır (bulgu lighting-9).
+///
+/// Derinlik kuralı (PBRT ile aynı): m_maxDepth = en fazla saçılma (sekme) sayısı.
+/// Son saçılmada NEE yapılır ve BSDF yönü de izlenir; o yöndeki ışık yayımı bir sonraki
+/// turda MIS ağırlığıyla eklenip döngü biter. Eskiden son noktada NEE yapılıyor ama
+/// tamamlayıcı BSDF ışını hiç izlenmiyordu, enerji kayboluyordu (bulgu lighting-m1).
 Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) const {
     Color3f L = Color3f::black();
     Color3f throughput = Color3f::white();
@@ -66,22 +84,30 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
     const auto& lights = scene.lights();
     const int explicitLights = static_cast<int>(lights.size());
     const int lightCount = explicitLights + (env ? 1 : 0);
+    // Düzgün ışık seçimi: her ışığın seçilme olasılığı 1/lightCount.
+    const float lightPmf = lightCount > 0 ? 1.0f / static_cast<float>(lightCount) : 0.0f;
+    const int shadowSamples = m_shadowQuality;
 
-    for (int depth = 0; depth < m_maxDepth; ++depth) {
+    // Tek bir NaN/Inf katkı ilerleyen (progressive) pikseli kalıcı olarak bozar;
+    // böyle bir katkıyı atlarız (bulgu lighting-10). Sonlu değerler aynen eklenir.
+    auto accumulate = [&L](const Color3f& c) {
+        if (c.isFinite()) L += c;
+    };
+
+    for (int depth = 0;; ++depth) {
         SurfaceInteraction isect;
         bool hit = scene.intersect(currentRay, isect);
 
         if (!hit) {
             if (env) {
                 Color3f Le = env->eval(currentRay.direction);
-                if (specularBounce || depth == 0) {
-                    L += throughput * Le;
-                } else {
-                    // MIS: previous BSDF sample vs env as light (cosine about last hit normal)
-                    float lightPdf = env->pdfLi(currentRay.direction, lastNormal);
-                    float weight = powerHeuristic(1, lastBsdfPdf, 1, lightPdf);
-                    L += throughput * Le * weight;
+                float weight = 1.0f;
+                if (!specularBounce) {
+                    // BSDF örneği ortama kaçtı: NEE'nin aynı yönü bulma pdf'i ile MIS.
+                    float lightPdf = lightPmf * env->pdfLi(currentRay.direction, lastNormal);
+                    weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                 }
+                accumulate(throughput * Le * weight);
             }
             break;
         }
@@ -89,35 +115,33 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
         if (isect.material) {
             Color3f emitted = isect.material->emitted(isect);
             if (!emitted.isBlack()) {
-                if (specularBounce || depth == 0) {
-                    // Camera ray and delta bounce: the BSDF has no matching NEE sample.
-                    L += throughput * emitted;
-                } else {
-                    // Diffuse/glossy hit of an emissive quad. Complementary to NEE's
-                    // powerHeuristic(lightPdf, bsdfPdf). Env MIS is unchanged (miss path).
-                    float lightPdf = areaLightSolidAnglePdf(lights, lastPoint, isect.point);
-                    float weight = 1.0f;
+                float weight = 1.0f;
+                if (!specularBounce) {
+                    // Diffuse/glossy hit of an emissive quad: complement of NEE's weight.
+                    // Kayıtlı ışık değilse (lightPdf = 0) NEE onu bulamaz → ağırlık 1.
+                    float lightPdf = lightPmf * areaLightSolidAnglePdf(lights, lastPoint, isect.point);
                     if (lightPdf > 0.0f && lastBsdfPdf > 0.0f) {
-                        weight = powerHeuristic(1, lastBsdfPdf, 1, lightPdf);
+                        weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                     }
-                    L += throughput * emitted * weight;
                 }
+                accumulate(throughput * emitted * weight);
             }
         }
 
-        if (!isect.material) {
+        if (!isect.material || depth >= m_maxDepth) {
             break;
         }
 
-        // Approximate contact AO (multiplies remaining path; cheap studio polish)
+        // Approximate contact AO (multiplies remaining path; cheap studio polish).
+        // m_aoStrength = 0 iken tamamen etkisizdir (örnek de tüketmez).
         if (m_aoStrength > 0.0f && depth == 0) {
             throughput *= approxAo(scene, isect, sampler, m_aoStrength, m_shadowQuality);
         }
 
-        bool isSpecular = isect.material->eval(-currentRay.direction, isect.normal, isect).isBlack();
+        const Vec3f wo = -currentRay.direction;
+        bool isSpecular = isect.material->eval(wo, isect.normal, isect).isBlack();
 
         if (lightCount > 0 && !isSpecular) {
-            const int shadowSamples = m_shadowQuality;
             for (int s = 0; s < shadowSamples; ++s) {
                 int lightIndex = std::min(static_cast<int>(sampler.get1D() * lightCount), lightCount - 1);
                 LightSample ls;
@@ -126,9 +150,6 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
                 if (lightIndex < explicitLights) {
                     ls = lights[lightIndex]->sampleLi(isect, sampler.get2D());
                     if (!ls.isValid()) continue;
-                    if (lights[lightIndex]->isDelta()) {
-                        // keep weight = 1 below
-                    }
                 } else {
                     fromEnv = true;
                     ls = env->sampleLi(isect, sampler.get2D());
@@ -156,40 +177,47 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
                 Ray shadowRay(shadowOrigin, shadowDir, 1e-4f, shadowEnd);
 
                 if (!scene.intersectAny(shadowRay)) {
-                    Color3f brdf = isect.material->eval(-currentRay.direction, ls.wi, isect);
-                    float cosTheta = std::max(0.0f, ls.wi.dot(isect.normal));
+                    Color3f f = isect.material->eval(wo, ls.wi, isect);
+                    // |cos|: ışık yüzeyin arkasında olabilir; BSDF geçirgense (kaba cam,
+                    // difüz geçirgenlik) f ≠ 0 döner ve bu ışık da sayılmalıdır. Saf yansıtıcı
+                    // malzemede arka yarıküre için f = 0 olduğundan |cos| zararsızdır.
+                    // (lighting-3 / materials-6: eskiden max(0, cos) ile atılıyordu, ama BSDF
+                    // tarafındaki MIS yine de ağırlığı düşürüyordu → enerji kaybı.)
+                    float cosTheta = std::abs(ls.wi.dot(isect.normal));
 
-                    if (!brdf.isBlack() && cosTheta > 0.0f) {
+                    if (!f.isBlack() && cosTheta > 0.0f) {
+                        float lightPdf = lightPmf * ls.pdf;
                         float weight = 1.0f;
                         bool delta = !fromEnv && lights[lightIndex]->isDelta();
                         if (!delta) {
-                            float bsdfPdf = isect.material->pdf(-currentRay.direction, ls.wi, isect);
-                            weight = powerHeuristic(1, ls.pdf, 1, bsdfPdf);
+                            float bsdfPdf = isect.material->pdf(wo, ls.wi, isect);
+                            weight = powerHeuristic(shadowSamples, lightPdf, 1, bsdfPdf);
                         }
-
-                        L += throughput * brdf * ls.Li * cosTheta * weight
-                             * static_cast<float>(lightCount)
-                             / (ls.pdf * static_cast<float>(shadowSamples));
+                        // Tahminci: f·Li·|cos| / (n_l · pdf_l), MIS ağırlığıyla.
+                        accumulate(throughput * f * ls.Li
+                                   * (cosTheta * weight / (lightPdf * static_cast<float>(shadowSamples))));
                     }
                 }
             }
         }
 
+        // BSDF örneklemesi: uc lob seçimi (yansıma/kırılma), u yön için.
+        float uc = sampler.get1D();
+        Vec2f u = sampler.get2D();
         Vec3f wi;
-        Color3f brdf;
-        float pdf;
-        Vec3f wo = -currentRay.direction;
-
-        if (!isect.material->sample(wo, isect, sampler.get2D(), wi, brdf, pdf)) {
+        Color3f f;
+        float pdf = 0.0f;
+        if (!isect.material->sampleWithLobe(wo, isect, uc, u, wi, f, pdf)) {
             break;
         }
 
-        if (pdf <= 0.0f || brdf.isBlack()) {
+        if (pdf <= 0.0f || f.isBlack()) {
             break;
         }
 
         float cosTheta = std::abs(wi.dot(isect.normal));
-        throughput *= brdf * cosTheta / pdf;
+        throughput *= f * (cosTheta / pdf);
+        if (!throughput.isFinite()) break;
         lastBsdfPdf = pdf;
         lastNormal = isect.normal;
         lastPoint = isect.point;
@@ -198,12 +226,19 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
         Vec3f nextRayOrigin = offsetRayOrigin(isect.point, isect.normal, wi);
         currentRay = Ray(nextRayOrigin, wi);
 
+        // Rus ruleti (PBRT-v4): hayatta kalma olasılığı = throughput'un EN BÜYÜK bileşeni.
+        // q = 1 - max; q > 0 ise ölçek 1/(1-q) ile tahminci yansız kalır. max ≥ 1 ise
+        // yol hiç kesilmez (q ≤ 0) ve rastgele sayı da tüketilmez. Eskiden luminans
+        // kullanılıyordu: doygun renkli (ör. saf mavi) yollar haksız yere öldürülüyordu.
         if (depth >= m_russianRouletteDepth) {
-            float q = std::max(0.05f, 1.0f - throughput.luminance());
-            if (sampler.get1D() < q) {
-                break;
+            float maxComponent = std::max({throughput.r, throughput.g, throughput.b});
+            float q = std::max(0.0f, 1.0f - maxComponent);
+            if (q > 0.0f) {
+                if (sampler.get1D() < q) {
+                    break;
+                }
+                throughput /= (1.0f - q);
             }
-            throughput /= (1.0f - q);
         }
     }
 

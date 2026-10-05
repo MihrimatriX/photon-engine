@@ -1,3 +1,5 @@
+// Renk (Color3f) aritmetiği ve sRGB aktarım eğrisi testleri.
+
 #include "gtest/gtest.h"
 #include "core/color/spectrum.h"
 
@@ -47,4 +49,17 @@ TEST(ColorTest, ValidityAndClamping) {
     EXPECT_FLOAT_EQ(clamped.g, 0.0f);
     EXPECT_FLOAT_EQ(clamped.b, 0.5f);
     EXPECT_TRUE(clamped.isValid());
+}
+
+// sRGB OETF (IEC 61966-2-1): encode, decode'un tam tersi olmalı ve siyaha yakın
+// doğrusal ayağı (12.92·x) kullanmalı. Eski gamma 2.2: encode(0.001) = 0.043.
+TEST(ColorTest, SrgbEncodeIsExactPiecewiseCurve) {
+    EXPECT_NEAR(srgbEncode(0.001f), 0.01292f, 1e-5f);
+    EXPECT_NEAR(srgbEncode(0.0f), 0.0f, 1e-7f);
+    EXPECT_NEAR(srgbEncode(1.0f), 1.0f, 1e-5f);
+    EXPECT_NEAR(srgbEncode(0.18f), 0.46135f, 1e-4f); // orta gri
+    for (int i = 0; i <= 1000; ++i) {
+        float v = static_cast<float>(i) / 1000.0f;
+        EXPECT_NEAR(srgbEncode(srgbDecode(v)), v, 2e-5f) << "v=" << v;
+    }
 }

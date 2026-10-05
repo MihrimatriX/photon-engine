@@ -1,3 +1,5 @@
+// PCG32 sözde-rastgele sayı üreteci (O'Neill 2014, XSH-RR çıkışı). Hızlı, küçük durumlu
+// ve tohumlanabilir; örnekleyiciler ve testler bunu kullanır.
 #pragma once
 
 #include <cstdint>
@@ -23,8 +25,12 @@ public:
         return (xorShifted >> rot) | (xorShifted << ((0u - rot) & 31));
     }
 
+    /// [0, 1) aralığında düzgün float. Üstteki 24 biti alıp 2^-24 ile çarparız:
+    /// sonuç k·2^-24 (k < 2^24) olur ve float'ta TAM temsil edilir, en büyük değer
+    /// 1 - 2^-24 < 1. Eski u32 / 2^32 bölmesi yuvarlamayla 1.0 verebiliyordu
+    /// (ör. 0xFFFFFFFF → 1.0f); bu da [0,1) varsayan örnekleyicileri bozar (core-11).
     float uniformFloat() {
-        return static_cast<float>(uniformUint32()) / 4294967296.0f;  // divide by 2^32
+        return static_cast<float>(uniformUint32() >> 8) * 0x1p-24f;
     }
 
     Vec2f uniformFloat2D() {

@@ -1,3 +1,5 @@
+// Malzeme (BSDF) arayüzü: sample / eval / pdf / emitted. Tüm malzemeler bunu uygular.
+// Yön kuralı PBRT ile aynı: wo ve wi yüzeyden DIŞARI bakar, birim uzunluktadır.
 #pragma once
 
 /// @file material.h
@@ -28,6 +30,18 @@ public:
     /// @return true if sampling succeeded, false if invalid.
     virtual bool sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& sample,
                         Vec3f& wi, Color3f& brdf, float& pdf) const = 0;
+
+    /// @brief sample() ile aynı, ama lob seçimi için ayrı bir 1B örnek @p uc alır.
+    ///
+    /// Neden: Kaba camda (PBRT-v4 DielectricBxDF) önce mikro-normal h iki boyutlu
+    /// @p u ile örneklenir, SONRA yansıma/kırılma kararı F(wo·h) olasılığıyla verilir.
+    /// Bu karar için u'dan bağımsız üçüncü bir sayı gerekir; u.x'i yeniden kullanmak
+    /// h ile kararı ilişkilendirir. Varsayılan uygulama uc'yi yok sayar, yani bu ek
+    /// arayüze ihtiyaç duymayan malzemeler değişmeden çalışır. Integratör bunu çağırır.
+    virtual bool sampleWithLobe(const Vec3f& wo, const SurfaceInteraction& si, float /*uc*/,
+                                const Vec2f& u, Vec3f& wi, Color3f& brdf, float& pdf) const {
+        return sample(wo, si, u, wi, brdf, pdf);
+    }
 
     /// @brief Evaluate the BRDF/BSDF for a given pair of directions (wo, wi).
     virtual Color3f eval(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const = 0;
