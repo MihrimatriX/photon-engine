@@ -44,6 +44,7 @@ public:
     bool loadFromDirectory(const std::string& path);
     const std::vector<MaterialPreset>& presets() const { return m_presets; }
     const MaterialPreset* findById(const std::string& id) const;
+    void add(MaterialPreset p) { m_presets.push_back(std::move(p)); }
     std::vector<std::string> categories() const;
     std::vector<const MaterialPreset*> byCategory(const std::string& cat) const;
 

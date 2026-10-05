@@ -235,7 +235,6 @@ if(PHOTON_BUILD_APP)
     endif()
 
     find_package(OpenGL REQUIRED)
-    add_subdirectory(src/preview)
     add_subdirectory(src/ui)
     add_subdirectory(src/app)
 endif()

@@ -34,6 +34,10 @@ public:
                  std::shared_ptr<EnvironmentLight> environment = nullptr,
                  bool isolateMaterials = false) const;
 
+    /// Yalnız geometriyi ekler: sıfırlama, ışık ve BVH yok. Çağıran ek şekilleri
+    /// (ör. zemin) ekleyip buildAccelerator() ile bitirir.
+    void compileInto(Scene& outScene, bool isolateMaterials = false) const;
+
     /// Ağacın derin kopyası. Geometri (değişmez) paylaşılır; cloneMaterials true ise
     /// malzemeler de kopyalanır (aynı malzemeyi paylaşan düğümler kopyada da paylaşır).
     /// uid'ler korunur: geri alma sonrası seçim aynı düğümü bulur.

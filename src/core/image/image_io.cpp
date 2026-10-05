@@ -329,3 +329,21 @@ std::optional<Image> loadImageLDRMemory(const unsigned char* bytes, int size, Te
 }
 
 } // namespace photon
+
+namespace photon {
+
+bool loadRGBA8(const std::string& path, std::vector<uint8_t>& out, int& w, int& h) {
+    int channels = 0;
+    if (!imageFileOk(path)) return false;
+    uint8_t* data = stbi_load(path.c_str(), &w, &h, &channels, 4);
+    if (!data) return false;
+    if (!imageDimsOk(w, h)) {
+        stbi_image_free(data);
+        return false;
+    }
+    out.assign(data, data + static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+    stbi_image_free(data);
+    return true;
+}
+
+} // namespace photon

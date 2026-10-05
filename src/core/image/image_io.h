@@ -9,6 +9,8 @@
 #include "core/image/tone_mapping.h"
 #include <string>
 #include <optional>
+#include <cstdint>
+#include <vector>
 
 namespace photon {
 
@@ -37,6 +39,9 @@ bool saveImageJPG(const Image& img, const std::string& path, ToneMapOperator tmo
 /// Hazır RGBA8 tamponu PNG olarak yaz (ekran görüntüsü için). OpenGL'den okunan
 /// tamponlar alttan başladığı için @p flipVertically genelde true verilir.
 bool saveRGBA8PNG(const uint8_t* rgba, int w, int h, const std::string& path, bool flipVertically);
+
+/// PNG/JPG dosyasını ham RGBA8 olarak oku (renk dönüşümü yok; küçük resim önbelleği için).
+bool loadRGBA8(const std::string& path, std::vector<uint8_t>& out, int& w, int& h);
 
 /// Save scene-linear radiance as OpenEXR (half float RGB, ZIP compression).
 bool saveImageEXR(const Image& img, const std::string& path);

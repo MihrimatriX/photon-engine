@@ -140,9 +140,9 @@ GroundQuad placeGroundUnder(const AABB& box) {
     float dz = box.pMax.z - box.pMin.z;
     float dy = box.pMax.y - box.pMin.y;
     float span = std::max({dx, dz, dy, 1e-3f});
-    // ponytail: dörtgen, en uzun ayak izinin 8 katı. Sonsuz düzlem değil; ufuk
-    // çizgisi geniş açılarda görünebilir. Gerekirse gölge yakalayıcı + sonsuz düzlem.
-    float pad = span * 4.0f;
+    // ponytail: dörtgen, sahne boyutunun 200 katı: pratikte ufka uzanır. Gerçek
+    // sonsuz düzlem + gölge yakalayıcı (shadow catcher) ileride.
+    float pad = span * 100.0f;
     float cx = (box.pMin.x + box.pMax.x) * 0.5f;
     float cz = (box.pMin.z + box.pMax.z) * 0.5f;
     GroundQuad g;
@@ -221,6 +221,14 @@ AABB SceneGraph::nodeWorldBounds(const SceneNode& node) {
 
 AABB SceneGraph::worldBounds() const {
     return nodeWorldBounds(*m_root);
+}
+
+} // namespace photon
+
+namespace photon {
+
+void SceneGraph::compileInto(Scene& outScene, bool isolateMaterials) const {
+    compileNode(*m_root, outScene, Transform{}, isolateMaterials);
 }
 
 } // namespace photon

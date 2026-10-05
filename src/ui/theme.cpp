@@ -16,7 +16,13 @@ constexpr ImVec4 rgb(int r, int g, int b, float a = 1.0f) {
 ImFont* loadWithIcons(const std::filesystem::path& text, const std::filesystem::path& icons, float size) {
     ImGuiIO& io = ImGui::GetIO();
     if (!std::filesystem::exists(text)) return nullptr;
-    ImFont* f = io.Fonts->AddFontFromFileTTF(text.string().c_str(), size);
+    // Inter'in kendisi de Özel Kullanım Alanı'nda (U+E000–F8FF) glifler taşıyor;
+    // ImGui birleşik fontta ilk bulduğu glifi kullandığı için ikonlar yerine
+    // Inter'in harfleri çıkıyordu. Bu aralık metin fontundan dışlanır.
+    static const ImWchar kExcludePUA[] = {ICON_MIN_LUCIDE, ICON_MAX_LUCIDE, 0};
+    ImFontConfig textCfg;
+    textCfg.GlyphExcludeRanges = kExcludePUA;
+    ImFont* f = io.Fonts->AddFontFromFileTTF(text.string().c_str(), size, &textCfg);
     if (!f) return nullptr;
     if (std::filesystem::exists(icons)) {
         ImFontConfig cfg;

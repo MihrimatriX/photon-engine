@@ -5,7 +5,6 @@
 #include "scene/material_library.h"
 #include "materials/dielectric.h"
 #include "materials/disney.h"
-#include "preview/gl_preview.h"
 #include "core/math/transform.h"
 #include "lights/area_light.h"
 #include "lights/directional_light.h"
@@ -152,22 +151,3 @@ TEST(MaterialLibrary, LoadsShippedPresets) {
     EXPECT_GE(lib.categories().size(), 5u);
 }
 
-TEST(Preview, LightDirFromScene) {
-    std::vector<std::shared_ptr<Light>> none;
-    Vec3f fallback = previewLightDirection(none);
-    EXPECT_NEAR(fallback.x, 0.4f, 1e-5f);
-
-    auto area = std::make_shared<AreaLight>(Vec3f(0, 2, 0), Vec3f(1, 0, 0), Vec3f(0, 0, 1), Color3f(1));
-    std::vector<std::shared_ptr<Light>> areaOnly = {area};
-    Vec3f fromArea = previewLightDirection(areaOnly);
-    EXPECT_NEAR(fromArea.x, area->normal().x, 1e-4f);
-    EXPECT_NEAR(fromArea.y, area->normal().y, 1e-4f);
-    EXPECT_NEAR(fromArea.z, area->normal().z, 1e-4f);
-
-    std::vector<std::shared_ptr<Light>> both = {
-        areaOnly[0],
-        std::make_shared<DirectionalLight>(Vec3f(0, -1, 0), Color3f(1))};
-    Vec3f fromSun = previewLightDirection(both);
-    EXPECT_NEAR(fromSun.y, 1.0f, 1e-4f);
-    EXPECT_NEAR(fromSun.x, 0.0f, 1e-4f);
-}
