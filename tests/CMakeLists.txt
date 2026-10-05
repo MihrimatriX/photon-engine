@@ -20,6 +20,7 @@ add_executable(photon_tests
     test_ortho.cpp
     test_loader_limits.cpp
     test_snell.cpp
+    test_sobol.cpp
     test_integrator.cpp
 )
 
