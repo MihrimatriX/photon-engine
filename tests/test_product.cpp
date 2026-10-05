@@ -1,3 +1,5 @@
+// Ürün/stüdyo özellikleri testleri: kamera odağı, dönüşüm, denoiser, zemin, malzeme ön ayarları, önizleme ışığı.
+
 #include <gtest/gtest.h>
 #include "ui/orbit_camera.h"
 #include "engine/denoiser.h"
@@ -42,28 +44,27 @@ TEST(Transform, TranslationKeepsRotation) {
     EXPECT_NEAR(p1.z - p0.z, 5.0f, 1e-4f);
 }
 
+// Image artık çözülmüş (ortalanmış) piksel tutar; örnek sayıları Film'e taşındı
+// (Faz 1b Film/Image ayrımı). Bu iki test yeni API'ye uyarlandı.
 TEST(Denoise, AovPointersKeepFallback) {
     Image img(3, 3);
-    img.addSample(1, 1, Color3f(4, 0, 0));
+    img.setPixel(1, 1, Color3f(4, 0, 0));
     Image albedo(3, 3);
-    albedo.addSample(1, 1, Color3f(1, 0, 0));
+    albedo.setPixel(1, 1, Color3f(1, 0, 0));
     Image normal(3, 3);
-    normal.addSample(1, 1, Color3f(0, 0, 1));
+    normal.setPixel(1, 1, Color3f(0, 0, 1));
     EXPECT_TRUE(denoiseImage(img, &albedo, &normal));
-    EXPECT_GT(img.getAveragedPixel(1, 1).r, 0.0f);
-    EXPECT_EQ(albedo.getSampleCount(1, 1), 1);
+    EXPECT_GT(img.getPixel(1, 1).r, 0.0f);
+    EXPECT_EQ(albedo.getPixel(1, 1).r, 1.0f);
 }
 
-TEST(Denoise, CopyKeepsSampleCount) {
+TEST(Denoise, CopyLeavesSourceAlone) {
     Image src(4, 4);
-    src.addSample(1, 1, Color3f(1, 0, 0));
-    src.addSample(1, 1, Color3f(0, 1, 0));
-    int before = src.getSampleCount(1, 1);
+    src.setPixel(1, 1, Color3f(1, 0, 0));
     Image out = denoiseCopy(src);
-    EXPECT_EQ(src.getSampleCount(1, 1), before);
-    EXPECT_EQ(src.getSampleCount(0, 0), 0);
+    EXPECT_EQ(src.getPixel(1, 1).r, 1.0f);
+    EXPECT_EQ(src.getPixel(0, 0).r, 0.0f);
     EXPECT_EQ(out.width(), src.width());
-    EXPECT_EQ(out.getSampleCount(1, 1), 1);
 }
 
 TEST(Ground, SitsUnderBounds) {
