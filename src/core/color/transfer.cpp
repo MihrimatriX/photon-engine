@@ -1,3 +1,6 @@
+// sRGB aktarım eğrileri (doğrusal ↔ kodlanmış) ve 8-bit nicemleme + titreşim (dither).
+// PNG'ye yazarken ve ekrana gönderirken doğrusal ışık bu dosyadan geçer.
+
 #include "core/color/transfer.h"
 
 #include <algorithm>
@@ -12,15 +15,13 @@ float srgbDecode(float encoded) {
 
 float srgbEncode(float linear) {
     linear = std::clamp(linear, 0.0f, 1.0f);
-    // TODO(human): F1.12 — write the piecewise sRGB OETF (IEC 61966-2-1), the
-    // inverse of srgbDecode above:
-    //   linear <= 0.0031308  ->  12.92 * linear
-    //   otherwise            ->  1.055 * linear^(1/2.4) - 0.055
-    // The line below is the old display curve (pure gamma 2.2), kept so the app
-    // looks the same until this is written. It is too bright near black:
-    // 0.001 encodes to 0.043 instead of 0.0129.
-    // Green when: ctest -L todo_human  (tests/learning/test_srgb_oetf.cpp)
-    return std::pow(linear, 1.0f / 2.2f);
+    // Parçalı sRGB OETF (IEC 61966-2-1), srgbDecode'un tam tersi:
+    //   linear ≤ 0.0031308 → 12.92·linear            (siyaha yakın doğrusal "ayak")
+    //   aksi halde         → 1.055·linear^(1/2.4) - 0.055
+    // İki parça 0.0031308'de hem değer hem eğim olarak (yaklaşık) birleşir. Saf
+    // gamma 2.2 (eski kod) siyaha yakın çok parlaktı: 0.001 → 0.043 (doğrusu 0.0129).
+    if (linear <= 0.0031308f) return 12.92f * linear;
+    return 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
 }
 
 uint8_t quantizeUnorm8(float value, float dither) {

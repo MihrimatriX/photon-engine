@@ -1,3 +1,6 @@
+// Analitik küre: ışın-küre kesişimi (ikinci derece denklem), dışa dönük normal,
+// küresel UV ve u yönündeki teğet.
+
 #include "geometry/sphere.h"
 #include "core/math/utils.h"
 #include <cmath>
@@ -49,8 +52,11 @@ bool Sphere::intersect(Ray& ray, SurfaceInteraction& isect) const {
     isect.uv.x = phi / TWO_PI;
     isect.uv.y = theta / PI;
 
-    // Compute tangent (derivative of position with respect to u)
-    isect.tangent = Vec3f(-TWO_PI * outwardNormal.z, 0.0f, -TWO_PI * outwardNormal.x);
+    // Teğet = ∂P/∂u yönü. φ' = atan2(-z, x) olduğundan x = r cosφ', z = -r sinφ' ve
+    //   ∂P/∂φ' = (-r sinφ', 0, -r cosφ') = (z, 0, -x).
+    // (2π çarpanı normalize edilince kaybolur.) Eski kodda x bileşeninin işareti tersti;
+    // teğet normale dik değildi, bazı noktalarda normale ters paralel oluyordu (geometry-9).
+    isect.tangent = Vec3f(outwardNormal.z, 0.0f, -outwardNormal.x);
     if (isect.tangent.lengthSquared() == 0.0f) {
         // Fallback tangent
         float sign = std::copysign(1.0f, outwardNormal.z);
