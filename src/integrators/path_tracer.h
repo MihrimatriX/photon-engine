@@ -1,3 +1,5 @@
+// Yol izleyici integratörün arayüzü. maxDepth = en fazla saçılma (sekme) sayısı
+// (PBRT kuralı): 1 → yalnızca doğrudan ışık, 2 → bir sekme dolaylı ışık, ...
 #pragma once
 
 /// @file path_tracer.h
@@ -8,6 +10,7 @@
 namespace photon {
 
 /// @brief Path tracer supporting global illumination, direct lighting, and Russian roulette.
+/// @p maxDepth counts scattering events; emission found by the last scattered ray is still added.
 class PathTracer : public Integrator {
 public:
     explicit PathTracer(int maxDepth = 8, int russianRouletteDepth = 3,
