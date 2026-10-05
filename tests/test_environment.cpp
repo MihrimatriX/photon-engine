@@ -18,7 +18,7 @@ Image whiteMap(int w, int h) {
 
 TEST(EnvironmentLight, CdfIntegratesToOne) {
     Image img = whiteMap(32, 16);
-    EnvironmentLight env(&img, 0.0f, 1.0f);
+    EnvironmentLight env(std::make_shared<const Image>(img), 0.0f, 1.0f);
     EXPECT_NEAR(env.distributionIntegral(), 1.0f, 1e-4f);
 
     // Constant luminance + sin(theta) weight is uniform over the sphere.
@@ -39,7 +39,7 @@ TEST(EnvironmentLight, SamplesBrightWindow) {
     for (int y = 4; y < 10; ++y)
         for (int x = 8; x < 24; ++x) img.setPixel(x, y, Color3f(80.0f));
 
-    EnvironmentLight env(&img, 0.0f, 1.0f);
+    EnvironmentLight env(std::make_shared<const Image>(img), 0.0f, 1.0f);
     EXPECT_NEAR(env.distributionIntegral(), 1.0f, 1e-4f);
 
     SurfaceInteraction si;
@@ -56,4 +56,28 @@ TEST(EnvironmentLight, SamplesBrightWindow) {
         }
     }
     EXPECT_GT(inside, N * N * 8 / 10);
+}
+
+TEST(EnvironmentLight, RotationKeepsPdfConsistent) {
+    constexpr int W = 32, H = 16;
+    Image img(W, H);
+    for (int y = 4; y < 10; ++y)
+        for (int x = 8; x < 14; ++x) img.setPixel(x, y, Color3f(50.0f));
+    EnvironmentLight env(std::make_shared<const Image>(img), 1.3f, 2.0f);
+    SurfaceInteraction si;
+    for (int i = 0; i < 16; ++i) {
+        LightSample ls = env.sampleLi(si, Vec2f((i + 0.5f) / 16.0f, 0.4f));
+        ASSERT_GT(ls.pdf, 0.0f);
+        EXPECT_NEAR(ls.pdf, env.pdfLi(ls.wi), std::max(1e-3f, ls.pdf * 0.15f));
+        // Sampled directions land on the (rotated) bright patch, scaled by intensity.
+        EXPECT_GT(ls.Li.r, 10.0f);
+    }
+}
+
+TEST(EnvironmentLight, PolesDoNotWrap) {
+    // Top row white, bottom row black: looking straight up must not blend in the nadir.
+    Image img(8, 8);
+    for (int x = 0; x < 8; ++x) img.setPixel(x, 0, Color3f(1.0f));
+    EXPECT_NEAR(sampleEquirect(img, 0.3f, 0.0f).r, 1.0f, 1e-5f);
+    EXPECT_NEAR(sampleEquirect(img, 0.3f, 1.0f).r, 0.0f, 1e-5f);
 }

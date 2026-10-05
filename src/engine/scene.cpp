@@ -1,3 +1,4 @@
+// scene.cpp — Render sahnesine şekil/ışık ekleme ve BVH üzerinden kesişim sorguları.
 #include "engine/scene.h"
 #include "geometry/mesh.h"
 #include "geometry/triangle.h"
@@ -13,10 +14,11 @@ void Scene::addShape(std::shared_ptr<Shape> shape) {
     m_shapes.push_back(std::move(shape));
     if (!mesh || !mesh->material()) return;
 
+    // Emisyonlu mesh (ör. LED panel malzemesi) → ışık örneklemesine de girer.
     SurfaceInteraction si;
     Color3f emission = mesh->material()->emitted(si);
     if (emission.isBlack()) return;
-    // Area-light quads are Triangle shapes, not meshes, so they are not registered twice.
+    // Alan ışığı dörtgenleri mesh değil Triangle olduğu için iki kez kaydedilmez.
     auto light = std::make_shared<MeshLight>(mesh.get(), emission);
     m_lights.push_back(light);
     m_lightPtrs.push_back(light.get());
@@ -27,9 +29,9 @@ void Scene::addLight(std::shared_ptr<Light> light) {
     m_lights.push_back(light);
     m_lightPtrs.push_back(light.get());
 
-    // Area lights are not otherwise intersectable, so a BSDF ray never returns their
-    // emission and the NEE MIS weight throws that energy away. Hang the same quad
-    // in the BVH as a black Lambertian that only emits.
+    // Alan ışıkları başka türlü kesişilemez: BSDF ile örneklenen bir ışın ışığa
+    // çarpınca emisyonunu göremez ve NEE'nin MIS ağırlığı o enerjiyi atar.
+    // Aynı dörtgeni BVH'ye yalnız ışık yayan siyah bir Lambertian olarak asarız.
     auto area = std::dynamic_pointer_cast<AreaLight>(light);
     if (!area) return;
 
@@ -48,12 +50,14 @@ void Scene::addLight(std::shared_ptr<Light> light) {
     const Material* m = mat.get();
     addShape(std::make_shared<Triangle>(p0, p1, p2, n, n, n, uv0, uv1, uv2, m));
     addShape(std::make_shared<Triangle>(p0, p2, p3, n, n, n, uv0, uv2, uv3, m));
-    // compile() builds the BVH before lights are attached; pick them up here.
-    buildAccelerator();
 }
 
 void Scene::setEnvironment(std::shared_ptr<EnvironmentLight> envLight) {
-    m_environment = envLight;
+    m_environment = std::move(envLight);
+}
+
+void Scene::retainMaterial(std::shared_ptr<const Material> material) {
+    if (material) m_materials.push_back(std::move(material));
 }
 
 void Scene::buildAccelerator() {
@@ -67,6 +71,9 @@ void Scene::reset() {
     m_environment.reset();
     m_bvh = BVH{};
     m_emissiveMaterials.clear();
+    m_materials.clear();
+    m_shapeOwner.clear();
+    m_background = Background{};
 }
 
 bool Scene::intersect(Ray& ray, SurfaceInteraction& isect) const {
@@ -75,6 +82,10 @@ bool Scene::intersect(Ray& ray, SurfaceInteraction& isect) const {
 
 bool Scene::intersectAny(const Ray& ray) const {
     return m_bvh.intersectAny(ray);
+}
+
+AABB Scene::bounds() const {
+    return m_bvh.bounds();
 }
 
 } // namespace photon

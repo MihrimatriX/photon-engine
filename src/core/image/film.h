@@ -33,6 +33,10 @@ public:
     /// Concurrent calls are safe when they target different pixels.
     void addSample(int x, int y, const Color3f& radiance);
 
+    /// addSample gibi ama negatif bileşenleri korur (gürültü giderici için yüzey
+    /// normalleri). NaN/Inf yine reddedilir.
+    void addSampleSigned(int x, int y, const Color3f& value);
+
     /// sum / count, or black for a pixel with no samples.
     Color3f resolvedPixel(int x, int y) const;
     int sampleCount(int x, int y) const;

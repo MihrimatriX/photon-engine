@@ -1,0 +1,10 @@
+{
+  "id": "gunmetal",
+  "name": "Tabanca Metali",
+  "category": "Metal",
+  "type": "generic",
+  "baseColor": [0.26, 0.27, 0.29],
+  "roughness": 0.25,
+  "metallic": 1,
+  "specular": 0.5
+}

@@ -28,5 +28,8 @@ target_link_libraries(photon_tests PRIVATE
 
 # Set include directory so tests can find core/math/vec.h etc.
 target_include_directories(photon_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(photon_tests PRIVATE PHOTON_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+
+photon_copy_oidn_dlls(photon_tests)
 
 add_test(NAME photon_tests COMMAND photon_tests)

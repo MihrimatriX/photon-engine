@@ -1,0 +1,11 @@
+{
+  "id": "warm_bulb",
+  "name": "Sıcak Ampul",
+  "category": "Işık",
+  "type": "generic",
+  "baseColor": [1.0, 0.72, 0.42],
+  "roughness": 0.4,
+  "metallic": 0,
+  "specular": 0.5,
+  "emissive": 8.0
+}

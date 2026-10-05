@@ -16,7 +16,7 @@ struct RenderSettings {
     int tileSize = 32;                 ///< Size of tile for multi-threaded rendering (e.g. 32x32)
     int numThreads = 0;                ///< 0 = hardware_concurrency (full-render dialog override)
 
-    ToneMapOperator tmo = ToneMapOperator::ACES; ///< Tone mapping operator to apply
+    ToneMapOperator tmo = ToneMapOperator::PBRNeutral; ///< Ton eşleme operatörü
     float exposure = 0.0f;             ///< Exposure value (EV stops)
 
     bool adaptiveSampling = false;     ///< Extra samples on high-variance pixels

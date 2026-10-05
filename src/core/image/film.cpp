@@ -58,6 +58,20 @@ void Film::addSample(int x, int y, const Color3f& L) {
     s[2] += L.b;
 }
 
+void Film::addSampleSigned(int x, int y, const Color3f& v) {
+    assert(x >= 0 && x < m_width && y >= 0 && y < m_height);
+    const size_t flat = flatIndex(x, y);
+    ++m_count[flat];
+    if (!finite3(v.r, v.g, v.b)) {
+        m_rejected.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    float* s = &m_sum[flat * 3];
+    s[0] += v.r;
+    s[1] += v.g;
+    s[2] += v.b;
+}
+
 Color3f Film::resolvedPixel(int x, int y) const {
     const size_t flat = flatIndex(x, y);
     const uint32_t n = m_count[flat];

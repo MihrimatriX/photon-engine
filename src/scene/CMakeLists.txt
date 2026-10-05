@@ -7,6 +7,7 @@ add_library(photon_scene STATIC
 target_link_libraries(photon_scene PUBLIC
     photon_engine
     photon_io
+    nlohmann_json::nlohmann_json
 )
 
 target_include_directories(photon_scene PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)

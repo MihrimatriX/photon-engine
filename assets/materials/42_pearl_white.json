@@ -1,0 +1,12 @@
+{
+  "id": "pearl_white",
+  "name": "İnci Beyazı",
+  "category": "Boya",
+  "type": "generic",
+  "baseColor": [0.88, 0.87, 0.84],
+  "roughness": 0.3,
+  "metallic": 0.15,
+  "specular": 0.5,
+  "clearCoat": 1.0,
+  "clearCoatRoughness": 0.03
+}

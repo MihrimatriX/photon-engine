@@ -1,0 +1,12 @@
+{
+  "id": "metallic_blue",
+  "name": "Metalik Mavi",
+  "category": "Boya",
+  "type": "generic",
+  "baseColor": [0.08, 0.2, 0.55],
+  "roughness": 0.35,
+  "metallic": 0.6,
+  "specular": 0.5,
+  "clearCoat": 1.0,
+  "clearCoatRoughness": 0.02
+}

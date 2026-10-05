@@ -1,9 +1,0 @@
-{
-  "id": "frosted_glass",
-  "name": "Frosted Glass",
-  "category": "Cam",
-  "baseColor": [0.9, 0.92, 0.95],
-  "metallic": 0.0,
-  "roughness": 0.45,
-  "specular": 0.8
-}

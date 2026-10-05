@@ -1,0 +1,12 @@
+{
+  "id": "piano_black",
+  "name": "Piyano Siyahı",
+  "category": "Boya",
+  "type": "generic",
+  "baseColor": [0.01, 0.01, 0.012],
+  "roughness": 0.3,
+  "metallic": 0,
+  "specular": 0.5,
+  "clearCoat": 1.0,
+  "clearCoatRoughness": 0.01
+}

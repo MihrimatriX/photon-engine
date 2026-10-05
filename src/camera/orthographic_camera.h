@@ -8,8 +8,9 @@
 
 namespace photon {
 
-/// Full-frame sensor height used to turn a focal length in mm into a vertical FOV.
-constexpr float kSensorHeightMm = 36.0f;
+/// Tam kare (36×24 mm) sensörün yüksekliği: odak uzunluğu (mm) → dikey görüş açısı.
+/// Yatay kadraj için Blender/KeyShot gibi 36 mm genişlik × en-boy oranı kullanılır.
+constexpr float kSensorHeightMm = 24.0f;
 
 inline float fovDegreesFromFocalMm(float focalMm) {
     if (focalMm < 1.0f) focalMm = 1.0f;

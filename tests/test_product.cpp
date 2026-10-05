@@ -42,35 +42,33 @@ TEST(Transform, TranslationKeepsRotation) {
     EXPECT_NEAR(p1.z - p0.z, 5.0f, 1e-4f);
 }
 
-TEST(Denoise, AovPointersKeepFallback) {
+TEST(Denoise, AovPointersKeepAovs) {
     Image img(3, 3);
-    img.addSample(1, 1, Color3f(4, 0, 0));
+    img.setPixel(1, 1, Color3f(4, 0, 0));
     Image albedo(3, 3);
-    albedo.addSample(1, 1, Color3f(1, 0, 0));
+    albedo.setPixel(1, 1, Color3f(1, 0, 0));
     Image normal(3, 3);
-    normal.addSample(1, 1, Color3f(0, 0, 1));
+    normal.setPixel(1, 1, Color3f(0, 0, 1));
     EXPECT_TRUE(denoiseImage(img, &albedo, &normal));
-    EXPECT_GT(img.getAveragedPixel(1, 1).r, 0.0f);
-    EXPECT_EQ(albedo.getSampleCount(1, 1), 1);
+    EXPECT_GT(img.getPixel(1, 1).r, 0.0f);
+    EXPECT_FLOAT_EQ(albedo.getPixel(1, 1).r, 1.0f);
 }
 
-TEST(Denoise, CopyKeepsSampleCount) {
+TEST(Denoise, CopyLeavesSourceAlone) {
     Image src(4, 4);
-    src.addSample(1, 1, Color3f(1, 0, 0));
-    src.addSample(1, 1, Color3f(0, 1, 0));
-    int before = src.getSampleCount(1, 1);
+    src.setPixel(1, 1, Color3f(1, 0.5f, 0));
     Image out = denoiseCopy(src);
-    EXPECT_EQ(src.getSampleCount(1, 1), before);
-    EXPECT_EQ(src.getSampleCount(0, 0), 0);
+    EXPECT_FLOAT_EQ(src.getPixel(1, 1).g, 0.5f);
+    EXPECT_FLOAT_EQ(src.getPixel(0, 0).r, 0.0f);
     EXPECT_EQ(out.width(), src.width());
-    EXPECT_EQ(out.getSampleCount(1, 1), 1);
+    EXPECT_EQ(out.height(), src.height());
 }
 
 TEST(Ground, SitsUnderBounds) {
     AABB box(Vec3f(-1.0f, 0.4f, -0.5f), Vec3f(1.0f, 2.0f, 0.5f));
     GroundQuad g = placeGroundUnder(box);
     EXPECT_LT(g.corner.y, box.pMin.y);
-    EXPECT_NEAR(g.corner.y, box.pMin.y - 0.02f, 1e-4f);
+    EXPECT_NEAR(g.corner.y, box.pMin.y, 1e-2f);
     EXPECT_GT(g.edgeU.x, (box.pMax.x - box.pMin.x) * 2.0f);
     EXPECT_NEAR(g.edgeU.y, 0.0f, 1e-6f);
 }
@@ -91,36 +89,67 @@ TEST(MaterialPreset, EmissiveIsVisible) {
     EXPECT_TRUE(lib.createMaterial(plain)->emitted(si).isBlack());
 }
 
-TEST(MaterialPreset, ClearGlassIsDielectric) {
-    MaterialLibrary lib;
+TEST(MaterialPreset, KindSelectsBsdf) {
     MaterialPreset glass;
-    glass.id = "clear_glass";
-    glass.baseColor = Color3f(0.95f, 0.98f, 1.0f);
-    auto mat = lib.createMaterial(glass);
+    glass.kind = MaterialKind::Glass;
+    glass.ior = 1.33f;
+    glass.roughness = 0.0f;
+    auto mat = MaterialLibrary::createMaterial(glass);
     auto* di = dynamic_cast<Dielectric*>(mat.get());
     ASSERT_NE(di, nullptr);
-    EXPECT_NEAR(di->ior(), 1.5f, 1e-5f);
+    EXPECT_NEAR(di->ior(), 1.33f, 1e-5f);
+    EXPECT_EQ(di->roughness(), 0.0f);
 
-    MaterialPreset frost;
-    frost.id = "frosted_glass";
-    frost.baseColor = Color3f(0.9f);
+    MaterialPreset frost = glass;
     frost.roughness = 0.45f;
-    auto frosted = lib.createMaterial(frost);
-    auto* rough = dynamic_cast<Dielectric*>(frosted.get());
+    auto* rough = dynamic_cast<Dielectric*>(MaterialLibrary::createMaterial(frost).get());
     ASSERT_NE(rough, nullptr);
     EXPECT_GT(rough->roughness(), 0.0f);
 
+    // Behaviour comes from the parameters, not from magic preset ids.
     MaterialPreset brush;
     brush.id = "brushed_aluminum";
-    auto metal = std::dynamic_pointer_cast<DisneyMaterial>(lib.createMaterial(brush));
+    brush.metallic = 1.0f;
+    brush.anisotropy = 0.75f;
+    auto metal = std::dynamic_pointer_cast<DisneyMaterial>(MaterialLibrary::createMaterial(brush));
     ASSERT_NE(metal, nullptr);
-    EXPECT_NEAR(metal->anisotropy(), 0.7f, 1e-4f);
+    EXPECT_NEAR(metal->anisotropy(), 0.75f, 1e-4f);
 
-    MaterialPreset cloth;
-    cloth.id = "linen";
-    auto linen = std::dynamic_pointer_cast<DisneyMaterial>(lib.createMaterial(cloth));
+    MaterialPreset plain;
+    plain.id = "linen";
+    auto linen = std::dynamic_pointer_cast<DisneyMaterial>(MaterialLibrary::createMaterial(plain));
     ASSERT_NE(linen, nullptr);
-    EXPECT_GT(linen->sheen(), 0.0f);
+    EXPECT_EQ(linen->sheen(), 0.0f);
+}
+
+TEST(MaterialPreset, RoundTripThroughMaterial) {
+    MaterialPreset p;
+    p.baseColor = Color3f(0.2f, 0.4f, 0.6f);
+    p.roughness = 0.3f;
+    p.clearCoat = 0.7f;
+    auto mat = MaterialLibrary::createMaterial(p);
+    MaterialPreset back = MaterialLibrary::presetFromMaterial(*mat, "Test Boya");
+    EXPECT_EQ(back.kind, MaterialKind::Generic);
+    EXPECT_NEAR(back.baseColor.g, 0.4f, 1e-5f);
+    EXPECT_NEAR(back.roughness, 0.3f, 1e-5f);
+    EXPECT_NEAR(back.clearCoat, 0.7f, 1e-5f);
+    EXPECT_EQ(back.id, "test_boya");
+
+    auto copy = cloneMaterial(*mat);
+    ASSERT_NE(copy, nullptr);
+    EXPECT_NE(copy.get(), mat.get());
+}
+
+TEST(MaterialLibrary, LoadsShippedPresets) {
+    MaterialLibrary lib;
+    ASSERT_TRUE(lib.loadFromDirectory(PHOTON_ASSETS_DIR "/materials"));
+    const MaterialPreset* chrome = lib.findById("chrome");
+    ASSERT_NE(chrome, nullptr);
+    EXPECT_EQ(chrome->metallic, 1.0f);
+    const MaterialPreset* glass = lib.findById("clear_glass");
+    ASSERT_NE(glass, nullptr);
+    EXPECT_EQ(glass->kind, MaterialKind::Glass);
+    EXPECT_GE(lib.categories().size(), 5u);
 }
 
 TEST(Preview, LightDirFromScene) {

@@ -1,9 +1,0 @@
-{
-  "id": "red_plastic",
-  "name": "Red Plastic",
-  "category": "Plastik",
-  "baseColor": [0.85, 0.1, 0.1],
-  "metallic": 0.0,
-  "roughness": 0.4,
-  "specular": 0.5
-}

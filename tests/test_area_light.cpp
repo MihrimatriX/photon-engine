@@ -86,6 +86,7 @@ TEST(AreaLight, CameraSeesEmissiveQuad) {
     Scene scene;
     auto light = studioLight();
     scene.addLight(light);
+    scene.buildAccelerator();
 
     Vec3f aim = interiorPoint(*light);
     Ray ray(Vec3f(aim.x, aim.y - 1.0f, aim.z), Vec3f(0.0f, 1.0f, 0.0f));
@@ -105,6 +106,7 @@ TEST(AreaLight, DiffuseFloorLitWithoutDoubleCount) {
             Vec3f(0.0f, 1.0f, 0.0f), floorMat.get());
     auto light = studioLight();
     scene.addLight(light);
+    scene.buildAccelerator();
 
     Vec3f aim = interiorPoint(*light);
     Ray ray(Vec3f(aim.x, 1.0f, aim.z), Vec3f(0.0f, -1.0f, 0.0f));
@@ -176,6 +178,7 @@ TEST(AreaLight, MirrorSeesLightGeometry) {
             Vec3f(0.0f, 1.0f, 0.0f), mirror.get());
     auto light = studioLight();
     scene.addLight(light);
+    scene.buildAccelerator();
 
     Vec3f aim = interiorPoint(*light);
     Ray ray(Vec3f(aim.x, 1.0f, aim.z), Vec3f(0.0f, -1.0f, 0.0f));

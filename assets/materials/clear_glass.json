@@ -1,9 +1,0 @@
-{
-  "id": "clear_glass",
-  "name": "Clear Glass",
-  "category": "Cam",
-  "baseColor": [0.95, 0.98, 1.0],
-  "metallic": 0.0,
-  "roughness": 0.02,
-  "specular": 1.0
-}

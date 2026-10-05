@@ -1,120 +1,70 @@
+// material_library.cpp — Preset JSON okuma/yazma ve preset → Material dönüşümü.
 #include "scene/material_library.h"
 #include "materials/dielectric.h"
+#include "materials/lambertian.h"
+#include "materials/mirror.h"
+#include "core/platform/path.h"
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
-#include <cstdlib>
+#include <iostream>
 
 namespace photon {
 namespace {
 
-// ponytail: minimal JSON field extraction, no dependency
-std::string jsonString(const std::string& json, const std::string& key) {
-    std::string needle = "\"" + key + "\"";
-    auto pos = json.find(needle);
-    if (pos == std::string::npos) return {};
-    pos = json.find(':', pos);
-    if (pos == std::string::npos) return {};
-    pos = json.find('"', pos);
-    if (pos == std::string::npos) return {};
-    auto end = json.find('"', pos + 1);
-    return json.substr(pos + 1, end - pos - 1);
+using json = nlohmann::json;
+
+Color3f readColor(const json& j, const char* key, const Color3f& def) {
+    auto it = j.find(key);
+    if (it == j.end() || !it->is_array() || it->size() < 3) return def;
+    return Color3f((*it)[0].get<float>(), (*it)[1].get<float>(), (*it)[2].get<float>());
 }
 
-float jsonFloat(const std::string& json, const std::string& key, float def) {
-    std::string needle = "\"" + key + "\"";
-    auto pos = json.find(needle);
-    if (pos == std::string::npos) return def;
-    pos = json.find(':', pos);
-    if (pos == std::string::npos) return def;
-    return std::strtof(json.c_str() + pos + 1, nullptr);
-}
-
-Color3f jsonColor(const std::string& json, const std::string& key, const Color3f& def) {
-    std::string needle = "\"" + key + "\"";
-    auto pos = json.find(needle);
-    if (pos == std::string::npos) return def;
-    pos = json.find('[', pos);
-    if (pos == std::string::npos) return def;
-    float r = 0, g = 0, b = 0;
-    std::sscanf(json.c_str() + pos, "[%f,%f,%f]", &r, &g, &b);
-    return Color3f(r, g, b);
-}
-
-float clampf(float v, float lo, float hi) {
-    return v < lo ? lo : (v > hi ? hi : v);
+std::string slug(const std::string& name) {
+    std::string out;
+    for (unsigned char c : name) {
+        if (std::isalnum(c)) out.push_back(static_cast<char>(std::tolower(c)));
+        else if (!out.empty() && out.back() != '_') out.push_back('_');
+    }
+    while (!out.empty() && out.back() == '_') out.pop_back();
+    return out.empty() ? "malzeme" : out;
 }
 
 } // namespace
 
-void renderSphereThumbnail(const MaterialPreset& p, int size, std::vector<uint8_t>& rgbaOut) {
-    size = std::max(8, size);
-    rgbaOut.assign(static_cast<size_t>(size) * static_cast<size_t>(size) * 4u, 0);
-    const float inv = 2.0f / static_cast<float>(size);
-    const float Lx = 0.45f, Ly = 0.55f, Lz = 0.7f;
-    const float Llen = std::sqrt(Lx * Lx + Ly * Ly + Lz * Lz);
-    const float lx = Lx / Llen, ly = Ly / Llen, lz = Lz / Llen;
-    const float shininess = 8.0f + (1.0f - p.roughness) * (1.0f - p.roughness) * 248.0f;
-    const float amb = 0.18f;
-
-    for (int y = 0; y < size; ++y) {
-        for (int x = 0; x < size; ++x) {
-            float u = x * inv - 1.0f;
-            float v = 1.0f - y * inv;
-            float r2 = u * u + v * v;
-            if (r2 > 1.0f) continue;
-            float z = std::sqrt(std::max(0.0f, 1.0f - r2));
-            float ndotl = std::max(0.0f, u * lx + v * ly + z * lz);
-            // Blinn-Phong highlight (view ≈ +Z)
-            float hx = lx, hy = ly, hz = lz + 1.0f;
-            float hlen = std::sqrt(hx * hx + hy * hy + hz * hz);
-            float ndoth = std::max(0.0f, (u * hx + v * hy + z * hz) / hlen);
-            float spec = std::pow(ndoth, shininess);
-
-            Color3f F0 = Color3f(0.04f * p.specular) * (1.0f - p.metallic) + p.baseColor * p.metallic;
-            Color3f diffuse = p.baseColor * (amb + ndotl * (1.0f - amb)) * (1.0f - p.metallic);
-            Color3f col = diffuse + F0 * (spec * (0.25f + 0.75f * p.metallic + 0.35f * (1.0f - p.roughness)));
-            if (p.emissive > 0.0f) col = col + p.baseColor * std::min(p.emissive * 0.08f, 1.5f);
-            // soft rim
-            float rim = 1.0f - z;
-            col = col * (1.0f - rim * 0.25f);
-
-            size_t i = (static_cast<size_t>(y) * static_cast<size_t>(size) + static_cast<size_t>(x)) * 4u;
-            rgbaOut[i] = static_cast<uint8_t>(clampf(col.r, 0.0f, 1.0f) * 255.0f);
-            rgbaOut[i + 1] = static_cast<uint8_t>(clampf(col.g, 0.0f, 1.0f) * 255.0f);
-            rgbaOut[i + 2] = static_cast<uint8_t>(clampf(col.b, 0.0f, 1.0f) * 255.0f);
-            float edge = clampf((1.0f - r2) * 12.0f, 0.0f, 1.0f);
-            rgbaOut[i + 3] = static_cast<uint8_t>(edge * 255.0f);
-        }
-    }
-}
-
 bool MaterialLibrary::loadFile(const std::string& path) {
-    std::ifstream in(path);
+    std::ifstream in(pathFromUtf8(path));
     if (!in) return false;
-    std::stringstream ss;
-    ss << in.rdbuf();
-    std::string json = ss.str();
+    json j = json::parse(in, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) {
+        std::cerr << "Material preset: invalid JSON: " << path << std::endl;
+        return false;
+    }
 
     MaterialPreset p;
-    p.id = jsonString(json, "id");
-    p.name = jsonString(json, "name");
-    p.category = jsonString(json, "category");
-    if (p.name.empty()) p.name = std::filesystem::path(path).stem().string();
-    if (p.category.empty()) p.category = "General";
-    p.baseColor = jsonColor(json, "baseColor", Color3f(0.8f));
-    p.metallic = jsonFloat(json, "metallic", 0.0f);
-    p.roughness = jsonFloat(json, "roughness", 0.5f);
-    p.specular = jsonFloat(json, "specular", 0.5f);
-    p.clearCoat = jsonFloat(json, "clearCoat", 0.0f);
-    p.emissive = jsonFloat(json, "emissive", 0.0f);
-    p.anisotropy = jsonFloat(json, "anisotropy", 0.0f);
-    p.sheen = jsonFloat(json, "sheen", 0.0f);
-    p.diffuseTransmission = jsonFloat(json, "diffuseTransmission", 0.0f);
-    if (p.id.empty()) p.id = p.name;
+    p.file = path;
+    p.id = j.value("id", std::string());
+    p.name = j.value("name", std::string());
+    p.category = j.value("category", std::string());
+    if (p.name.empty()) p.name = pathToUtf8(pathFromUtf8(path).stem());
+    if (p.category.empty()) p.category = "Genel";
+    if (p.id.empty()) p.id = slug(p.name);
+    p.kind = j.value("type", std::string("generic")) == "glass" ? MaterialKind::Glass : MaterialKind::Generic;
+    p.baseColor = readColor(j, "baseColor", Color3f(0.8f));
+    p.metallic = j.value("metallic", 0.0f);
+    p.roughness = j.value("roughness", 0.5f);
+    p.specular = j.value("specular", 0.5f);
+    p.clearCoat = j.value("clearCoat", 0.0f);
+    p.clearCoatRoughness = j.value("clearCoatRoughness", 0.03f);
+    p.anisotropy = j.value("anisotropy", 0.0f);
+    p.sheen = j.value("sheen", 0.0f);
+    p.diffuseTransmission = j.value("diffuseTransmission", 0.0f);
+    p.emissive = j.value("emissive", 0.0f);
+    p.ior = j.value("ior", 1.5f);
     m_presets.push_back(std::move(p));
     return true;
 }
@@ -122,10 +72,15 @@ bool MaterialLibrary::loadFile(const std::string& path) {
 bool MaterialLibrary::loadFromDirectory(const std::string& path) {
     m_presets.clear();
     namespace fs = std::filesystem;
-    if (!fs::exists(path)) return false;
-    for (const auto& e : fs::directory_iterator(path)) {
-        if (e.path().extension() == ".json") loadFile(e.path().string());
+    const fs::path dir = pathFromUtf8(path);
+    std::error_code ec;
+    if (!fs::exists(dir, ec)) return false;
+    std::vector<fs::path> files;
+    for (const auto& e : fs::directory_iterator(dir, ec)) {
+        if (e.path().extension() == ".json") files.push_back(e.path());
     }
+    std::sort(files.begin(), files.end());
+    for (const auto& f : files) loadFile(pathToUtf8(f));
     return !m_presets.empty();
 }
 
@@ -142,8 +97,7 @@ std::vector<std::string> MaterialLibrary::categories() const {
         if (std::find(cats.begin(), cats.end(), p.category) == cats.end())
             cats.push_back(p.category);
     }
-    std::sort(cats.begin(), cats.end());
-    return cats;
+    return cats; // dosya sırasıyla (öneklerle düzenlenir: 10_plastik_..., 20_metal_...)
 }
 
 std::vector<const MaterialPreset*> MaterialLibrary::byCategory(const std::string& cat) const {
@@ -154,22 +108,94 @@ std::vector<const MaterialPreset*> MaterialLibrary::byCategory(const std::string
     return out;
 }
 
-std::shared_ptr<Material> MaterialLibrary::createMaterial(const MaterialPreset& p) const {
-    if (p.id == "clear_glass")
-        return std::make_shared<Dielectric>(1.5f, p.baseColor, 0.0f);
-    if (p.id == "frosted_glass")
-        return std::make_shared<Dielectric>(1.5f, p.baseColor, std::max(0.001f, p.roughness));
+std::shared_ptr<Material> MaterialLibrary::createMaterial(const MaterialPreset& p) {
+    if (p.kind == MaterialKind::Glass) {
+        // Pürüzlülük ~0 ise kusursuz (delta) cam, aksi hâlde GGX buzlu cam.
+        const float r = p.roughness <= 0.02f ? 0.0f : p.roughness;
+        return std::make_shared<Dielectric>(p.ior, p.baseColor, r);
+    }
     auto m = std::make_shared<DisneyMaterial>(p.baseColor, p.metallic, p.roughness, p.specular);
     m->setClearCoat(p.clearCoat);
-    float aniso = p.anisotropy;
-    if (p.id == "brushed_aluminum" && aniso <= 0.0f) aniso = 0.7f;
-    m->setAnisotropy(aniso);
-    float sheen = p.sheen;
-    if ((p.id == "blue_fabric" || p.id == "linen") && sheen <= 0.0f) sheen = 0.6f;
-    m->setSheen(sheen);
+    m->setClearCoatRoughness(p.clearCoatRoughness);
+    m->setAnisotropy(p.anisotropy);
+    m->setSheen(p.sheen);
     m->setDiffuseTransmission(p.diffuseTransmission);
     if (p.emissive > 0.0f) m->setEmission(p.baseColor * p.emissive);
     return m;
+}
+
+MaterialPreset MaterialLibrary::presetFromMaterial(const Material& mat, const std::string& name) {
+    MaterialPreset p;
+    p.name = name;
+    p.id = slug(name);
+    p.category = "Benim";
+    if (const auto* d = dynamic_cast<const DisneyMaterial*>(&mat)) {
+        p.baseColor = d->baseColor();
+        p.metallic = d->metallic();
+        p.roughness = d->roughness();
+        p.specular = d->specular();
+        p.clearCoat = d->clearCoat();
+        p.clearCoatRoughness = d->clearCoatRoughness();
+        p.anisotropy = d->anisotropy();
+        p.sheen = d->sheen();
+        p.diffuseTransmission = d->diffuseTransmission();
+        SurfaceInteraction si;
+        const Color3f e = d->emitted(si);
+        const float m = std::max(e.r, std::max(e.g, e.b));
+        if (m > 0.0f) {
+            p.emissive = m;
+            p.baseColor = e / m;
+        }
+    } else if (const auto* g = dynamic_cast<const Dielectric*>(&mat)) {
+        p.kind = MaterialKind::Glass;
+        p.baseColor = g->tint();
+        p.roughness = g->roughness();
+        p.ior = g->ior();
+    }
+    return p;
+}
+
+bool MaterialLibrary::savePreset(MaterialPreset p, const std::string& dir) {
+    namespace fs = std::filesystem;
+    if (p.id.empty()) p.id = slug(p.name);
+    json j;
+    j["id"] = p.id;
+    j["name"] = p.name;
+    j["category"] = p.category;
+    j["type"] = p.kind == MaterialKind::Glass ? "glass" : "generic";
+    j["baseColor"] = {p.baseColor.r, p.baseColor.g, p.baseColor.b};
+    j["roughness"] = p.roughness;
+    if (p.kind == MaterialKind::Glass) {
+        j["ior"] = p.ior;
+    } else {
+        j["metallic"] = p.metallic;
+        j["specular"] = p.specular;
+        j["clearCoat"] = p.clearCoat;
+        j["clearCoatRoughness"] = p.clearCoatRoughness;
+        j["anisotropy"] = p.anisotropy;
+        j["sheen"] = p.sheen;
+        j["diffuseTransmission"] = p.diffuseTransmission;
+        j["emissive"] = p.emissive;
+    }
+    std::error_code ec;
+    fs::create_directories(pathFromUtf8(dir), ec);
+    const fs::path file = pathFromUtf8(dir) / pathFromUtf8("90_" + p.id + ".json");
+    std::ofstream out(file);
+    if (!out) return false;
+    out << j.dump(2);
+    if (!out) return false;
+    p.file = pathToUtf8(file);
+    std::erase_if(m_presets, [&](const MaterialPreset& e) { return e.id == p.id; });
+    m_presets.push_back(std::move(p));
+    return true;
+}
+
+std::shared_ptr<Material> cloneMaterial(const Material& m) {
+    if (const auto* d = dynamic_cast<const DisneyMaterial*>(&m)) return std::make_shared<DisneyMaterial>(*d);
+    if (const auto* g = dynamic_cast<const Dielectric*>(&m)) return std::make_shared<Dielectric>(*g);
+    if (const auto* l = dynamic_cast<const Lambertian*>(&m)) return std::make_shared<Lambertian>(*l);
+    if (const auto* r = dynamic_cast<const Mirror*>(&m)) return std::make_shared<Mirror>(*r);
+    return nullptr;
 }
 
 } // namespace photon

@@ -210,8 +210,14 @@ void BVH::freeBuildTree(BVHBuildNode* node) {
 namespace {
 
 bool hitPrim(const PrimRef& prim, Ray& ray, SurfaceInteraction& isect) {
-    if (prim.mesh) return prim.mesh->intersectTriangle(prim.tri, ray, isect);
-    return prim.shape && prim.shape->intersect(ray, isect);
+    if (prim.mesh) {
+        if (!prim.mesh->intersectTriangle(prim.tri, ray, isect)) return false;
+        isect.hitObject = prim.mesh;
+        return true;
+    }
+    if (!prim.shape || !prim.shape->intersect(ray, isect)) return false;
+    isect.hitObject = prim.shape;
+    return true;
 }
 
 // ponytail: thread_local heap stack. A fixed 64 overflowed and dropped the branch.

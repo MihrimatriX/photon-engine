@@ -19,6 +19,7 @@ struct SurfaceInteraction {
     Vec2f uv;               ///< UV texture coordinates
     float t = -1.0f;        ///< Distance along the ray of intersection
     const Material* material = nullptr; ///< Material of the intersected surface
+    const void* hitObject = nullptr;    ///< Çarpılan şekil/mesh (seçim için; BVH yazar)
     bool frontFace = true;  ///< True if ray hit front side of the surface
 
     /// Flip the shading normal toward the ray. Does not overwrite a geometric normal already set.

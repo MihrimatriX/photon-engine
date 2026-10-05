@@ -1,22 +1,45 @@
+// denoiser.h — Intel Open Image Denoise (OIDN) ile gürültü giderme.
+//
+// Path tracing az örnekle gürültülü görüntü üretir. OIDN, yapay sinir ağıyla bu
+// gürültüyü temizler; albedo ve normal kanalları (AOV) verilirse dokuları ve
+// kenarları çok daha iyi korur. OIDN derlemede yoksa yalnız 3×3 yumuşatma
+// uygulanır (gerçek bir gürültü giderici değildir; arayüz bunu açıkça söyler).
 #pragma once
 
-/// @file denoiser.h
-/// @brief Optional Intel OIDN image denoiser + soft blur fallback.
-
 #include "core/image/image.h"
+#include <memory>
+#include <mutex>
 
 namespace photon {
 
-/// Denoise a resolved (averaged) HDR image in place.
-/// Uses Intel OIDN when linked (PHOTON_ENABLE_OIDN). Otherwise applies a 3x3
-/// luminance-weighted blur: it softens fireflies but is not a denoiser.
-/// Optional albedo/normal AOVs improve OIDN quality when provided (same resolution).
+/// OIDN cihazını ve filtresini bir kez kurup tekrar kullanan gürültü giderici.
+/// Bir örnek aynı anda tek thread'den kullanılmalı (iç kilit bunu zorlar).
+class Denoiser {
+public:
+    enum class Quality { Fast, Balanced, High };
+
+    Denoiser();
+    ~Denoiser();
+    Denoiser(const Denoiser&) = delete;
+    Denoiser& operator=(const Denoiser&) = delete;
+
+    /// Ortalaması alınmış HDR görüntüyü yerinde temizler. AOV'ler isteğe bağlı,
+    /// aynı çözünürlükte olmalı. Hata olursa yumuşatmaya düşer ve false döner.
+    bool run(Image& color, const Image* albedo, const Image* normal, Quality quality = Quality::High);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+    std::mutex m_mutex;
+};
+
+/// Paylaşılan bir Denoiser ile yerinde gürültü giderme (Quality::High).
 bool denoiseImage(Image& color, const Image* albedo = nullptr, const Image* normal = nullptr);
 
-/// Denoise a copy; the source is left alone.
+/// Kopya üzerinde gürültü giderme; kaynak değişmez.
 Image denoiseCopy(const Image& color);
 
-/// True when this build was compiled with a linked OIDN SDK.
+/// Bu derleme OIDN ile bağlandıysa true.
 bool denoiseAvailable();
 
 } // namespace photon

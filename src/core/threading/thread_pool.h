@@ -1,3 +1,8 @@
+// thread_pool.h — Sabit sayıda işçi thread'i olan basit görev havuzu.
+//
+// Render karoları (tile) bu havuza iş olarak atılır. Her işçi kuyruktan bir
+// görev alır ve çalıştırır. submit() bir std::future döndürür; çağıran taraf
+// future.get() ile işin bitmesini bekler ve işteki istisnayı (exception) alır.
 #pragma once
 
 #include <vector>
@@ -8,7 +13,7 @@
 #include <functional>
 #include <future>
 #include <memory>
-#include <atomic>
+#include <stdexcept>
 #include <type_traits>
 
 namespace photon {
@@ -33,11 +38,13 @@ private:
     std::mutex m_mutex;
     std::condition_variable m_condition;
     std::condition_variable m_completionCondition;
-    std::atomic<bool> m_stop{false};
-    std::atomic<size_t> m_activeTasks{0};
+    // İkisi de yalnız m_mutex altında okunur/yazılır. Kilit dışında yazmak
+    // "kayıp uyanma" yarışına yol açar: işçi koşulu kontrol edip uyumadan hemen
+    // önce bayrak değişir ve notify kaçırılır; join() sonsuza kadar bekler.
+    bool m_stop = false;
+    size_t m_activeTasks = 0;
 };
 
-// Template implementation
 template<typename F, typename... Args>
 auto ThreadPool::submit(F&& f, Args&&... args) -> std::future<std::invoke_result_t<F, Args...>> {
     using ReturnType = std::invoke_result_t<F, Args...>;
@@ -53,10 +60,13 @@ auto ThreadPool::submit(F&& f, Args&&... args) -> std::future<std::invoke_result
         if (m_stop) {
             throw std::runtime_error("Cannot submit to stopped ThreadPool");
         }
-        m_activeTasks++;
+        ++m_activeTasks;
         m_tasks.emplace([task, this]() {
             (*task)();
-            m_activeTasks--;
+            {
+                std::lock_guard<std::mutex> done(m_mutex);
+                --m_activeTasks;
+            }
             m_completionCondition.notify_all();
         });
     }

@@ -15,6 +15,7 @@
 #include "core/image/image_io.h"
 #include "core/color/transfer.h"
 #include "core/platform/path.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -61,6 +62,57 @@ bool saveImagePNG(const Image& img, const std::string& path, ToneMapOperator tmo
 
     // Image rows are top first, which is also PNG's order.
     return stbi_write_png(path.c_str(), w, h, 3, ldrData.data(), w * 3) != 0;
+}
+
+// Şeffaf arka planlı PNG. Film'deki renk "önceden çarpılmış" (premultiplied)
+// birikir: kenardaki bir pikselin örneklerinin yarısı nesneye çarptıysa renk
+// toplamı da yarı yarıya siyah arka planla karışır. PNG düz (straight) alfa
+// beklediği için renk alfa'ya bölünür, sonra ton eşlenir.
+bool saveImagePNGAlpha(const Image& img, const Image& alpha, const std::string& path,
+                       ToneMapOperator tmo, float exposureEV) {
+    const int w = img.width();
+    const int h = img.height();
+    if (w <= 0 || h <= 0 || alpha.width() != w || alpha.height() != h) return false;
+    std::vector<uint8_t> rgba(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const float a = std::clamp(alpha.getPixel(x, y).r, 0.0f, 1.0f);
+            const Color3f straight = a > 1e-4f ? img.getPixel(x, y) / a : Color3f::black();
+            const Color3f display = toneMap(straight, tmo, exposureEV);
+            const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4;
+            for (int c = 0; c < 3; ++c)
+                rgba[idx + static_cast<size_t>(c)] = quantizeUnorm8(display[c], tpdfDither(x, y, c));
+            rgba[idx + 3] = quantizeUnorm8(a);
+        }
+    }
+    return stbi_write_png(path.c_str(), w, h, 4, rgba.data(), w * 4) != 0;
+}
+
+bool saveImageJPG(const Image& img, const std::string& path, ToneMapOperator tmo, float exposureEV,
+                  int quality) {
+    const int w = img.width();
+    const int h = img.height();
+    if (w <= 0 || h <= 0) return false;
+    std::vector<uint8_t> rgb(static_cast<size_t>(w) * static_cast<size_t>(h) * 3);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const Color3f display = toneMap(img.getPixel(x, y), tmo, exposureEV);
+            const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3;
+            for (int c = 0; c < 3; ++c)
+                rgb[idx + static_cast<size_t>(c)] = quantizeUnorm8(display[c], tpdfDither(x, y, c));
+        }
+    }
+    return stbi_write_jpg(path.c_str(), w, h, 3, rgb.data(), std::clamp(quality, 1, 100)) != 0;
+}
+
+bool saveRGBA8PNG(const uint8_t* rgba, int w, int h, const std::string& path, bool flipVertically) {
+    if (!rgba || w <= 0 || h <= 0) return false;
+    if (!flipVertically) return stbi_write_png(path.c_str(), w, h, 4, rgba, w * 4) != 0;
+    std::vector<uint8_t> flipped(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+    const size_t row = static_cast<size_t>(w) * 4;
+    for (int y = 0; y < h; ++y)
+        std::memcpy(&flipped[static_cast<size_t>(y) * row], rgba + static_cast<size_t>(h - 1 - y) * row, row);
+    return stbi_write_png(path.c_str(), w, h, 4, flipped.data(), static_cast<int>(row)) != 0;
 }
 
 bool saveImageEXR(const Image& img, const std::string& path) {

@@ -27,19 +27,34 @@ if(MSVC)
 else()
     option(PHOTON_WARNINGS_AS_ERRORS "Treat warnings in photon_* targets as errors" ON)
 endif()
-# OIDN: auto-enable when the SDK is findable (vcpkg / CMAKE_PREFIX_PATH).
-# Force with -DPHOTON_ENABLE_OIDN=ON; disable with -DPHOTON_ENABLE_OIDN=OFF.
-option(PHOTON_ENABLE_OIDN "Enable Intel Open Image Denoise (AUTO if found)" OFF)
+# OIDN (Intel Open Image Denoise, Apache-2.0). Not a vcpkg port: the official
+# prebuilt package goes into third_party/oidn (scripts/fetch_deps.ps1).
+# ON = use it when found; OFF = never link it.
+option(PHOTON_ENABLE_OIDN "Use Intel Open Image Denoise when found" ON)
 set(PHOTON_OIDN_FOUND FALSE)
-find_package(OpenImageDenoise CONFIG QUIET)
-if(OpenImageDenoise_FOUND)
-    set(PHOTON_OIDN_FOUND TRUE)
-    message(STATUS "OIDN: Open Image Denoise found — denoise enabled")
-elseif(PHOTON_ENABLE_OIDN)
-    message(WARNING "PHOTON_ENABLE_OIDN=ON but OpenImageDenoise not found — soft blur fallback only.\n"
-                    "  Install: vcpkg install openimagedenoise, then reconfigure with\n"
-                    "  -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake")
+set(PHOTON_OIDN_DLL_DIR "")
+if(PHOTON_ENABLE_OIDN)
+    list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/third_party/oidn")
+    find_package(OpenImageDenoise CONFIG QUIET)
+    if(OpenImageDenoise_FOUND)
+        set(PHOTON_OIDN_FOUND TRUE)
+        if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/oidn/bin")
+            set(PHOTON_OIDN_DLL_DIR "${CMAKE_SOURCE_DIR}/third_party/oidn/bin")
+        endif()
+        message(STATUS "OIDN: found ${OpenImageDenoise_VERSION} — denoise enabled")
+    else()
+        message(STATUS "OIDN: not found — run scripts/fetch_deps.ps1 (soft blur fallback only)")
+    endif()
 endif()
+
+# Copies the OIDN runtime DLLs next to an executable (Windows has no rpath).
+function(photon_copy_oidn_dlls target)
+    if(PHOTON_OIDN_DLL_DIR)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${PHOTON_OIDN_DLL_DIR}" $<TARGET_FILE_DIR:${target}>
+            COMMENT "Copying OIDN DLLs for ${target}")
+    endif()
+endfunction()
 
 # ──────────────────────────────────────────────
 # Compiler Warnings & Flags
@@ -122,6 +137,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cgltf)
 
+# nlohmann/json – project files, material and studio presets (MIT)
+find_package(nlohmann_json CONFIG QUIET)
+if(NOT nlohmann_json_FOUND)
+    FetchContent_Declare(
+        nlohmann_json
+        URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+endif()
+
 # Google Test (conditional)
 if(PHOTON_BUILD_TESTS)
     FetchContent_Declare(
@@ -193,6 +218,22 @@ if(PHOTON_BUILD_APP)
         add_library(imgui::imgui ALIAS imgui_app)
     endif()
 
+    # ImGuizmo – translate/rotate/scale gizmo (MIT)
+    find_package(imguizmo CONFIG QUIET)
+    if(NOT imguizmo_FOUND)
+        FetchContent_Declare(
+            imguizmo_fc
+            GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo.git
+            GIT_TAG        1.91.3
+            SOURCE_SUBDIR  photon-headers-only
+        )
+        FetchContent_MakeAvailable(imguizmo_fc)
+        add_library(imguizmo_app STATIC ${imguizmo_fc_SOURCE_DIR}/ImGuizmo.cpp)
+        target_include_directories(imguizmo_app SYSTEM PUBLIC ${imguizmo_fc_SOURCE_DIR})
+        target_link_libraries(imguizmo_app PUBLIC imgui::imgui)
+        add_library(imguizmo::imguizmo ALIAS imguizmo_app)
+    endif()
+
     find_package(OpenGL REQUIRED)
     add_subdirectory(src/preview)
     add_subdirectory(src/ui)
@@ -210,6 +251,7 @@ endif()
 if(PHOTON_BUILD_CLI)
     add_executable(photon_render src/main.cpp)
     target_link_libraries(photon_render PRIVATE photon_engine photon_build_flags)
+    photon_copy_oidn_dlls(photon_render)
 endif()
 
 # ponytail: ASan instruments photon_* only. vcpkg and FetchContent stay

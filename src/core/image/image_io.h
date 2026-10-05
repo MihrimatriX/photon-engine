@@ -25,6 +25,19 @@ bool saveImagePNG(const Image& img, const std::string& path,
                   ToneMapOperator tmo = ToneMapOperator::ACES, float exposureEV = 0.0f,
                   bool dither = true);
 
+/// Şeffaf arka planlı 8-bit RGBA PNG. @p img önceden çarpılmış (premultiplied)
+/// renk, @p alpha kapsama (r kanalı). Renk alfaya bölünüp ton eşlenir.
+bool saveImagePNGAlpha(const Image& img, const Image& alpha, const std::string& path,
+                       ToneMapOperator tmo, float exposureEV);
+
+/// 8-bit JPEG (kalite 1–100). Alfa yok.
+bool saveImageJPG(const Image& img, const std::string& path, ToneMapOperator tmo,
+                  float exposureEV, int quality = 95);
+
+/// Hazır RGBA8 tamponu PNG olarak yaz (ekran görüntüsü için). OpenGL'den okunan
+/// tamponlar alttan başladığı için @p flipVertically genelde true verilir.
+bool saveRGBA8PNG(const uint8_t* rgba, int w, int h, const std::string& path, bool flipVertically);
+
 /// Save scene-linear radiance as OpenEXR (half float RGB, ZIP compression).
 bool saveImageEXR(const Image& img, const std::string& path);
 
