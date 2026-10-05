@@ -1,3 +1,4 @@
+# Birim testleri (GoogleTest). Yeni test dosyaları buraya eklenir.
 add_executable(photon_tests
     test_vec.cpp
     test_ray.cpp
@@ -18,6 +19,7 @@ add_executable(photon_tests
     test_import.cpp
     test_ortho.cpp
     test_loader_limits.cpp
+    test_snell.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE

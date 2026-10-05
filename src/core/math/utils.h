@@ -1,3 +1,5 @@
+// Küçük matematik yardımcıları: clamp/lerp, ikinci derece denklem, MIS güç sezgiseli,
+// yansıma/kırılma vektörleri ve Fresnel denklemleri. Renderer'ın her yerinden kullanılır.
 #pragma once
 
 /// @file utils.h
@@ -135,13 +137,20 @@ inline Vec3f reflectVec(const Vec3f& wo, const Vec3f& n) {
 }
 
 /// Refract direction @p wi through a surface with normal @p n and
-/// relative index of refraction @p eta = ηi/ηt.
+/// relative index of refraction @p eta = ηi/ηt (PBRT-v3 `Refract` convention).
 ///
-/// @param[in]  wi  Incident direction (pointing toward surface).
-/// @param[in]  n   Surface normal (pointing toward the side @p wi is on).
-/// @param[in]  eta Ratio of indices of refraction (ηi / ηt).
-/// @param[out] wt  Refracted direction (pointing away from surface).
+/// @param[in]  wi  Incident direction, pointing AWAY from the surface (same side as @p n).
+/// @param[in]  n   Unit surface normal on the same side as @p wi (dot(wi, n) > 0).
+/// @param[in]  eta Ratio of indices of refraction ηi / ηt (ηi = medium @p wi is in).
+/// @param[out] wt  Refracted direction, pointing away from the surface on the other side.
 /// @return @c true if refraction occurs, @c false for total internal reflection.
+///
+/// Matematik (Snell, vektör biçimi): wi'nin teğet bileşeni wi - cosθi·n'dir.
+/// Kırılan ışının teğet bileşeni Snell gereği eta kat büyür ve YÖNÜ TERS olur
+/// (ışın yüzeyi geçer): -eta·(wi - cosθi·n). Normal bileşeni -cosθt·n'dir.
+/// Toplam: wt = -eta·wi + (eta·cosθi - cosθt)·n. Dikkat: wi yüzeye DOĞRU değil,
+/// yüzeyden DIŞARI bakar. Eski belge "toward" diyordu; Dielectric de buna uyup
+/// -wo verince her kırılma teğet düzlemde aynalanıyordu (bulgu core-1).
 inline bool refractVec(const Vec3f& wi, const Vec3f& n, float eta, Vec3f& wt) {
     float cosThetaI = dot(n, wi);
     float sin2ThetaI = std::max(0.0f, 1.0f - cosThetaI * cosThetaI);
