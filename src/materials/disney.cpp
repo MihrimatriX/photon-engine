@@ -1,4 +1,9 @@
+// Basitleştirilmiş Disney Principled BRDF (Burley 2012/2015): Burley difüz, GGX
+// speküler (anizotrop olabilir), sheen, ince-yüzey difüz geçirgenlik ve enerjiyi
+// koruyan bir clearcoat katmanı. Örnekleme Heitz 2018 görünür normalleri (VNDF) ile.
+
 #include "materials/disney.h"
+#include "materials/microfacet.h"
 #include "core/image/image_io.h"
 #include "core/math/frame.h"
 #include "core/math/utils.h"
@@ -9,78 +14,21 @@ namespace photon {
 
 namespace {
 
-float ggxD(float cosThetaH, float alpha) {
-    float alpha2 = alpha * alpha;
-    float denom = cosThetaH * cosThetaH * (alpha2 - 1.0f) + 1.0f;
-    return alpha2 / (PI * denom * denom);
+/// Clearcoat katmanı sabit IOR 1.5'tir (Burley): F0 = ((1.5-1)/(1.5+1))² = 0.04.
+constexpr float COAT_F0 = 0.04f;
+
+float schlick(float f0, float cosTheta) {
+    return f0 + (1.0f - f0) * pow5(1.0f - std::clamp(cosTheta, 0.0f, 1.0f));
 }
 
-float smithG1(float cosTheta, float alpha2) {
-    float cosTheta2 = cosTheta * cosTheta;
-    float tanTheta2 = std::max(0.0f, 1.0f - cosTheta2) / cosTheta2;
-    return 2.0f / (1.0f + std::sqrt(1.0f + alpha2 * tanTheta2));
-}
-
-Vec3f sampleGGX(const Vec2f& u, float alpha) {
-    float x = std::clamp(u.x, 0.0f, 0.999f);
-    float theta = std::atan(alpha * std::sqrt(x) / std::sqrt(1.0f - x));
-    float phi = TWO_PI * u.y;
-    return Vec3f(
-        std::sin(theta) * std::cos(phi),
-        std::sin(theta) * std::sin(phi),
-        std::cos(theta)
-    );
-}
-
+/// Burley'nin anizotropi eşlemesi: aspect = sqrt(1 - 0.9·aniso),
+/// ax = r²/aspect, ay = r²·aspect. aniso = 0 → ax = ay = r² (izotrop GGX).
+/// Alt sınır (1e-4) microfacet.h içinde uygulanır.
 void anisoAlpha(float roughness, float anisotropy, float& ax, float& ay) {
-    float aspect = std::sqrt(std::max(0.0f, 1.0f - 0.9f * std::clamp(anisotropy, 0.0f, 1.0f)));
-    float a2 = std::max(0.001f, roughness * roughness);
-    ax = std::max(0.001f, a2 / aspect);
-    ay = std::max(0.001f, a2 * aspect);
-}
-
-float ggxDAniso(const Vec3f& h, float ax, float ay) {
-    float cosTheta = h.z;
-    if (cosTheta <= 1e-6f) return 0.0f;
-    float cos2 = cosTheta * cosTheta;
-    float sin2 = std::max(0.0f, 1.0f - cos2);
-    float tan2 = sin2 / cos2;
-    float sinTheta = std::sqrt(sin2);
-    float cosPhi = sinTheta > 0.0f ? h.x / sinTheta : 1.0f;
-    float sinPhi = sinTheta > 0.0f ? h.y / sinTheta : 0.0f;
-    float e = tan2 * (cosPhi * cosPhi / (ax * ax) + sinPhi * sinPhi / (ay * ay));
-    float cos4 = cos2 * cos2;
-    return 1.0f / (PI * ax * ay * cos4 * (1.0f + e) * (1.0f + e));
-}
-
-float smithG1Aniso(const Vec3f& w, float ax, float ay) {
-    float cosTheta = std::abs(w.z);
-    if (cosTheta <= 1e-6f) return 0.0f;
-    float cos2 = cosTheta * cosTheta;
-    float sin2 = std::max(0.0f, 1.0f - cos2);
-    if (sin2 <= 0.0f) return 1.0f;
-    float tanTheta = std::sqrt(sin2) / cosTheta;
-    float sinTheta = std::sqrt(sin2);
-    float cosPhi = w.x / sinTheta;
-    float sinPhi = w.y / sinTheta;
-    float alpha = std::sqrt(cosPhi * cosPhi * ax * ax + sinPhi * sinPhi * ay * ay);
-    float a2t2 = (alpha * tanTheta) * (alpha * tanTheta);
-    return 2.0f / (1.0f + std::sqrt(1.0f + a2t2));
-}
-
-Vec3f sampleGGXAniso(const Vec2f& u, float ax, float ay) {
-    float u1 = std::clamp(u.x, 0.0f, 0.999f);
-    float phi = std::atan((ay / ax) * std::tan(TWO_PI * u.y + 0.5f * PI));
-    if (u.y > 0.5f) phi += PI;
-    float sinPhi = std::sin(phi);
-    float cosPhi = std::cos(phi);
-    float ax2 = ax * ax;
-    float ay2 = ay * ay;
-    float alpha2 = 1.0f / (cosPhi * cosPhi / ax2 + sinPhi * sinPhi / ay2);
-    float tanTheta2 = alpha2 * u1 / std::max(1e-6f, 1.0f - u1);
-    float cosTheta = 1.0f / std::sqrt(1.0f + tanTheta2);
-    float sinTheta = std::sqrt(std::max(0.0f, 1.0f - cosTheta * cosTheta));
-    return Vec3f(sinTheta * cosPhi, sinTheta * sinPhi, cosTheta);
+    float aspect = std::sqrt(std::max(0.1f, 1.0f - 0.9f * std::clamp(anisotropy, 0.0f, 1.0f)));
+    float a = roughness * roughness;
+    ax = a / aspect;
+    ay = a * aspect;
 }
 
 Frame shadingFrame(const Vec3f& nIn, const Vec3f& tangentIn) {
@@ -95,24 +43,14 @@ Frame shadingFrame(const Vec3f& nIn, const Vec3f& tangentIn) {
     return Frame(t, b, n);
 }
 
-float lobeD(const Vec3f& h, float roughness, float anisotropy) {
-    if (anisotropy <= 1e-4f) return ggxD(std::max(0.0f, h.z), roughness * roughness);
-    float ax, ay;
-    anisoAlpha(roughness, anisotropy, ax, ay);
-    return ggxDAniso(h, ax, ay);
-}
-
-float lobeG(const Vec3f& wo, const Vec3f& wi, float roughness, float anisotropy) {
-    if (anisotropy <= 1e-4f) {
-        float alpha = roughness * roughness;
-        float alpha2 = alpha * alpha;
-        return smithG1(wo.z, alpha2) * smithG1(wi.z, alpha2);
-    }
-    float ax, ay;
-    anisoAlpha(roughness, anisotropy, ax, ay);
-    return smithG1Aniso(wo, ax, ay) * smithG1Aniso(wi, ax, ay);
-}
-
+/// Tüm lobların toplamı f(wo, wi), yerel çerçevede.
+///
+/// Clearcoat (bulgu materials-10): kaplama, alttaki tabanın ÜSTÜNDE ince bir 1.5 IOR
+/// katmanıdır. Işığın Fc kadarı kaplamadan yansır; tabana yalnızca (1 - Fc) girer ve
+/// geri çıkarken yine (1 - Fc) ile zayıflar. Bu yüzden taban
+///   (1 - cc·Fc(cosθo)) · (1 - cc·Fc(cosθi))
+/// ile çarpılır. Eskiden kaplama lobu tabanın üstüne zayıflatmadan EKLENİYORDU ve
+/// yatay açılarda (Fc → 1) toplam yansıma 1'i aşıyordu (enerji yaratıyordu).
 Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingParams& p) {
     Frame frame = shadingFrame(p.normal, p.tangent);
     Vec3f woLocal = frame.toLocal(wo);
@@ -120,51 +58,56 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
 
     if (woLocal.z <= 0.0f) return Color3f::black();
 
+    const float cosThetaO = woLocal.z;
+    const float coatO = 1.0f - p.clearCoat * schlick(COAT_F0, cosThetaO);
+
     float trans = std::clamp(p.diffuseTransmission, 0.0f, 1.0f) * (1.0f - p.metallic);
     if (wiLocal.z <= 0.0f) {
         if (trans <= 0.0f) return Color3f::black();
-        return p.baseColor * trans * INV_PI;
+        // İnce yaprak: alttan gelen ışık kaplamayı yalnızca wo tarafında bir kez geçer.
+        return p.baseColor * (trans * INV_PI * coatO);
     }
 
     Vec3f hLocal = (woLocal + wiLocal).normalized();
+    const float cosThetaI = wiLocal.z;
+    const float cosThetaD = woLocal.dot(hLocal);
 
-    float cosThetaO = woLocal.z;
-    float cosThetaI = wiLocal.z;
-    float cosThetaH = hLocal.z;
-    float cosThetaD = woLocal.dot(hLocal);
-
+    // Burley difüz: F_D90 = 0.5 + 2·r·cos²θd ile kenarlarda geri-saçılma.
     float F90 = 0.5f + 2.0f * p.roughness * cosThetaD * cosThetaD;
-    float Fo = 1.0f + (F90 - 1.0f) * std::pow(1.0f - cosThetaO, 5.0f);
-    float Fi = 1.0f + (F90 - 1.0f) * std::pow(1.0f - cosThetaI, 5.0f);
+    float Fo = 1.0f + (F90 - 1.0f) * pow5(1.0f - cosThetaO);
+    float Fi = 1.0f + (F90 - 1.0f) * pow5(1.0f - cosThetaI);
     Color3f fDiffuse = p.baseColor * INV_PI * Fo * Fi * (1.0f - p.metallic) * (1.0f - trans);
 
-    float D = lobeD(hLocal, p.roughness, p.anisotropy);
-    float G = lobeG(woLocal, wiLocal, p.roughness, p.anisotropy);
-    Color3f F0 = lerp(Color3f(0.04f * p.specular), p.baseColor, p.metallic);
-    Color3f F = F0 + (Color3f(1.0f) - F0) * std::pow(1.0f - cosThetaD, 5.0f);
+    // GGX speküler. F0: dielektrikte 0.08·specular (Burley 2012; specular = 0.5 →
+    // F0 = 0.04, yani IOR 1.5). Metalde baseColor. (materials-9: eskiden 0.04·specular.)
+    float ax, ay;
+    anisoAlpha(p.roughness, p.anisotropy, ax, ay);
+    float D = ggxD(hLocal, ax, ay);
+    float G = ggxG(woLocal, wiLocal, ax, ay);
+    Color3f F0 = lerp(Color3f(0.08f * p.specular), p.baseColor, p.metallic);
+    Color3f F = F0 + (Color3f(1.0f) - F0) * pow5(1.0f - cosThetaD);
     Color3f fSpecular = (F * D * G) / (4.0f * cosThetaO * cosThetaI);
-
-    Color3f fCoat(0.0f);
-    if (p.clearCoat > 0.0f) {
-        float alphaC = p.clearCoatRoughness * p.clearCoatRoughness;
-        float alphaC2 = alphaC * alphaC;
-        float Dc = ggxD(cosThetaH, alphaC);
-        float Gc = smithG1(cosThetaO, alphaC2) * smithG1(cosThetaI, alphaC2);
-        float Fc = 0.04f + 0.96f * std::pow(1.0f - cosThetaD, 5.0f);
-        fCoat = Color3f(p.clearCoat * Fc * Dc * Gc / (4.0f * cosThetaO * cosThetaI));
-    }
 
     Color3f fSheen(0.0f);
     if (p.sheen > 0.0f) {
         // ponytail: sheen rides the diffuse sample; a dedicated sheen lobe if cloth noise matters
-        float fh = std::pow(std::max(0.0f, 1.0f - cosThetaD), 5.0f);
+        float fh = pow5(std::max(0.0f, 1.0f - cosThetaD));
         float lum = p.baseColor.luminance();
         Color3f tint = lum > 1e-6f ? p.baseColor * (1.0f / lum) : Color3f(1.0f);
         Color3f csheen = Color3f(1.0f) * 0.5f + tint * 0.5f;
         fSheen = csheen * (p.sheen * fh * (1.0f - p.metallic));
     }
 
-    return fDiffuse + fSpecular + fCoat + fSheen;
+    Color3f base = fDiffuse + fSpecular + fSheen;
+    if (p.clearCoat <= 0.0f) return base;
+
+    float alphaC = p.clearCoatRoughness * p.clearCoatRoughness;
+    float Dc = ggxD(hLocal, alphaC, alphaC);
+    float Gc = ggxG(woLocal, wiLocal, alphaC, alphaC);
+    float Fc = schlick(COAT_F0, cosThetaD);
+    Color3f fCoat(p.clearCoat * Fc * Dc * Gc / (4.0f * cosThetaO * cosThetaI));
+    float coatI = 1.0f - p.clearCoat * schlick(COAT_F0, cosThetaI);
+    return base * (coatO * coatI) + fCoat;
 }
 
 void lobeWeights(const DisneyMaterial::ShadingParams& p, float& pCoat, float& pSpec,
@@ -177,6 +120,9 @@ void lobeWeights(const DisneyMaterial::ShadingParams& p, float& pCoat, float& pS
     pDiffRefl = pDiff - pTrans;
 }
 
+/// sample() ile birebir aynı karışım pdf'i: Σ (lob seçme olasılığı × lob pdf'i).
+/// GGX loblar VNDF ile örneklendiği için yansıyan wi'nin pdf'i
+///   D_wo(h) / (4 wo·h) = G1(wo)·D(h) / (4 cosθo)      (Heitz 2018, denklem 17)
 float pdfLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingParams& p) {
     Frame frame = shadingFrame(p.normal, p.tangent);
     Vec3f woLocal = frame.toLocal(wo);
@@ -193,19 +139,18 @@ float pdfLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingPa
     }
 
     Vec3f hLocal = (woLocal + wiLocal).normalized();
-    float cosThetaH = hLocal.z;
     float cosThetaD = woLocal.dot(hLocal);
     if (cosThetaD <= 0.0f) return 0.0f;
 
     float pdfDiffuse = cosineHemispherePdf(wiLocal.z);
-    float D = lobeD(hLocal, p.roughness, p.anisotropy);
-    float pdfSpecular = (D * cosThetaH) / (4.0f * cosThetaD);
+    float ax, ay;
+    anisoAlpha(p.roughness, p.anisotropy, ax, ay);
+    float pdfSpecular = ggxVisiblePdf(woLocal, hLocal, ax, ay) / (4.0f * cosThetaD);
 
     float pdfCoat = 0.0f;
     if (pCoat > 0.0f) {
         float alphaC = p.clearCoatRoughness * p.clearCoatRoughness;
-        float Dc = ggxD(cosThetaH, alphaC);
-        pdfCoat = (Dc * cosThetaH) / (4.0f * cosThetaD);
+        pdfCoat = ggxVisiblePdf(woLocal, hLocal, alphaC, alphaC) / (4.0f * cosThetaD);
     }
 
     return pDiffRefl * pdfDiffuse + pSpec * pdfSpecular + pCoat * pdfCoat;
@@ -296,6 +241,10 @@ DisneyMaterial::ShadingParams DisneyMaterial::resolve(const SurfaceInteraction& 
     return p;
 }
 
+/// Lob seçimi sample.x'in [0,1) aralığını lob olasılıklarına böler ve seçilen aralığı
+/// yeniden [0,1)'e germe ile kullanır (örnek yeniden kullanımı). GGX loblarında
+/// mikro-normal görünür normallerden (VNDF) örneklenir: wo'dan görünmeyen h'ler hiç
+/// üretilmez, bu yüzden eski D·cosθ örneklemesine göre daha az örnek boşa gider.
 bool DisneyMaterial::sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& sample,
                             Vec3f& wi, Color3f& brdf, float& pdf) const {
     ShadingParams p = resolve(si);
@@ -313,28 +262,23 @@ bool DisneyMaterial::sample(const Vec3f& wo, const SurfaceInteraction& si, const
     float xi = sample.x;
 
     if (pCoat > 0.0f && xi < pCoat) {
-        float scaledX = xi / pCoat;
-        float alpha = p.clearCoatRoughness * p.clearCoatRoughness;
-        Vec3f hLocal = sampleGGX(Vec2f(scaledX, sample.y), alpha);
+        float scaledX = std::min(xi / pCoat, 0.99999994f);
+        float alphaC = p.clearCoatRoughness * p.clearCoatRoughness;
+        Vec3f hLocal = ggxSampleVisibleNormal(woLocal, alphaC, alphaC, scaledX, sample.y);
         wiLocal = reflectVec(woLocal, hLocal);
         if (wiLocal.z <= 0.0f) return false;
     } else if (xi < pCoat + pSpec) {
-        float scaledX = (xi - pCoat) / std::max(pSpec, 1e-6f);
-        Vec3f hLocal;
-        if (p.anisotropy > 1e-4f) {
-            float ax, ay;
-            anisoAlpha(p.roughness, p.anisotropy, ax, ay);
-            hLocal = sampleGGXAniso(Vec2f(scaledX, sample.y), ax, ay);
-        } else {
-            hLocal = sampleGGX(Vec2f(scaledX, sample.y), p.roughness * p.roughness);
-        }
+        float scaledX = std::min((xi - pCoat) / std::max(pSpec, 1e-6f), 0.99999994f);
+        float ax, ay;
+        anisoAlpha(p.roughness, p.anisotropy, ax, ay);
+        Vec3f hLocal = ggxSampleVisibleNormal(woLocal, ax, ay, scaledX, sample.y);
         wiLocal = reflectVec(woLocal, hLocal);
         if (wiLocal.z <= 0.0f) return false;
     } else if (xi < pCoat + pSpec + pDiffRefl) {
-        float scaledX = (xi - pCoat - pSpec) / std::max(pDiffRefl, 1e-6f);
+        float scaledX = std::min((xi - pCoat - pSpec) / std::max(pDiffRefl, 1e-6f), 0.99999994f);
         wiLocal = cosineSampleHemisphere(Vec2f(scaledX, sample.y));
     } else {
-        float scaledX = (xi - pCoat - pSpec - pDiffRefl) / std::max(pTrans, 1e-6f);
+        float scaledX = std::min((xi - pCoat - pSpec - pDiffRefl) / std::max(pTrans, 1e-6f), 0.99999994f);
         wiLocal = cosineSampleHemisphere(Vec2f(scaledX, sample.y));
         wiLocal.z = -wiLocal.z;
     }

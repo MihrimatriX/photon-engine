@@ -74,7 +74,7 @@ void renderSphereThumbnail(const MaterialPreset& p, int size, std::vector<uint8_
             float ndoth = std::max(0.0f, (u * hx + v * hy + z * hz) / hlen);
             float spec = std::pow(ndoth, shininess);
 
-            Color3f F0 = Color3f(0.04f * p.specular) * (1.0f - p.metallic) + p.baseColor * p.metallic;
+            Color3f F0 = Color3f(0.08f * p.specular) * (1.0f - p.metallic) + p.baseColor * p.metallic; // Burley: 0.08·specular, disney.cpp ile aynı
             Color3f diffuse = p.baseColor * (amb + ndotl * (1.0f - amb)) * (1.0f - p.metallic);
             Color3f col = diffuse + F0 * (spec * (0.25f + 0.75f * p.metallic + 0.35f * (1.0f - p.roughness)));
             if (p.emissive > 0.0f) col = col + p.baseColor * std::min(p.emissive * 0.08f, 1.5f);
