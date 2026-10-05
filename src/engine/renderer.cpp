@@ -2,7 +2,7 @@
 #include "engine/renderer.h"
 #include "engine/denoiser.h"
 #include "core/threading/parallel.h"
-#include "samplers/stratified_sampler.h"
+#include "samplers/sobol_sampler.h"
 #include "integrators/path_tracer.h"
 #include "materials/disney.h"
 #include "materials/dielectric.h"
@@ -36,20 +36,6 @@ float luminance(const Color3f& c) {
 
 Color3f clamp01(const Color3f& c) {
     return Color3f(std::clamp(c.r, 0.0f, 1.0f), std::clamp(c.g, 0.0f, 1.0f), std::clamp(c.b, 0.0f, 1.0f));
-}
-
-// spp'yi en kareye yakın xs × ys ızgarasına böler (16 → 4×4, 8 → 2×4).
-void samplerGrid(int spp, int& xs, int& ys) {
-    spp = std::max(1, spp);
-    int root = std::max(1, static_cast<int>(std::lround(std::sqrt(static_cast<double>(spp)))));
-    xs = 1;
-    for (int i = root; i >= 1; --i) {
-        if (spp % i == 0) {
-            xs = i;
-            break;
-        }
-    }
-    ys = spp / xs;
 }
 
 // OIDN'in "albedo" kanalı: yüzeyin dokusuz/ışıksız taban rengi. Ayna ve cam
@@ -133,10 +119,11 @@ void denoiseWithAovs(Image& out, const AovFilms* aovs) {
 
 } // namespace
 
+// Owen karıştırmalı Sobol (Burley 2020): her piksel ve boyut kendi karıştırmasını
+// alır, ilerlemeli render'da her ön-ek (1, 2, 4... örnek) iyi tabakalanır.
 std::unique_ptr<Sampler> createRenderSampler(int samplesPerPixel, uint64_t seed) {
-    int xs = 1, ys = 1;
-    samplerGrid(std::max(1, samplesPerPixel), xs, ys);
-    return std::make_unique<StratifiedSampler>(xs, ys, seed);
+    (void)samplesPerPixel;
+    return createSobolSampler(seed);
 }
 
 Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSettings& settings,
@@ -159,7 +146,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
 
     if (!settings.adaptiveSampling) {
         parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-            uint64_t tileSeed = 12345 ^ (static_cast<uint64_t>(xBegin) * 73821 + static_cast<uint64_t>(yBegin) * 1923);
+            const uint64_t tileSeed = 12345; // karo boyutundan bağımsız, deterministik
             std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
 
             for (int y = yBegin; y < yEnd; ++y) {
@@ -182,7 +169,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
         std::vector<float> sumL2(static_cast<size_t>(w) * h, 0.0f);
 
         parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-            uint64_t tileSeed = 12345 ^ (static_cast<uint64_t>(xBegin) * 73821 + static_cast<uint64_t>(yBegin) * 1923);
+            const uint64_t tileSeed = 12345; // karo boyutundan bağımsız, deterministik
             std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
 
             for (int y = yBegin; y < yEnd; ++y) {
@@ -214,7 +201,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
             const float threshold = std::max(1e-6f, meanVar * 0.5f);
 
             parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-                uint64_t tileSeed = 99991 ^ (static_cast<uint64_t>(xBegin) * 73821 + static_cast<uint64_t>(yBegin) * 1923);
+                const uint64_t tileSeed = 12345; // aynı dizinin devamı (baseSpp + s)
                 std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
 
                 for (int y = yBegin; y < yEnd; ++y) {
@@ -321,9 +308,9 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
 
     const bool wantAovs = aovs != nullptr;
     return parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-        uint64_t tileSeed = 12345 ^ (static_cast<uint64_t>(xBegin) * 73821 +
-                                     static_cast<uint64_t>(yBegin) * 1923 +
-                                     static_cast<uint64_t>(passIndex) * 991231);
+        // Sobol karıştırması pass'ler boyunca SABİT kalmalı; yoksa ardışık örnekler
+        // aynı dizinin devamı olmaz ve tabakalanma kaybolur. Piksel ayrışması içeride.
+        const uint64_t tileSeed = 12345;
         std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
 
         for (int y = yBegin; y < yEnd; ++y) {

@@ -1,6 +1,10 @@
+# Düzenlenebilir sahne katmanı: sahne ağacı, malzeme kütüphanesi, belge (ışık/ortam),
+# model içe aktarma ve proje dosyaları. Masaüstü uygulaması kapalıyken de testler kullanır.
 add_library(photon_scene STATIC
     scene_graph.cpp
     material_library.cpp
+    document.cpp
+    model_import.cpp
     project_io.cpp
 )
 

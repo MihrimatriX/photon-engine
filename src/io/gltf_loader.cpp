@@ -218,10 +218,10 @@ bool appendPrimitive(GltfLoadResult& result, const cgltf_primitive& prim, const 
     if (!posAcc) return true;
 
     std::shared_ptr<Material> mat;
+    // Malzemesiz primitive: nullptr döner, çağıran kendi varsayılanını atar (OBJ ile aynı).
+    // Eskiden yığındaki nesneye sahip olmayan bir shared_ptr dönüyordu [io-1].
     if (prim.material) mat = makePbrMaterial(*prim.material, baseDir);
-    else if (defaultMaterial)
-        mat = std::shared_ptr<Material>(const_cast<Material*>(defaultMaterial), [](Material*) {});
-    else
+    else if (!defaultMaterial)
         mat = std::make_shared<Lambertian>(Color3f(0.8f));
 
     std::vector<Vec3f> positions;
@@ -301,7 +301,7 @@ bool appendPrimitive(GltfLoadResult& result, const cgltf_primitive& prim, const 
     corners += n;
     result.materials.push_back(mat);
     result.meshes.push_back(std::make_shared<TriangleMesh>(
-        positions, normals, uvs, indices, result.materials.back().get()));
+        positions, normals, uvs, indices, mat ? mat.get() : defaultMaterial));
     return true;
 }
 
