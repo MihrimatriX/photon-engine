@@ -1,3 +1,5 @@
+// mesh.cpp — TriangleMesh: sınırlar, eksik normallerin hesaplanması, tek üçgen kesişimi
+// ve dışarıda (Embree) bulunan isabet için yüzey verisinin doldurulması.
 #include "geometry/mesh.h"
 #include <iostream>
 
@@ -86,6 +88,20 @@ bool TriangleMesh::intersectTriangle(size_t index, Ray& ray, SurfaceInteraction&
     Triangle tri(m_positions[idx0], m_positions[idx1], m_positions[idx2],
                  n0, n1, n2, uv0, uv1, uv2, m_material);
     return tri.intersect(ray, isect);
+}
+
+void TriangleMesh::shadeTriangle(size_t index, const Ray& ray, float t, float u, float v,
+                                 SurfaceInteraction& isect) const {
+    // Yığında geçici üçgen (getTriangle heap ayırır; isabet başına ayırma pahalı).
+    const size_t o = index * 3;
+    const uint32_t i0 = m_indices[o], i1 = m_indices[o + 1], i2 = m_indices[o + 2];
+    const bool hasN = m_normals.size() == m_positions.size();
+    const bool hasUV = m_uvs.size() == m_positions.size();
+    Triangle tri(m_positions[i0], m_positions[i1], m_positions[i2],
+                 hasN ? m_normals[i0] : Vec3f(0.0f), hasN ? m_normals[i1] : Vec3f(0.0f), hasN ? m_normals[i2] : Vec3f(0.0f),
+                 hasUV ? m_uvs[i0] : Vec2f(0.0f), hasUV ? m_uvs[i1] : Vec2f(0.0f), hasUV ? m_uvs[i2] : Vec2f(0.0f),
+                 m_material);
+    tri.fillHit(ray, t, u, v, isect);
 }
 
 std::shared_ptr<Triangle> TriangleMesh::getTriangle(size_t index) const {

@@ -1,3 +1,7 @@
+// test_loader_limits.cpp — Güvenilmez girdi testleri: boş, kesik, sınır dışı indeksli, NaN/Inf
+// içeren ya da devasa sayım bildiren OBJ/glTF/HDR/PNG/EXR/proje dosyaları çökmeden
+// reddedilmeli; geçerli küçük dosyalar ise yüklenmeli. Ayrıca proje kaydet/aç gidiş-dönüşü
+// (Türkçe karakterli UTF-8 yol dahil).
 #include <gtest/gtest.h>
 #include "core/image/image.h"
 #include "core/image/image_io.h"
@@ -5,6 +9,8 @@
 #include "io/obj_loader.h"
 #include "scene/project_io.h"
 #include "scene/scene_graph.h"
+#include "materials/disney.h"
+#include "core/platform/path.h"
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -34,6 +40,8 @@ void writeText(const std::filesystem::path& path, const std::string& text) {
     writeBytes(path, text.data(), text.size());
 }
 
+// Radiance .hdr (RGBE) üretir. Genişlik 8..32767 ise yeni tip satır RLE'si kullanılır:
+// satır başına (2, 2, genişlik_hi, genişlik_lo), sonra her kanal için (128+koşu, değer) çiftleri.
 std::string rleHdr(int width, int height) {
     std::string s = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y " + std::to_string(height)
         + " +X " + std::to_string(width) + "\n";
@@ -87,6 +95,7 @@ void writeTriangleGltf(const std::filesystem::path& dir, const float verts[9], c
 })");
 }
 
+// Belleğe gömülü en küçük geçerli 1×1 RGB PNG (dosya ve bellekten yükleme testi için).
 const unsigned char kPng1x1[] = {
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
     0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
@@ -212,19 +221,68 @@ TEST(LoaderLimits, ProjectEmptyAndTruncatedRejected) {
     namespace fs = std::filesystem;
     fs::path dir = scratchDir("photon_limits_proj");
     writeText(dir / "empty.photon", "");
-    writeText(dir / "trunc.photon", "{\"version\": 1");
-    writeText(dir / "ok.photon", R"({"version":1,"camera":{},"imports":["tri.obj"],"includeCornell":false})");
+    writeText(dir / "trunc.photon", "{\"version\": 2");
+    writeText(dir / "old.photon", R"({"version":1,"camera":{}})");
+    writeText(dir / "badidx.photon",
+              R"({"version":2,"nodes":[{"type":"mesh","geometry":{"p":[0,0,0,1,0,0,0,1,0],"i":[0,1,7]}}]})");
 
     SceneGraph graph;
-    std::string json;
-    EXPECT_FALSE(loadProject((dir / "empty.photon").string(), graph, json));
-    EXPECT_TRUE(loadProject((dir / "trunc.photon").string(), graph, json));
-    ProjectFile proj;
-    EXPECT_FALSE(parseProjectJson(json, proj));
-    EXPECT_FALSE(parseProjectJson("{", proj));
-    EXPECT_TRUE(loadProject((dir / "ok.photon").string(), graph, json));
-    ASSERT_TRUE(parseProjectJson(json, proj));
-    ASSERT_EQ(proj.imports.size(), 1u);
-    EXPECT_EQ(proj.imports[0].path, "tri.obj");
+    ProjectData data;
+    std::string err;
+    EXPECT_FALSE(loadProject((dir / "empty.photon").string(), graph, data, &err));
+    EXPECT_FALSE(loadProject((dir / "trunc.photon").string(), graph, data, &err));
+    EXPECT_FALSE(loadProject((dir / "old.photon").string(), graph, data, &err));
+    // Out-of-range index: the node is dropped, the project still loads.
+    EXPECT_TRUE(loadProject((dir / "badidx.photon").string(), graph, data, &err));
+    EXPECT_TRUE(graph.empty());
+    fs::remove_all(dir);
+}
+
+TEST(Project, RoundTripKeepsSceneLightsAndEnvironment) {
+    namespace fs = std::filesystem;
+    fs::path dir = scratchDir("photon_proj_roundtrip");
+    SceneGraph graph;
+    auto mat = std::make_shared<DisneyMaterial>(Color3f(0.1f, 0.2f, 0.3f), 1.0f, 0.25f, 0.5f);
+    auto node = std::make_unique<SceneNode>("Üçgen", SceneNodeType::Mesh);
+    node->mesh = std::make_shared<TriangleMesh>(
+        std::vector<Vec3f>{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}}, std::vector<Vec3f>{}, std::vector<Vec2f>{},
+        std::vector<uint32_t>{0, 1, 2}, mat.get());
+    node->material = mat;
+    node->localTransform = Transform::translate(Vec3f(1, 2, 3));
+    node->visible = false;
+    graph.root()->addChild(std::move(node));
+
+    ProjectData data;
+    data.environment.rotationDeg = 42.0f;
+    data.environment.background.mode = Background::Mode::Transparent;
+    LightDesc light;
+    light.type = LightDesc::Type::Directional;
+    light.intensity = 3.5f;
+    data.lights.push_back(light);
+    data.camera["fov"] = 30.0;
+
+    const std::string file = pathToUtf8(dir / u8"şişe.photon"); // Türkçe ad: UTF-8 yol testi
+    std::string err;
+    ASSERT_TRUE(saveProject(file, graph, data, &err)) << err;
+
+    SceneGraph loaded;
+    ProjectData back;
+    ASSERT_TRUE(loadProject(file, loaded, back, &err)) << err;
+    ASSERT_EQ(loaded.root()->children.size(), 1u);
+    const SceneNode& n = *loaded.root()->children[0];
+    EXPECT_EQ(n.name, "Üçgen");
+    EXPECT_FALSE(n.visible);
+    EXPECT_NEAR(n.localTransform.matrix()(1, 3), 2.0f, 1e-5f);
+    ASSERT_TRUE(n.mesh);
+    EXPECT_EQ(n.mesh->numTriangles(), 1u);
+    auto d = std::dynamic_pointer_cast<DisneyMaterial>(n.material);
+    ASSERT_TRUE(d);
+    EXPECT_NEAR(d->roughness(), 0.25f, 1e-5f);
+    EXPECT_NEAR(back.environment.rotationDeg, 42.0f, 1e-5f);
+    EXPECT_EQ(back.environment.background.mode, Background::Mode::Transparent);
+    ASSERT_EQ(back.lights.size(), 1u);
+    EXPECT_EQ(back.lights[0].type, LightDesc::Type::Directional);
+    EXPECT_NEAR(back.lights[0].intensity, 3.5f, 1e-5f);
+    EXPECT_NEAR(back.camera.value("fov", 0.0), 30.0, 1e-9);
     fs::remove_all(dir);
 }

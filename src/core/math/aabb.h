@@ -1,3 +1,6 @@
+// aabb.h — Eksen hizalı sınırlayıcı kutu (AABB).
+// BVH düğümlerinin sınırları, sahne sınırları ve SAH maliyet hesabı bu yapıyı kullanır.
+// Işın–kutu kesişimi "slab" (dilim) yöntemiyle yapılır (PBRT 4. baskı, bölüm 6.1.2).
 #pragma once
 
 /// @file aabb.h
@@ -46,6 +49,13 @@ struct AABB {
     /// @param[out] tNear Parametric distance to the near intersection.
     /// @param[out] tFar  Parametric distance to the far intersection.
     /// @return @c true if the ray intersects the box within [ray.tMin, ray.tMax].
+    //
+    // Slab yöntemi: kutu, üç çift paralel düzlemin ("dilim") kesişimidir. Her eksen i için
+    // ışın o + t·d bu düzlemleri t = (pMin[i] − o[i]) / d[i] ve t = (pMax[i] − o[i]) / d[i]
+    // değerlerinde keser; bu bir [tYakın, tUzak] aralığı verir. Kutunun içi = üç aralığın
+    // kesişimi: t0 = en büyük giriş, t1 = en küçük çıkış. t0 > t1 olursa aralık boş → ıska.
+    // d[i] = 0 iken invDir = ±∞ olur; IEEE aritmetiği sayesinde test (ışın tam düzlem
+    // üzerindeyken oluşan 0·∞ = NaN köşe durumu hariç) yine doğru çalışır.
     inline bool intersect(const Ray& ray, float& tNear, float& tFar) const {
         float t0 = ray.tMin;
         float t1 = ray.tMax;
@@ -102,6 +112,8 @@ struct AABB {
 
     /// Surface area of the AABB (sum of all 6 face areas).
     /// Used by SAH-based BVH builders.
+    // SAH (Surface Area Heuristic): rastgele bir ışının çocuk kutuya çarpma olasılığı,
+    // ebeveyne çarptığı bilindiğinde, yüzey alanları oranıyla orantılıdır: A_çocuk / A_ebeveyn.
     constexpr float surfaceArea() const {
         Vec3f d = diagonal();
         return 2.0f * (d.x * d.y + d.x * d.z + d.y * d.z);
@@ -125,6 +137,7 @@ struct AABB {
     /// Return the relative position of point @p p within the AABB,
     /// where pMin maps to (0,0,0) and pMax maps to (1,1,1).
     /// Undefined for an empty AABB.
+    // BVH kurulumunda centroid'leri kova (bucket) indekslerine çevirmek için kullanılır.
     inline Vec3f offset(const Vec3f& p) const {
         Vec3f o = p - pMin;
         Vec3f d = diagonal();

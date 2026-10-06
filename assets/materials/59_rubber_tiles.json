@@ -1,0 +1,13 @@
+{
+  "id": "rubber_tiles",
+  "name": "Kauçuk Karo",
+  "category": "Dokulu",
+  "type": "generic",
+  "baseColor": [1.0, 1.0, 1.0],
+  "roughness": 0.7,
+  "metallic": 0,
+  "specular": 0.5,
+  "maps": { "albedo": "rubber_tiles_diff_1k.jpg", "normal": "rubber_tiles_nor_gl_1k.jpg", "roughness": "rubber_tiles_rough_1k.jpg" },
+  "mapping": "box",
+  "texScale": 2
+}

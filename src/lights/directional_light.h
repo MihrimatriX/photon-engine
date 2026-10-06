@@ -1,3 +1,5 @@
+// directional_light.h — Yönlü (güneş benzeri) ışık: sonsuz uzakta, paralel ışınlar.
+// Delta ışıktır: tek bir yönden gelir, konumu yoktur; gölge ışınları sonsuza kadar uzanır.
 #pragma once
 
 /// @file directional_light.h

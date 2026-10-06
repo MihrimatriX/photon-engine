@@ -1,3 +1,5 @@
+# src/geometry/CMakeLists.txt — photon_geometry: şekiller (küre, üçgen, mesh), kesişim kaydı
+# (SurfaceInteraction) ve BVH hızlandırma yapısı.
 add_library(photon_geometry STATIC
     sphere.cpp
     triangle.cpp

@@ -1,3 +1,6 @@
+// aligned.h — Platformdan bağımsız hizalı bellek ayırma/serbest bırakma.
+// SIMD yüklemeleri ve önbellek satırı (64 bayt) hizası için kullanılır; Windows'ta
+// _aligned_malloc/_aligned_free, diğer sistemlerde std::aligned_alloc/free çiftidir.
 #pragma once
 
 #include <cstddef>
@@ -20,6 +23,7 @@ inline void* alignedAlloc(size_t size, size_t alignment) {
     return _aligned_malloc(size, alignment);
 #else
     // std::aligned_alloc requires size to be a multiple of alignment
+    // (x + a − 1) & ~(a − 1): a ikinin kuvveti olduğunda x'i a'nın katına yukarı yuvarlar.
     size_t alignedSize = (size + alignment - 1) & ~(alignment - 1);
     return std::aligned_alloc(alignment, alignedSize);
 #endif

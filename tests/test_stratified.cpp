@@ -1,6 +1,10 @@
+// test_stratified.cpp — Tabakalı örnekleyici testleri: bir pikselin 16 örneği 4×4 ızgarada her
+// hücreye tam bir kez düşmeli, aynı tohumla tekrar üretilebilmeli; üretim render'ında Sobol
+// örnekleyicinin seçildiği de doğrulanır.
 #include <gtest/gtest.h>
 #include "samplers/stratified_sampler.h"
 #include "samplers/independent_sampler.h"
+#include "samplers/sobol_sampler.h"
 #include "engine/renderer.h"
 #include <cmath>
 
@@ -41,9 +45,9 @@ TEST(StratifiedSampler, RepeatIsDeterministic) {
     EXPECT_EQ(ua.y, ub.y);
 }
 
-TEST(RenderSampler, ProductionIsStratified) {
+TEST(RenderSampler, ProductionIsSobol) {
     auto sampler = createRenderSampler(16, 12345);
-    EXPECT_NE(dynamic_cast<StratifiedSampler*>(sampler.get()), nullptr);
+    EXPECT_NE(dynamic_cast<SobolSampler*>(sampler.get()), nullptr);
     EXPECT_EQ(dynamic_cast<IndependentSampler*>(sampler.get()), nullptr);
 
     IndependentSampler tests(4);

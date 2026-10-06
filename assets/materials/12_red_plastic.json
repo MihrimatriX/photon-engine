@@ -1,0 +1,10 @@
+{
+  "id": "red_plastic",
+  "name": "Kırmızı Plastik",
+  "category": "Plastik",
+  "type": "generic",
+  "baseColor": [0.62, 0.04, 0.035],
+  "roughness": 0.3,
+  "metallic": 0,
+  "specular": 0.5
+}

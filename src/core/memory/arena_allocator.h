@@ -1,3 +1,6 @@
+// arena_allocator.h — Bölge (arena) bellek ayırıcısı: büyük bloklardan ardışık ayırma.
+// Kısa ömürlü, birlikte ölen nesneler (örn. bir örnek/iş parçası boyunca geçici veriler)
+// için idealdir: ayırma O(1), toplu serbest bırakma reset() ile tek adımda (PBRT ScratchBuffer).
 #pragma once
 
 #include <cstdint>

@@ -1,3 +1,6 @@
+// transform.h — Afin dönüşüm: matris + önceden hesaplanmış tersi birlikte saklanır.
+// Sahne grafiği ve model yükleyiciler mesh köşelerini/normallerini bununla dünya uzayına
+// taşır; normaller ters-transpoz gerektirdiğinden tersi önbelleğe almak maliyet kazandırır.
 #pragma once
 
 /// @file transform.h
@@ -81,6 +84,8 @@ private:
     Mat4f m_inverse;
 };
 
+// Dönme/ölçek kısmını koruyup yalnızca öteleme sütununu değiştirir.
+// Matris değiştiği için ters yeniden hesaplanır (Transform(Mat4f) yapıcısı).
 inline Transform withTranslation(const Transform& xf, const Vec3f& t) {
     Mat4f m = xf.matrix();
     m(0, 3) = t.x;

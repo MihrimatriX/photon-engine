@@ -1,3 +1,7 @@
+// image_io.cpp — Görüntü dosyası G/Ç uygulaması: stb_image (PNG/JPG/HDR okuma),
+// stb_image_write (PNG/JPG yazma) ve tinyexr (EXR okuma/yazma). Bu dosya her üç tek-başlık
+// kütüphanenin uygulamasını (IMPLEMENTATION makroları) derleyen tek yerdir.
+// Akış (yazma): doğrusal radyans → pozlama (EV) → ton eşleme → sRGB → dither → 8-bit.
 // Narrow paths are UTF-8 on every platform; on Windows stb converts them to UTF-16.
 #define STBI_WINDOWS_UTF8
 #define STB_IMAGE_IMPLEMENTATION
@@ -15,6 +19,7 @@
 #include "core/image/image_io.h"
 #include "core/color/transfer.h"
 #include "core/platform/path.h"
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -41,6 +46,9 @@ bool imageDimsOk(int w, int h) {
 } // namespace
 
 
+// Her piksel: toneMap() pozlama + ton eşleme + sRGB kodlamayı yapar (sonuç [0,1] ekran
+// değeri); ardından kanal başına deterministik TPDF dither ile 8-bit'e yuvarlanır.
+// Dither piksel konumunun saf fonksiyonu olduğu için aynı render aynı dosyayı üretir.
 bool saveImagePNG(const Image& img, const std::string& path, ToneMapOperator tmo, float exposureEV,
                   bool dither) {
     const int w = img.width();
@@ -63,6 +71,57 @@ bool saveImagePNG(const Image& img, const std::string& path, ToneMapOperator tmo
     return stbi_write_png(path.c_str(), w, h, 3, ldrData.data(), w * 3) != 0;
 }
 
+// Şeffaf arka planlı PNG. Film'deki renk "önceden çarpılmış" (premultiplied)
+// birikir: kenardaki bir pikselin örneklerinin yarısı nesneye çarptıysa renk
+// toplamı da yarı yarıya siyah arka planla karışır. PNG düz (straight) alfa
+// beklediği için renk alfa'ya bölünür, sonra ton eşlenir.
+bool saveImagePNGAlpha(const Image& img, const Image& alpha, const std::string& path,
+                       ToneMapOperator tmo, float exposureEV) {
+    const int w = img.width();
+    const int h = img.height();
+    if (w <= 0 || h <= 0 || alpha.width() != w || alpha.height() != h) return false;
+    std::vector<uint8_t> rgba(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const float a = std::clamp(alpha.getPixel(x, y).r, 0.0f, 1.0f);
+            const Color3f straight = a > 1e-4f ? img.getPixel(x, y) / a : Color3f::black();
+            const Color3f display = toneMap(straight, tmo, exposureEV);
+            const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4;
+            for (int c = 0; c < 3; ++c)
+                rgba[idx + static_cast<size_t>(c)] = quantizeUnorm8(display[c], tpdfDither(x, y, c));
+            rgba[idx + 3] = quantizeUnorm8(a);
+        }
+    }
+    return stbi_write_png(path.c_str(), w, h, 4, rgba.data(), w * 4) != 0;
+}
+
+bool saveImageJPG(const Image& img, const std::string& path, ToneMapOperator tmo, float exposureEV,
+                  int quality) {
+    const int w = img.width();
+    const int h = img.height();
+    if (w <= 0 || h <= 0) return false;
+    std::vector<uint8_t> rgb(static_cast<size_t>(w) * static_cast<size_t>(h) * 3);
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const Color3f display = toneMap(img.getPixel(x, y), tmo, exposureEV);
+            const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3;
+            for (int c = 0; c < 3; ++c)
+                rgb[idx + static_cast<size_t>(c)] = quantizeUnorm8(display[c], tpdfDither(x, y, c));
+        }
+    }
+    return stbi_write_jpg(path.c_str(), w, h, 3, rgb.data(), std::clamp(quality, 1, 100)) != 0;
+}
+
+bool saveRGBA8PNG(const uint8_t* rgba, int w, int h, const std::string& path, bool flipVertically) {
+    if (!rgba || w <= 0 || h <= 0) return false;
+    if (!flipVertically) return stbi_write_png(path.c_str(), w, h, 4, rgba, w * 4) != 0;
+    std::vector<uint8_t> flipped(static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+    const size_t row = static_cast<size_t>(w) * 4;
+    for (int y = 0; y < h; ++y)
+        std::memcpy(&flipped[static_cast<size_t>(y) * row], rgba + static_cast<size_t>(h - 1 - y) * row, row);
+    return stbi_write_png(path.c_str(), w, h, 4, flipped.data(), static_cast<int>(row)) != 0;
+}
+
 bool saveImageEXR(const Image& img, const std::string& path) {
     const int w = img.width();
     const int h = img.height();
@@ -70,6 +129,9 @@ bool saveImageEXR(const Image& img, const std::string& path) {
     const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
 
     // EXR stores planar channels; readers expect them sorted by name: B, G, R.
+    // EXR ton eşleme/sRGB uygulanmamış sahne-doğrusal (scene-linear) radyansı saklar;
+    // 1'in üstündeki değerler kırpılmaz, sonradan kompozisyon/renk düzeltmede kullanılabilir.
+    // Image iç içe RGB tutar → burada kanal başına ayrı düzlemlere (planar) ayrılır.
     std::vector<float> r(n), g(n), b(n);
     const float* px = img.data();
     for (size_t i = 0; i < n; ++i) {
@@ -98,6 +160,8 @@ bool saveImageEXR(const Image& img, const std::string& path) {
     header.channels = channels;
 
     // Input is float; stored as half (ample for radiance, half the size).
+    // half = 16-bit float: ~3 ondalık basamak hassasiyet, ~6·10⁻⁸ … 65504 aralığı; HDR
+    // radyans için yeterli. ZIP kayıpsız sıkıştırmadır.
     int pixelTypes[3] = {TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT};
     int storedTypes[3] = {TINYEXR_PIXELTYPE_HALF, TINYEXR_PIXELTYPE_HALF, TINYEXR_PIXELTYPE_HALF};
     header.pixel_types = pixelTypes;
@@ -214,6 +278,8 @@ std::optional<Image> loadImageEXR(const std::string& path) {
 
 namespace {
 
+// 8-bit değer yalnızca 256 farklı olabildiği için sRGB çözme (pow içerir) bir kez
+// 256 elemanlı arama tablosuna (LUT) hesaplanır; piksel başına pow çağrısı yapılmaz.
 std::optional<Image> imageFromRgb8(const uint8_t* data, int w, int h, TextureEncoding encoding) {
     if (!data || !imageDimsOk(w, h)) return std::nullopt;
     float lut[256];
@@ -274,6 +340,24 @@ std::optional<Image> loadImageLDRMemory(const unsigned char* bytes, int size, Te
     auto img = imageFromRgb8(data, w, h, encoding);
     stbi_image_free(data);
     return img;
+}
+
+} // namespace photon
+
+namespace photon {
+
+bool loadRGBA8(const std::string& path, std::vector<uint8_t>& out, int& w, int& h) {
+    int channels = 0;
+    if (!imageFileOk(path)) return false;
+    uint8_t* data = stbi_load(path.c_str(), &w, &h, &channels, 4);
+    if (!data) return false;
+    if (!imageDimsOk(w, h)) {
+        stbi_image_free(data);
+        return false;
+    }
+    out.assign(data, data + static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+    stbi_image_free(data);
+    return true;
 }
 
 } // namespace photon

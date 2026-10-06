@@ -1,0 +1,10 @@
+{
+  "id": "soft_touch_grey",
+  "name": "Yumuşak Dokunuş Gri",
+  "category": "Plastik",
+  "type": "generic",
+  "baseColor": [0.18, 0.18, 0.19],
+  "roughness": 0.62,
+  "metallic": 0,
+  "specular": 0.4
+}

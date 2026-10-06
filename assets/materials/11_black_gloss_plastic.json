@@ -1,0 +1,10 @@
+{
+  "id": "black_gloss_plastic",
+  "name": "Siyah Parlak Plastik",
+  "category": "Plastik",
+  "type": "generic",
+  "baseColor": [0.02, 0.02, 0.022],
+  "roughness": 0.12,
+  "metallic": 0,
+  "specular": 0.5
+}

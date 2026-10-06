@@ -1,3 +1,7 @@
+// camera.h — Soyut kamera arayüzü: ekran koordinatı (u, v) → dünya uzayında birincil ışın.
+// Renderer her piksel örneği için raster (x+jitter, y+jitter) noktasını [0,1]² ekran
+// koordinatına çevirir (y ters çevrilir: raster üst-sol, ekran alt-sol köken) ve buraya verir.
+// Somut kameralar: iğne deliği (perspective), ince mercek (thin lens), ortografik.
 #pragma once
 
 /// @file camera.h

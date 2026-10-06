@@ -1,3 +1,5 @@
+// mirror.h — Mükemmel ayna: gelen ışık tek bir yöne (yansıma yönüne) gider.
+// BRDF bir Dirac deltasıdır: isDelta() true, eval/pdf 0 döner, ışık yalnız sample() ile izlenir.
 #pragma once
 
 /// @file mirror.h
@@ -12,6 +14,7 @@ class Mirror : public Material {
 public:
     explicit Mirror(const Color3f& reflectance) : m_reflectance(reflectance) {}
 
+    bool isDelta() const override { return true; }
     bool sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& sample,
                 Vec3f& wi, Color3f& brdf, float& pdf) const override;
 

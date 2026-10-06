@@ -1,3 +1,6 @@
+// integrator.h — Integrator arayüzü: bir kamera ışını boyunca gelen radyansı tahmin eder.
+// Render denklemi L_o = L_e + ∫ f · L_i · |cos θ| dω'yı Monte Carlo ile çözen sınıflar
+// (ör. PathTracer) bunu uygular. Renderer her piksel örneği için Li()'yi çağırıp ortalar.
 #pragma once
 
 /// @file integrator.h

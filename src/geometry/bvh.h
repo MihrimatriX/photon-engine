@@ -1,3 +1,7 @@
+// bvh.h — Sınırlayıcı hacim hiyerarşisi (BVH): ışın-sahne kesişimini O(n) yerine
+// ~O(log n) yapan ağaç. Kutular iç içedir; ışın bir kutuya çarpmıyorsa içindeki
+// hiçbir üçgen test edilmez. Yapım: 12 kovalı SAH (yüzey alanı sezgiseli).
+// Embree yoksa ve testlerde kullanılan, motorun kendi (öğrenme amaçlı) hızlandırıcısı.
 #pragma once
 
 /// @file bvh.h
@@ -72,6 +76,14 @@ private:
 
     std::vector<std::shared_ptr<Shape>> m_keep;
     std::vector<PrimRef> m_prims;
+    /// Yaprak sırasında, m_prims ile paralel yalın üçgen verisi (köşe + iki kenar).
+    /// Aday testi yalnız bunu okur; tam gölgelendirme verisi en yakın isabette bir kez.
+    struct TriAccel {
+        Vec3f v0, e1, e2;
+        float parallelEps = 0.0f; ///< 1e-14·|e1|²·|e2|² (Triangle::intersect ile aynı eşik)
+    };
+    std::vector<TriAccel> m_tris;
+    bool hitTriangleLean(uint32_t primIndex, const Ray& ray, float& t) const;
     std::vector<BVHNode> m_nodes;
 
     // Helper structures for SAH building

@@ -1,3 +1,6 @@
+// test_aabb.cpp — Eksen hizalı sınır kutusu (AABB) testleri: merkez, köşegen, yüzey alanı,
+// birleştirme ve slab yöntemiyle ışın kesişimi. BVH bunlara dayanır: yüzey alanı yanlışsa SAH
+// kötü ağaç kurar, kesişim yanlışsa nesneler görüntüden kaybolur.
 #include "gtest/gtest.h"
 #include "core/math/aabb.h"
 

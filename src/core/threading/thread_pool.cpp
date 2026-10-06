@@ -1,3 +1,4 @@
+// thread_pool.cpp — ThreadPool'un işçi döngüsü, kapatma ve waitAll uygulaması.
 #include "thread_pool.h"
 
 namespace photon {
@@ -18,6 +19,7 @@ ThreadPool::ThreadPool(size_t numThreads) {
                         return m_stop || !m_tasks.empty();
                     });
 
+                    // Kapanırken kuyrukta kalan işler yine de bitirilir.
                     if (m_stop && m_tasks.empty()) {
                         return;
                     }
@@ -32,7 +34,10 @@ ThreadPool::ThreadPool(size_t numThreads) {
 }
 
 ThreadPool::~ThreadPool() {
-    m_stop = true;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_stop = true;
+    }
     m_condition.notify_all();
 
     for (auto& thread : m_threads) {

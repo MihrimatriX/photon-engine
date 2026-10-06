@@ -1,3 +1,6 @@
+// arena_allocator.cpp — Bölge (arena) ayırıcısının uygulaması.
+// Ayırma = işaretçiyi ileri kaydırmak (bump allocation); tek tek free yoktur,
+// reset() ile tüm bölge bir kerede yeniden kullanılır.
 #include "arena_allocator.h"
 
 #include <algorithm>
@@ -63,6 +66,8 @@ void* ArenaAllocator::allocate(size_t bytes, size_t alignment) {
     }
 
     // Calculate aligned offset within current block
+    // Mevcut adres hizaya yukarı yuvarlanır: (addr + a − 1) & ~(a − 1) (a = 2'nin kuvveti).
+    // Sığarsa sadece ofset ilerler — O(1), kilitsiz, malloc'tan çok daha ucuz.
     if (m_currentBlock) {
         uintptr_t currentAddr = reinterpret_cast<uintptr_t>(m_currentBlock) + m_currentOffset;
         uintptr_t alignedAddr = (currentAddr + alignment - 1) & ~(alignment - 1);
@@ -76,6 +81,7 @@ void* ArenaAllocator::allocate(size_t bytes, size_t alignment) {
     }
 
     // Current block doesn't have enough space, allocate a new one
+    // + alignment payı: yeni blok başlangıcı hizalı olmasa bile hizalama sonrası yer kalsın.
     allocateBlock(std::max(m_blockSize, bytes + alignment));
 
     // Align within the fresh block
@@ -88,6 +94,8 @@ void* ArenaAllocator::allocate(size_t bytes, size_t alignment) {
     return reinterpret_cast<void*>(alignedAddr);
 }
 
+// Blokları serbest bırakmadan ilk bloğa döner; sonraki ayırmalar belleği yeniden kullanır.
+// Not: yalnızca ilk blok tekrar kullanılır, sonraki bloklar release()'e kadar boşta bekler.
 void ArenaAllocator::reset() {
     m_currentOffset = 0;
     m_totalAllocated = 0;

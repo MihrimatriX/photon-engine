@@ -1,7 +1,7 @@
 {
   "name": "photon-engine",
-  "version": "0.1.0",
-  "description": "Physically-based render engine inspired by KeyShot",
+  "version": "0.2.0",
+  "description": "Physically-based product visualization renderer",
   "dependencies": [
     "glfw3",
     {
@@ -11,7 +11,9 @@
         "glfw-binding",
         "opengl3-binding"
       ]
-    }
+    },
+    "imguizmo",
+    "nlohmann-json"
   ],
   "builtin-baseline": "eb2d3a3279fd019cb7733072d86900d0ad2a1aef"
 }

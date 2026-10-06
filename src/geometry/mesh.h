@@ -1,3 +1,5 @@
+// mesh.h — Üçgen ağı (TriangleMesh): köşe konumları, normaller, UV'ler ve indeks tamponu.
+// BVH ve Embree tek tek üçgenlere (index) erişir; yığında ayrı Triangle nesnesi tutulmaz.
 #pragma once
 
 /// @file mesh.h
@@ -27,6 +29,8 @@ public:
 
     /// Stack triangle, no heap shape. BVH leaves index these.
     bool intersectTriangle(size_t index, Ray& ray, SurfaceInteraction& isect) const;
+    /// Kesişim dışarıda (Embree) bulunduysa: t ve barisentriklerle yüzey verisini doldur.
+    void shadeTriangle(size_t index, const Ray& ray, float t, float u, float v, SurfaceInteraction& isect) const;
     AABB triangleBounds(size_t index) const;
     float triangleArea(size_t index) const;
     void triangleVertices(size_t index, Vec3f& p0, Vec3f& p1, Vec3f& p2) const;

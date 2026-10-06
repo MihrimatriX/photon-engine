@@ -1,3 +1,6 @@
+// film.h — Film: örnek biriktirici (fiziksel kameradaki film/sensörün karşılığı).
+// Her piksel için radyans toplamı ve örnek sayısı tutulur; piksel değeri = toplam / sayı,
+// yani Monte Carlo tahmincisinin ortalaması. resolve() bu ortalamayı Image'a çevirir.
 #pragma once
 
 /// @file film.h
@@ -32,6 +35,10 @@ public:
     /// path must not poison a pixel for the rest of the render.
     /// Concurrent calls are safe when they target different pixels.
     void addSample(int x, int y, const Color3f& radiance);
+
+    /// addSample gibi ama negatif bileşenleri korur (gürültü giderici için yüzey
+    /// normalleri). NaN/Inf yine reddedilir.
+    void addSampleSigned(int x, int y, const Color3f& value);
 
     /// sum / count, or black for a pixel with no samples.
     Color3f resolvedPixel(int x, int y) const;

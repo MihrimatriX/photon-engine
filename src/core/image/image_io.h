@@ -1,3 +1,7 @@
+// image_io.h — Görüntü okuma/yazma: PNG/JPG (8-bit, ton eşlenmiş), EXR (half float, doğrusal),
+// HDR/EXR/LDR yükleme. 8-bit dokular sRGB ya da doğrusal (veri) olarak çözülür.
+// Kural: renk dokuları sRGB kodludur ve doğrusala çevrilir; normal/pürüzlülük haritaları
+// "veri"dir, eğri uygulanmaz.
 #pragma once
 
 /// @file image_io.h
@@ -9,6 +13,8 @@
 #include "core/image/tone_mapping.h"
 #include <string>
 #include <optional>
+#include <cstdint>
+#include <vector>
 
 namespace photon {
 
@@ -24,6 +30,22 @@ enum class TextureEncoding {
 bool saveImagePNG(const Image& img, const std::string& path,
                   ToneMapOperator tmo = ToneMapOperator::ACES, float exposureEV = 0.0f,
                   bool dither = true);
+
+/// Şeffaf arka planlı 8-bit RGBA PNG. @p img önceden çarpılmış (premultiplied)
+/// renk, @p alpha kapsama (r kanalı). Renk alfaya bölünüp ton eşlenir.
+bool saveImagePNGAlpha(const Image& img, const Image& alpha, const std::string& path,
+                       ToneMapOperator tmo, float exposureEV);
+
+/// 8-bit JPEG (kalite 1–100). Alfa yok.
+bool saveImageJPG(const Image& img, const std::string& path, ToneMapOperator tmo,
+                  float exposureEV, int quality = 95);
+
+/// Hazır RGBA8 tamponu PNG olarak yaz (ekran görüntüsü için). OpenGL'den okunan
+/// tamponlar alttan başladığı için @p flipVertically genelde true verilir.
+bool saveRGBA8PNG(const uint8_t* rgba, int w, int h, const std::string& path, bool flipVertically);
+
+/// PNG/JPG dosyasını ham RGBA8 olarak oku (renk dönüşümü yok; küçük resim önbelleği için).
+bool loadRGBA8(const std::string& path, std::vector<uint8_t>& out, int& w, int& h);
 
 /// Save scene-linear radiance as OpenEXR (half float RGB, ZIP compression).
 bool saveImageEXR(const Image& img, const std::string& path);

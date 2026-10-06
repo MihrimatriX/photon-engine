@@ -1,3 +1,6 @@
+# core/CMakeLists.txt — photon_core statik kütüphanesi: matematik, renk, görüntü/film,
+# iş parçacığı havuzu ve bellek yardımcıları. Diğer tüm modüller buna bağlıdır.
+# Başlıkların çoğu yalnızca-başlık (header-only); burada sadece .cpp'ler listelenir.
 # PhotonEngine Core Library
 # Contains math, image processing, threading, and memory utilities.
 
@@ -13,6 +16,7 @@ target_sources(photon_core PRIVATE
     image/tone_mapping.cpp
     threading/thread_pool.cpp
     memory/arena_allocator.cpp
+    platform/path.cpp
 )
 
 # Public include directory — parent src/ folder so includes look like:
@@ -26,6 +30,8 @@ target_include_directories(photon_core
 target_compile_features(photon_core PUBLIC cxx_std_20)
 
 # Private include dirs for third-party header-only libraries
+# stb ve tinyexr'in uygulaması image_io.cpp içinde derlenir; SYSTEM bayrağı onların
+# uyarılarını bastırır, PRIVATE ise bu başlıkların diğer modüllere sızmasını engeller.
 target_include_directories(photon_core SYSTEM
     PRIVATE
         ${stb_SOURCE_DIR}

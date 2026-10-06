@@ -1,6 +1,12 @@
+// orthographic_camera.cpp — Ortografik kamera: tüm ışınlar paralel, kökenleri değişir.
+// Perspektif bozulma yoktur (uzak nesne küçülmez); teknik/ürün çizimleri için uygundur.
 #include "camera/orthographic_camera.h"
 
 namespace photon {
+
+// Kamera tabanı (w = geri, u = sağ, v = yukarı) lookAt ile aynı mantıkla kurulur.
+// Görüntü düzlemi kamera konumundan geçen verticalExtent × (en-boy · verticalExtent)
+// boyutunda bir dikdörtgendir; (u,v) ∈ [0,1]² bu dikdörtgende bir köken noktası seçer.
 
 OrthographicCamera::OrthographicCamera(const Vec3f& position, const Vec3f& target, const Vec3f& up,
                                        float verticalExtent, float aspectRatio) {

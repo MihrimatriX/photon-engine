@@ -1,3 +1,6 @@
+// path.h — UTF-8 string ↔ std::filesystem::path dönüşümü.
+// Windows'ta std::string'den path kurmak ANSI kod sayfasıyla çözer ve Türkçe karakterli
+// yolları ("Masaüstü/şişe.obj") bozar; u8string üzerinden geçmek bunu engeller.
 #pragma once
 
 /// @file path.h
@@ -22,5 +25,11 @@ inline std::string pathToUtf8(const std::filesystem::path& p) {
     const std::u8string u8 = p.u8string();
     return std::string(u8.begin(), u8.end());
 }
+
+/// Çalışan exe'nin bulunduğu klasör (bulunamazsa çalışma dizini).
+std::filesystem::path executableDir();
+
+/// assets/ klasörü (UTF-8): exe'nin yanında, yoksa üst klasörlerde aranır.
+std::string findAssetsRoot();
 
 } // namespace photon

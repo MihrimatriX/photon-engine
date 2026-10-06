@@ -61,3 +61,13 @@ Testing/
 app_stdout.txt
 app_stderr.txt
 build-*.log
+
+# Agent worktrees and downloaded archives
+.claude/
+third_party_dl/
+# OIDN / Embree prebuilt packages (scripts/fetch_deps.ps1)
+third_party/oidn/
+third_party/embree/
+
+# Paket çıktısı (scripts/package.ps1)
+dist/

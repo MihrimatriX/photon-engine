@@ -1,3 +1,6 @@
+// Tek üçgen ışın kesişimi (Möller–Trumbore 1997) ve kesişim noktasında normal, UV,
+// teğet enterpolasyonu. Mesh dışındaki bağımsız üçgenler (ör. alan ışığı quad'ları) bunu kullanır.
+
 #include "geometry/triangle.h"
 #include <cmath>
 
@@ -9,34 +12,46 @@ bool Triangle::intersect(Ray& ray, SurfaceInteraction& isect) const {
     Vec3f h = ray.direction.cross(edge2);
     float a = edge1.dot(h);
 
-    if (a > -1e-6f && a < 1e-6f) {
-        return false; // Ray is parallel to the triangle
+    // Determinant a = -(e1 × e2)·d = -|e1||e2| sinφ cosθ (φ: kenarlar arası açı,
+    // θ: ışın ile normal arası açı). Mutlak 1e-6 eşiği alanı ~1e-6'dan küçük üçgenleri
+    // (ör. 1 mm'lik model) tamamen görünmez yapıyordu (geometry-1). Eşiği |e1||e2|'ye
+    // göre GÖRELİ alırız: yalnızca ışın düzleme gerçekten paralelse (|cosθ| ≲ 1e-7) reddet.
+    // Kareler kullanıldığından karekök gerekmez.
+    if (a * a <= 1e-14f * edge1.lengthSquared() * edge2.lengthSquared()) {
+        return false; // Ray is parallel to the triangle (or the triangle is degenerate)
     }
 
     float f = 1.0f / a;
     Vec3f s = ray.origin - m_v0;
     float u = f * s.dot(h);
 
-    if (u < 0.0f || u > 1.0f) {
+    // Karşılaştırmalar NaN'da da reddedecek biçimde yazıldı (!(x >= 0) NaN için true).
+    if (!(u >= 0.0f && u <= 1.0f)) {
         return false;
     }
 
     Vec3f q = s.cross(edge1);
     float v = f * ray.direction.dot(q);
 
-    if (v < 0.0f || u + v > 1.0f) {
+    if (!(v >= 0.0f && u + v <= 1.0f)) {
         return false;
     }
 
     float t = f * edge2.dot(q);
 
-    if (t < ray.tMin || t > ray.tMax) {
+    if (!(t >= ray.tMin && t <= ray.tMax)) {
         return false;
     }
 
     // Hit confirmed!
     ray.tMax = t; // Update ray's tMax
+    fillHit(ray, t, u, v, isect);
+    return true;
+}
 
+void Triangle::fillHit(const Ray& ray, float t, float u, float v, SurfaceInteraction& isect) const {
+    const Vec3f edge1 = m_v1 - m_v0;
+    const Vec3f edge2 = m_v2 - m_v0;
     isect.t = t;
     isect.point = ray.at(t);
 
@@ -80,8 +95,6 @@ bool Triangle::intersect(Ray& ray, SurfaceInteraction& isect) const {
     isect.tangent = isect.tangent.normalized();
 
     isect.material = m_material;
-
-    return true;
 }
 
 AABB Triangle::bounds() const {

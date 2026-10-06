@@ -1,3 +1,4 @@
+// sphere.h — Analitik küre şekli: merkez + yarıçap, üçgenleştirmeden tam kesişim.
 #pragma once
 
 /// @file sphere.h

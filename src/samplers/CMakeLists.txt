@@ -1,6 +1,9 @@
+# samplers/CMakeLists.txt — photon_samplers kütüphanesi.
+# Örnekleyiciler: bağımsız (beyaz gürültü), tabakalı ve Owen-karıştırmalı Sobol.
 add_library(photon_samplers STATIC
     independent_sampler.cpp
     stratified_sampler.cpp
+    sobol_sampler.cpp
 )
 
 target_link_libraries(photon_samplers PUBLIC photon_core)

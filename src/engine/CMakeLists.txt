@@ -2,6 +2,7 @@ add_library(photon_engine STATIC
     scene.cpp
     renderer.cpp
     denoiser.cpp
+    embree_accel.cpp
 )
 
 target_link_libraries(photon_engine PUBLIC
@@ -25,6 +26,15 @@ if(PHOTON_OIDN_FOUND)
     else()
         target_link_libraries(photon_engine PUBLIC OpenImageDenoise)
     endif()
+endif()
+
+# Intel Embree 4 (Apache-2.0): bulunursa üretim ışın kesişimi onunla yapılır.
+if(embree_FOUND)
+    target_compile_definitions(photon_engine PRIVATE PHOTON_HAS_EMBREE)
+    target_link_libraries(photon_engine PRIVATE embree)
+    message(STATUS "Embree: found ${embree_VERSION} — production ray queries")
+else()
+    message(STATUS "Embree: not found — using the built-in BVH")
 endif()
 
 target_link_libraries(photon_engine PRIVATE photon_build_flags)

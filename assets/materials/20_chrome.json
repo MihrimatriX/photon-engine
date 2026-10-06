@@ -1,0 +1,10 @@
+{
+  "id": "chrome",
+  "name": "Krom",
+  "category": "Metal",
+  "type": "generic",
+  "baseColor": [0.95, 0.95, 0.96],
+  "roughness": 0.03,
+  "metallic": 1,
+  "specular": 0.5
+}

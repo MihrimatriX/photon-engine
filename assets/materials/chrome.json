@@ -1,9 +1,0 @@
-{
-  "id": "chrome",
-  "name": "Chrome",
-  "category": "Metalik",
-  "baseColor": [0.95, 0.95, 0.95],
-  "metallic": 1.0,
-  "roughness": 0.05,
-  "specular": 0.5
-}

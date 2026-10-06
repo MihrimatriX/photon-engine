@@ -1,3 +1,4 @@
+// mirror.cpp — Delta yansıma: wi = yansıma(wo), ağırlık = reflectance.
 #include "materials/mirror.h"
 #include "core/math/frame.h"
 
@@ -13,6 +14,8 @@ bool Mirror::sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& 
     }
 
     // Perfect specular reflection in local space
+    // Yerel uzayda normal = +z: yansıma x, y bileşenlerini ters çevirir, z'yi korur
+    // (dünya uzayında wr = -wo + 2(wo·n)n ile aynı).
     Vec3f wiLocal(-woLocal.x, -woLocal.y, woLocal.z);
     wi = frame.toWorld(wiLocal).normalized();
 
@@ -20,6 +23,8 @@ bool Mirror::sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& 
     // In Monte Carlo integration: (BRDF * cosTheta) / PDF.
     // For a delta distribution, we model it by returning PDF = 1.0,
     // and BRDF = Reflectance / cosTheta.
+    // Delta BRDF: f = R · δ(ω - ωr) / |cos θ|. Integrator f·|cos|/pdf hesapladığı için
+    // brdf = R / cos ve pdf = 1 verilir → ağırlık tam R olur. pdf = 1 bir olasılık kütlesidir.
     pdf = 1.0f;
     brdf = m_reflectance / wiLocal.z;
 

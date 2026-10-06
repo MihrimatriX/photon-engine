@@ -1,3 +1,5 @@
+// orthographic_camera.h — Ortografik (paralel ışınlı) kamera ve odak uzunluğu ↔ görüş açısı
+// dönüşümleri (35 mm tam kare sensör varsayımıyla).
 #pragma once
 
 #include "camera/camera.h"
@@ -8,9 +10,12 @@
 
 namespace photon {
 
-/// Full-frame sensor height used to turn a focal length in mm into a vertical FOV.
-constexpr float kSensorHeightMm = 36.0f;
+/// Tam kare (36×24 mm) sensörün yüksekliği: odak uzunluğu (mm) → dikey görüş açısı.
+/// Yatay kadraj için Blender/KeyShot gibi 36 mm genişlik × en-boy oranı kullanılır.
+constexpr float kSensorHeightMm = 24.0f;
 
+// İğne deliği geometrisi: sensörün yarı yüksekliği (12 mm) ile odak uzunluğu f bir dik
+// üçgen oluşturur → tan(fov/2) = (h/2)/f, yani fov = 2·atan(h / 2f). Örn. 50 mm → ≈ 27°.
 inline float fovDegreesFromFocalMm(float focalMm) {
     if (focalMm < 1.0f) focalMm = 1.0f;
     return rad2deg(2.0f * std::atan((kSensorHeightMm * 0.5f) / focalMm));

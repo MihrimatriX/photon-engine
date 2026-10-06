@@ -1,3 +1,6 @@
+// test_import.cpp — Model içe aktarma testleri: glTF düğüm ağacındaki ebeveyn ötelemesinin
+// konumlara uygulanması ve OBJ/MTL Kd renginin Lambertian malzemeye atanması.
+// Küçük dosyalar geçici klasöre yazılıp yüklenir.
 #include <gtest/gtest.h>
 #include "io/gltf_loader.h"
 #include "io/obj_loader.h"

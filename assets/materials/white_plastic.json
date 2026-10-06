@@ -1,9 +1,0 @@
-{
-  "id": "white_plastic",
-  "name": "White Plastic",
-  "category": "Plastik",
-  "baseColor": [0.9, 0.9, 0.9],
-  "metallic": 0.0,
-  "roughness": 0.35,
-  "specular": 0.5
-}

@@ -1,9 +1,0 @@
-{
-  "id": "glossy_black",
-  "name": "Glossy Black",
-  "category": "Plastik",
-  "baseColor": [0.02, 0.02, 0.02],
-  "metallic": 0.0,
-  "roughness": 0.1,
-  "specular": 0.8
-}

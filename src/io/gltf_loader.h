@@ -1,3 +1,6 @@
+// gltf_loader.h — glTF 2.0 (.gltf / .glb) sahne yükleyicisinin arayüzü.
+// Düğüm ağacı dünya uzayına düzleştirilir; her üçgen primitive ayrı bir TriangleMesh olur,
+// PBR metallic-roughness malzemesi DisneyMaterial'e çevrilir.
 #pragma once
 
 #include "geometry/mesh.h"

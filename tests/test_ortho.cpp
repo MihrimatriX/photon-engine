@@ -1,3 +1,5 @@
+// test_ortho.cpp — Ortografik kamera (paralel ışınlar, farklı başlangıç noktaları) ve
+// odak uzaklığı (mm) ↔ dikey görüş açısı (FOV) dönüşümü testleri.
 #include <gtest/gtest.h>
 #include "camera/orthographic_camera.h"
 #include <cmath>
@@ -17,6 +19,7 @@ TEST(OrthographicCamera, OriginsDifferDirectionsParallel) {
 
 TEST(FocalLength, SensorHeightSetsFov) {
     float fov = fovDegreesFromFocalMm(36.0f);
-    EXPECT_NEAR(fov, 53.1301f, 0.05f);
+    // 36x24 full frame: 2 * atan(12 / 36) = 36.87 degrees vertical.
+    EXPECT_NEAR(fov, 36.8699f, 0.05f);
     EXPECT_NEAR(focalMmFromFovDegrees(fov), 36.0f, 0.05f);
 }

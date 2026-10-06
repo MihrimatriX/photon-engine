@@ -1,3 +1,5 @@
+// utils.h — Küçük matematik yardımcıları: clamp/lerp, ikinci derece denklem, MIS güç sezgiseli,
+// yansıma/kırılma vektörleri ve Fresnel denklemleri. Renderer'ın her yerinden kullanılır.
 #pragma once
 
 /// @file utils.h
@@ -73,6 +75,9 @@ inline bool solveQuadratic(float a, float b, float c, float& t0, float& t1) {
     float sqrtDisc = std::sqrt(discriminant);
 
     // Numerically stable formulation (Press et al.)
+    // Klasik (−b ± √Δ)/2a formülünde b ≈ √Δ olduğunda çıkarma "felaket iptali" ile
+    // basamak kaybeder. Çözüm: işaretleri aynı olan toplamı kullan, q = −½(b + sgn(b)√Δ);
+    // kökler q/a ve c/q (Vieta: t0·t1 = c/a). Hiçbir adımda yakın sayılar çıkarılmaz.
     float q = -0.5f * (b + (b < 0.0f ? -sqrtDisc : sqrtDisc));
 
     t0 = q / a;
@@ -96,6 +101,10 @@ inline bool solveQuadratic(float a, float b, float c, float& t0, float& t1) {
 /// @param ng   Number of samples from distribution g
 /// @param gPdf PDF value of distribution g
 /// @return MIS weight for distribution f
+// MIS (Çoklu Önem Örneklemesi): aynı ışık katkısı hem BSDF örneklemesiyle hem ışık
+// örneklemesiyle bulunabilir. Ağırlıkların toplamı 1 olduğu sürece tahmin yansızdır;
+// güç sezgiseli (β=2) hangi strateji o yönde daha "emin"se (pdf büyükse) ona daha çok
+// ağırlık verir ve gürültüyü dengeli sezgiselden daha iyi bastırır (Veach tezi, bölüm 9).
 inline float powerHeuristic(int nf, float fPdf, int ng, float gPdf) {
     float f = static_cast<float>(nf) * fPdf;
     float g = static_cast<float>(ng) * gPdf;
@@ -130,18 +139,27 @@ inline Vec3f sphericalToCartesian(float theta, float phi) {
 /// @param wo Outgoing direction (pointing away from surface).
 /// @param n  Surface normal (unit length).
 /// @return Reflected direction.
+// wo'nun normal bileşeni (wo·n)n korunur, teğet bileşeni ters çevrilir:
+// r = (wo·n)n − (wo − (wo·n)n) = 2(wo·n)n − wo.
 inline Vec3f reflectVec(const Vec3f& wo, const Vec3f& n) {
     return 2.0f * dot(wo, n) * n - wo;
 }
 
 /// Refract direction @p wi through a surface with normal @p n and
-/// relative index of refraction @p eta = ηi/ηt.
+/// relative index of refraction @p eta = ηi/ηt (PBRT-v3 `Refract` convention).
 ///
-/// @param[in]  wi  Incident direction (pointing toward surface).
-/// @param[in]  n   Surface normal (pointing toward the side @p wi is on).
-/// @param[in]  eta Ratio of indices of refraction (ηi / ηt).
-/// @param[out] wt  Refracted direction (pointing away from surface).
+/// @param[in]  wi  Incident direction, pointing AWAY from the surface (same side as @p n).
+/// @param[in]  n   Unit surface normal on the same side as @p wi (dot(wi, n) > 0).
+/// @param[in]  eta Ratio of indices of refraction ηi / ηt (ηi = medium @p wi is in).
+/// @param[out] wt  Refracted direction, pointing away from the surface on the other side.
 /// @return @c true if refraction occurs, @c false for total internal reflection.
+///
+/// Matematik (Snell, vektör biçimi): wi'nin teğet bileşeni wi - cosθi·n'dir.
+/// Kırılan ışının teğet bileşeni Snell gereği eta kat büyür ve YÖNÜ TERS olur
+/// (ışın yüzeyi geçer): -eta·(wi - cosθi·n). Normal bileşeni -cosθt·n'dir.
+/// Toplam: wt = -eta·wi + (eta·cosθi - cosθt)·n. Dikkat: wi yüzeye DOĞRU değil,
+/// yüzeyden DIŞARI bakar. Eski belge "toward" diyordu; Dielectric de buna uyup
+/// -wo verince her kırılma teğet düzlemde aynalanıyordu (bulgu core-1).
 inline bool refractVec(const Vec3f& wi, const Vec3f& n, float eta, Vec3f& wt) {
     float cosThetaI = dot(n, wi);
     float sin2ThetaI = std::max(0.0f, 1.0f - cosThetaI * cosThetaI);
@@ -164,6 +182,8 @@ inline bool refractVec(const Vec3f& wi, const Vec3f& n, float eta, Vec3f& wt) {
 /// @param cosTheta Cosine of the angle between the incident direction and normal.
 /// @param F0       Reflectance at normal incidence.
 /// @return Approximate Fresnel reflectance.
+// F(θ) ≈ F0 + (1 − F0)(1 − cosθ)⁵ (Schlick 1994). Dik gelişte F0, sıyırma açısında 1'e
+// gider. F0 = ((η−1)/(η+1))²; cam (η=1.5) için ≈ 0.04. Üs 5 için pow yerine çarpım zinciri.
 inline float fresnelSchlick(float cosTheta, float F0) {
     float oneMinusCos = 1.0f - cosTheta;
     float oneMinusCos2 = oneMinusCos * oneMinusCos;
@@ -180,6 +200,9 @@ inline float fresnelSchlick(float cosTheta, float F0) {
 /// @param etaI      Index of refraction of the incident medium.
 /// @param etaT      Index of refraction of the transmitted medium.
 /// @return Fresnel reflectance ∈ [0, 1].
+// Maxwell denklemlerinden gelen tam Fresnel: rs (dik/s) ve rp (paralel/p) kutuplanmış
+// genlik yansıtma katsayılarıdır. Kutuplanmamış ışık için güç yansıtması bunların
+// karelerinin ortalamasıdır: F = (rs² + rp²)/2. Geçen kısım 1 − F (PBRT 4. baskı, 9.3).
 inline float fresnelDielectric(float cosThetaI, float etaI, float etaT) {
     cosThetaI = clamp(cosThetaI, -1.0f, 1.0f);
 
@@ -216,6 +239,8 @@ inline float fresnelDielectric(float cosThetaI, float etaI, float etaT) {
 ///
 /// Uses ITU-R BT.709 coefficients (same as sRGB primaries).
 /// @return Scalar luminance value.
+// Katsayılar, doğrusal sRGB/BT.709 ana renklerinden CIE Y'ye dönüşüm matrisinin orta
+// satırıdır; göz yeşile en duyarlı olduğundan G ağırlığı en büyüktür. Girdi DOĞRUSAL olmalı.
 inline constexpr float luminance(float r, float g, float b) {
     return 0.2126f * r + 0.7152f * g + 0.0722f * b;
 }

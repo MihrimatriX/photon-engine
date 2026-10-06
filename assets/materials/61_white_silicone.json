@@ -1,0 +1,11 @@
+{
+  "id": "white_silicone",
+  "name": "Beyaz Silikon",
+  "category": "Kauçuk",
+  "type": "generic",
+  "baseColor": [0.85, 0.85, 0.83],
+  "roughness": 0.5,
+  "metallic": 0,
+  "specular": 0.4,
+  "diffuseTransmission": 0.25
+}

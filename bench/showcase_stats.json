@@ -1,0 +1,12 @@
+{
+  "bounces": 8,
+  "denoise": true,
+  "height": 1080,
+  "loadSeconds": 0.0671149,
+  "msamplesPerSecond": 3.399337962548627,
+  "output": "../../bench/showcase_1080p.png",
+  "renderSeconds": 78.0801447,
+  "spp": 128,
+  "threads": 8,
+  "width": 1920
+}

@@ -1,3 +1,7 @@
+// light.h — Tüm ışık kaynaklarının ortak arayüzü (Light) ve örnek sonucu (LightSample).
+// Path tracer her yüzey noktasında bir ışık seçip sampleLi ile ona doğru bir yön örnekler
+// (next-event estimation, NEE). Tahminci: f · Li · |cos θ| / pdf. Bu yüzden pdf'in KATI AÇI
+// (solid angle, sr⁻¹) cinsinden olması şart; alan ışıkları kendi alan pdf'lerini çevirip verir.
 #pragma once
 
 /// @file light.h
@@ -33,6 +37,9 @@ public:
 
     /// @brief Return true if this light is a delta distribution (point, directional).
     /// Delta lights cannot be intersected by rays directly, and require special handling in MIS.
+    /// Delta ışık (nokta/yönlü) sıfır alan kaplar: rastgele bir ışının ona çarpma olasılığı 0,
+    /// ancak sampleLi ile bulunabilir. pdf = 1 bir yoğunluk değil "olasılık kütlesi"dir; BSDF
+    /// örneklemesi bu ışığı asla bulamayacağı için MIS uygulanmaz, NEE katkısı tam ağırlık alır.
     virtual bool isDelta() const = 0;
 
     /// @brief Approximate total power emitted by the light source.

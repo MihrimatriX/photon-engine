@@ -1,9 +1,17 @@
+// parallel.h — Görüntüyü karolara bölüp thread havuzunda paralel işleyen yardımcılar.
+//
+// parallelFor2D, W×H görüntüyü tileSize×tileSize karolara böler ve her karoyu
+// havuza bir iş olarak verir. İsteğe bağlı `cancel` bayrağı set edilince henüz
+// başlamamış karolar hemen döner; böylece kamera hareket ettiğinde eski pass
+// bir karo süresi içinde (milisaniyeler) durur.
 #pragma once
 
 #include "thread_pool.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <future>
 #include <memory>
@@ -11,65 +19,36 @@
 
 namespace photon {
 
+/// Uygulama ömrü boyunca yaşayan ortak havuz. Bir çekirdek UI thread'ine kalsın
+/// diye işçi sayısı hardware_concurrency - 1 (en az 1).
 inline ThreadPool& getThreadPool() {
-    static ThreadPool pool;
+    static ThreadPool pool(std::max(1u, std::thread::hardware_concurrency() > 1
+                                           ? std::thread::hardware_concurrency() - 1
+                                           : 1u));
     return pool;
 }
 
-inline void parallelFor(int64_t begin, int64_t end, const std::function<void(int64_t)>& func, int64_t grainSize = 1) {
-    if (grainSize <= 0) {
-        grainSize = 1;
-    }
-
-    int64_t range = end - begin;
-    if (range <= 0) {
-        return;
-    }
-
-    if (range <= grainSize) {
-        for (int64_t i = begin; i < end; ++i) {
-            func(i);
-        }
-        return;
-    }
-
-    // Hold a shared copy so worker lifetimes can't outlive a temporary std::function.
-    auto sharedFunc = std::make_shared<std::function<void(int64_t)>>(func);
-    auto& pool = getThreadPool();
-    std::vector<std::future<void>> futures;
-
-    for (int64_t i = begin; i < end; i += grainSize) {
-        int64_t chunkEnd = std::min(i + grainSize, end);
-        futures.push_back(pool.submit([sharedFunc, i, chunkEnd]() {
-            for (int64_t j = i; j < chunkEnd; ++j) {
-                (*sharedFunc)(j);
-            }
-        }));
-    }
-
-    for (auto& future : futures) {
-        future.get();
-    }
-}
-
-inline void parallelFor2D(int width, int height, const std::function<void(int, int, int, int)>& func,
-                          int tileSize = 16, ThreadPool* poolOverride = nullptr) {
+/// Karoları paralel işler. Bir karo istisna atarsa diğer karoların bitmesi
+/// beklenir, sonra ilk istisna yeniden fırlatılır: işçiler çağıranın yığınındaki
+/// (stack) verilere dokunurken fonksiyondan erken çıkmak çökmeye yol açardı.
+/// @return Tüm karolar işlendiyse true; iptal edildiyse false.
+inline bool parallelFor2D(int width, int height, const std::function<void(int, int, int, int)>& func,
+                          int tileSize = 16, ThreadPool* poolOverride = nullptr,
+                          const std::atomic<bool>* cancel = nullptr) {
     if (width <= 0 || height <= 0) {
-        return;
+        return true;
     }
 
     if (tileSize <= 0) {
         tileSize = 16;
     }
 
-    // Copy into shared_ptr: workers must not keep a reference to a stack temporary.
-    auto sharedFunc = std::make_shared<std::function<void(int, int, int, int)>>(func);
-
     ThreadPool& pool = poolOverride ? *poolOverride : getThreadPool();
     std::vector<std::future<void>> futures;
     futures.reserve(static_cast<size_t>((width + tileSize - 1) / tileSize) *
                     static_cast<size_t>((height + tileSize - 1) / tileSize));
 
+    // Referansla yakalamak güvenli: aşağıda her future beklenmeden dönülmüyor.
     for (int y = 0; y < height; y += tileSize) {
         for (int x = 0; x < width; x += tileSize) {
             int xBegin = x;
@@ -77,15 +56,23 @@ inline void parallelFor2D(int width, int height, const std::function<void(int, i
             int yBegin = y;
             int yEnd = std::min(y + tileSize, height);
 
-            futures.push_back(pool.submit([sharedFunc, xBegin, xEnd, yBegin, yEnd]() {
-                (*sharedFunc)(xBegin, xEnd, yBegin, yEnd);
+            futures.push_back(pool.submit([&func, cancel, xBegin, xEnd, yBegin, yEnd]() {
+                if (cancel && cancel->load(std::memory_order_relaxed)) return;
+                func(xBegin, xEnd, yBegin, yEnd);
             }));
         }
     }
 
+    std::exception_ptr firstError;
     for (auto& future : futures) {
-        future.get();
+        try {
+            future.get();
+        } catch (...) {
+            if (!firstError) firstError = std::current_exception();
+        }
     }
+    if (firstError) std::rethrow_exception(firstError);
+    return !(cancel && cancel->load(std::memory_order_relaxed));
 }
 
 } // namespace photon

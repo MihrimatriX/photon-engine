@@ -1,3 +1,6 @@
+// mat.h — 4×4 matris (Mat4f): afin dönüşümler (öteleme/döndürme/ölçek), lookAt ve izdüşüm.
+// Transform sınıfı bu matrisi ve tersini birlikte saklar; noktalar/vektörler/normaller
+// sahne ↔ nesne uzayı arasında bu matrislerle taşınır.
 #pragma once
 
 /// @file mat.h
@@ -21,6 +24,9 @@ namespace photon {
 /// Convention: data[row][col].
 /// Matrix–vector multiplication treats vectors as column vectors:
 ///   result = M * v
+// Sütun vektör kuralı: A*B*v önce B'yi, sonra A'yı uygular (sağdan sola okunur).
+// Öteleme son sütundadır (data[0..2][3]); homojen w=1 olan noktalar ötelenir,
+// w=0 olan yönler ötelenmez.
 struct Mat4f {
     float data[4][4] = {};
 
@@ -88,6 +94,9 @@ struct Mat4f {
 
     /// Compute the determinant of this 4×4 matrix via cofactor expansion
     /// along the first row.
+    // Aslında genelleştirilmiş Laplace açılımı (ilk iki satır boyunca): s0..s5 üst iki
+    // satırın 2×2 minörleri, c0..c5 alt iki satırın tamamlayıcı 2×2 minörleri.
+    // det = Σ ± s_i · c_(5−i); işaretler sütun permütasyonunun paritesinden gelir.
     constexpr float determinant() const {
         // 2×2 sub-determinants (Laplace expansion)
         float s0 = data[0][0] * data[1][1] - data[1][0] * data[0][1];
@@ -113,6 +122,11 @@ struct Mat4f {
     ///
     /// Uses the method from "Streaming SIMD Extensions — Inverse of 4×4 Matrix"
     /// (Intel AP-928). Returns identity if the matrix is singular.
+    //
+    // Matematik: M⁻¹ = adj(M) / det(M); adj(M) = kofaktör matrisinin transpozu.
+    // Her kofaktör bir 3×3 determinanttır; burada determinant() ile aynı s/c 2×2
+    // minörleri yeniden kullanılarak her biri 3 çarpım-toplamla hesaplanır.
+    // det == 0 (tekil matris, örn. sıfır ölçek) ise ters yoktur → birim matris döner.
     constexpr Mat4f inverse() const {
         float s0 = data[0][0] * data[1][1] - data[1][0] * data[0][1];
         float s1 = data[0][0] * data[1][2] - data[1][0] * data[0][2];
@@ -237,6 +251,10 @@ struct Mat4f {
     /// @param eye    Camera position in world space.
     /// @param target Point the camera is looking at.
     /// @param up     World up direction (typically {0, 1, 0}).
+    //
+    // Kamera tabanı: f = ileri, r = f × up (sağ), u = r × f (gerçek yukarı). Satırlar
+    // (r, u, −f) bir dönme matrisinin transpozu = tersidir; son sütun −R·eye ötelemesi.
+    // Yani matris = R⁻¹ · T(−eye): önce kamerayı orijine taşı, sonra eksenleri hizala.
     static inline Mat4f lookAt(const Vec3f& eye, const Vec3f& target, const Vec3f& up) {
         Vec3f f = (target - eye).normalized();  // Forward (-z in view space)
         Vec3f r = f.cross(up).normalized();     // Right   (+x in view space)
@@ -256,6 +274,11 @@ struct Mat4f {
     /// @param aspect Aspect ratio (width / height).
     /// @param zNear  Near clipping plane distance (> 0).
     /// @param zFar   Far clipping plane distance (> zNear).
+    //
+    // x,y ölçeği 1/tan(fov/2): görüş konisini [−1, 1] karesine sıkıştırır; son satır
+    // w' = −z_görüş yapar, böylece perspektif bölmesi (x/w, y/w) uzaktakini küçültür.
+    // Not: z katsayıları (−(f+n)/(f−n), −2fn/(f−n)) OpenGL tarzıdır ve derinliği aslında
+    // [−1, 1]'e eşler. Işın izleyici bu matrisi yalnızca önizleme/gizmo izdüşümü için kullanır.
     static inline Mat4f perspective(float fovY, float aspect, float zNear, float zFar) {
         float tanHalfFov = std::tan(fovY * 0.5f);
         float range = zFar - zNear;

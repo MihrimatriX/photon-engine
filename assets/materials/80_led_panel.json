@@ -1,0 +1,11 @@
+{
+  "id": "led_panel",
+  "name": "LED Panel",
+  "category": "Işık",
+  "type": "generic",
+  "baseColor": [1.0, 0.97, 0.92],
+  "roughness": 0.5,
+  "metallic": 0,
+  "specular": 0.5,
+  "emissive": 6.0
+}

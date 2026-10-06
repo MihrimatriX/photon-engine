@@ -1,3 +1,5 @@
+// test_mesh_light.cpp — Yayıcı (emission) malzemeli bir mesh'in ışık olarak kullanılıp altındaki
+// dağınık zemini aydınlattığını doğrular (MeshLight + NEE yolu).
 #include <gtest/gtest.h>
 #include "engine/scene.h"
 #include "geometry/mesh.h"

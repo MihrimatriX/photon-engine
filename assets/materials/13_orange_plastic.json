@@ -1,0 +1,10 @@
+{
+  "id": "orange_plastic",
+  "name": "Turuncu Plastik",
+  "category": "Plastik",
+  "type": "generic",
+  "baseColor": [0.85, 0.28, 0.03],
+  "roughness": 0.3,
+  "metallic": 0,
+  "specular": 0.5
+}

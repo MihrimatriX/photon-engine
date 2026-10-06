@@ -1,0 +1,12 @@
+{
+  "id": "red_car_paint",
+  "name": "Kırmızı Araç Boyası",
+  "category": "Boya",
+  "type": "generic",
+  "baseColor": [0.55, 0.02, 0.03],
+  "roughness": 0.35,
+  "metallic": 0,
+  "specular": 0.5,
+  "clearCoat": 1.0,
+  "clearCoatRoughness": 0.02
+}

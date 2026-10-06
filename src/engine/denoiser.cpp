@@ -1,3 +1,4 @@
+// denoiser.cpp — OIDN sarmalayıcısı ve OIDN yoksa kullanılan yumuşatma yedeği.
 #include "engine/denoiser.h"
 
 #include <algorithm>
@@ -13,19 +14,14 @@ namespace photon {
 
 namespace {
 
+// OIDN yokken: 3×3 komşulukta parlaklığa ters ağırlıklı ortalama. Ateş böceği
+// (firefly) denilen tek parlak pikselleri bastırır ama ayrıntıyı da bulanıklaştırır.
 bool softBlurDenoise(Image& color) {
     const int w = color.width();
     const int h = color.height();
     if (w <= 0 || h <= 0) return false;
 
-    // 3×3 box on averaged HDR — reduces fireflies when OIDN SDK is absent.
-    std::vector<Color3f> src(static_cast<size_t>(w) * h);
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            src[static_cast<size_t>(y) * w + x] = color.getPixel(x, y);
-        }
-    }
-
+    Image src = color;
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             Color3f sum(0.0f);
@@ -34,9 +30,8 @@ bool softBlurDenoise(Image& color) {
                 for (int dx = -1; dx <= 1; ++dx) {
                     int nx = std::clamp(x + dx, 0, w - 1);
                     int ny = std::clamp(y + dy, 0, h - 1);
-                    Color3f c = src[static_cast<size_t>(ny) * w + nx];
+                    Color3f c = src.getPixel(nx, ny);
                     float lum = 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
-                    // Down-weight extreme fireflies
                     float weight = 1.0f / (1.0f + lum * lum);
                     sum += c * weight;
                     wsum += weight;
@@ -50,6 +45,97 @@ bool softBlurDenoise(Image& color) {
 
 } // namespace
 
+#if defined(PHOTON_ENABLE_OIDN)
+struct Denoiser::Impl {
+    oidn::DeviceRef device;
+    bool ok = false;
+    Impl() {
+        try {
+            // GTX 1080 (Pascal) OIDN GPU modunu desteklemez; CPU cihazı seçilir.
+            device = oidn::newDevice(oidn::DeviceType::CPU);
+            device.commit();
+            const char* msg = nullptr;
+            ok = device.getError(msg) == oidn::Error::None;
+            if (!ok) std::cerr << "OIDN device error: " << (msg ? msg : "?") << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "OIDN init failed: " << e.what() << std::endl;
+        }
+    }
+};
+#else
+struct Denoiser::Impl {};
+#endif
+
+Denoiser::Denoiser() : m_impl(std::make_unique<Impl>()) {}
+Denoiser::~Denoiser() = default;
+
+bool Denoiser::run(Image& color, const Image* albedo, const Image* normal, Quality quality) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+#if !defined(PHOTON_ENABLE_OIDN)
+    (void)albedo;
+    (void)normal;
+    (void)quality;
+    softBlurDenoise(color);
+    return false;
+#else
+    const int w = color.width();
+    const int h = color.height();
+    if (w <= 0 || h <= 0) return false;
+    if (!m_impl->ok) {
+        softBlurDenoise(color);
+        return false;
+    }
+
+    try {
+        // Image zaten sıkı paketlenmiş float RGB; OIDN doğrudan onun belleğini okur.
+        // Çıktı ayrı bir tampona yazılır (yerinde çalıştırmak OIDN'de desteklenir
+        // ama ayrı tampon, hata durumunda girdiyi bozmadan yedeğe düşmeyi sağlar).
+        std::vector<float> outBuf(static_cast<size_t>(w) * static_cast<size_t>(h) * 3);
+        oidn::FilterRef filter = m_impl->device.newFilter("RT");
+        filter.setImage("color", color.data(), oidn::Format::Float3, w, h);
+        filter.setImage("output", outBuf.data(), oidn::Format::Float3, w, h);
+        const bool hasAlbedo = albedo && albedo->width() == w && albedo->height() == h;
+        const bool hasNormal = hasAlbedo && normal && normal->width() == w && normal->height() == h;
+        if (hasAlbedo) filter.setImage("albedo", const_cast<float*>(albedo->data()), oidn::Format::Float3, w, h);
+        // OIDN normal kanalını yalnız albedo ile birlikte kabul eder.
+        if (hasNormal) filter.setImage("normal", const_cast<float*>(normal->data()), oidn::Format::Float3, w, h);
+        filter.set("hdr", true);
+        switch (quality) {
+            case Quality::Fast: filter.set("quality", oidn::Quality::Fast); break;
+            case Quality::Balanced: filter.set("quality", oidn::Quality::Balanced); break;
+            case Quality::High: filter.set("quality", oidn::Quality::High); break;
+        }
+        filter.commit();
+        filter.execute();
+
+        const char* errorMessage = nullptr;
+        if (m_impl->device.getError(errorMessage) != oidn::Error::None) {
+            std::cerr << "OIDN error: " << (errorMessage ? errorMessage : "unknown") << std::endl;
+            softBlurDenoise(color);
+            return false;
+        }
+        std::copy(outBuf.begin(), outBuf.end(), color.data());
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "OIDN exception: " << e.what() << std::endl;
+        softBlurDenoise(color);
+        return false;
+    }
+#endif
+}
+
+namespace {
+Denoiser& sharedDenoiser() {
+    static Denoiser d;
+    return d;
+}
+} // namespace
+
+bool denoiseImage(Image& color, const Image* albedo, const Image* normal) {
+    if (!denoiseAvailable()) return softBlurDenoise(color);
+    return sharedDenoiser().run(color, albedo, normal, Denoiser::Quality::High);
+}
+
 Image denoiseCopy(const Image& color) {
     Image out = color;
     denoiseImage(out);
@@ -61,88 +147,6 @@ bool denoiseAvailable() {
     return true;
 #else
     return false;
-#endif
-}
-
-bool denoiseImage(Image& color, const Image* albedo, const Image* normal) {
-#if !defined(PHOTON_ENABLE_OIDN)
-    (void)albedo;
-    (void)normal;
-    return softBlurDenoise(color);
-#else
-    const int w = color.width();
-    const int h = color.height();
-    if (w <= 0 || h <= 0) return false;
-
-    std::vector<float> beauty(static_cast<size_t>(w) * h * 3);
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            Color3f c = color.getPixel(x, y);
-            const size_t i = (static_cast<size_t>(y) * w + x) * 3;
-            beauty[i + 0] = c.r;
-            beauty[i + 1] = c.g;
-            beauty[i + 2] = c.b;
-        }
-    }
-
-    try {
-        oidn::DeviceRef device = oidn::newDevice();
-        device.commit();
-
-        oidn::FilterRef filter = device.newFilter("RT");
-        filter.setImage("color", beauty.data(), oidn::Format::Float3, w, h);
-        filter.setImage("output", beauty.data(), oidn::Format::Float3, w, h);
-
-        std::vector<float> albedoBuf, normalBuf;
-        if (albedo && albedo->width() == w && albedo->height() == h) {
-            albedoBuf.resize(beauty.size());
-            for (int y = 0; y < h; ++y) {
-                for (int x = 0; x < w; ++x) {
-                    Color3f c = albedo->getPixel(x, y);
-                    const size_t i = (static_cast<size_t>(y) * w + x) * 3;
-                    albedoBuf[i + 0] = c.r;
-                    albedoBuf[i + 1] = c.g;
-                    albedoBuf[i + 2] = c.b;
-                }
-            }
-            filter.setImage("albedo", albedoBuf.data(), oidn::Format::Float3, w, h);
-        }
-        if (normal && normal->width() == w && normal->height() == h) {
-            normalBuf.resize(beauty.size());
-            for (int y = 0; y < h; ++y) {
-                for (int x = 0; x < w; ++x) {
-                    Color3f c = normal->getPixel(x, y);
-                    const size_t i = (static_cast<size_t>(y) * w + x) * 3;
-                    normalBuf[i + 0] = c.r;
-                    normalBuf[i + 1] = c.g;
-                    normalBuf[i + 2] = c.b;
-                }
-            }
-            filter.setImage("normal", normalBuf.data(), oidn::Format::Float3, w, h);
-        }
-
-        filter.set("hdr", true);
-        filter.commit();
-        filter.execute();
-
-        const char* errorMessage = nullptr;
-        if (device.getError(errorMessage) != oidn::Error::None) {
-            std::cerr << "OIDN error: " << (errorMessage ? errorMessage : "unknown")
-                      << " — falling back to soft blur" << std::endl;
-            return softBlurDenoise(color);
-        }
-
-        for (int y = 0; y < h; ++y) {
-            for (int x = 0; x < w; ++x) {
-                const size_t i = (static_cast<size_t>(y) * w + x) * 3;
-                color.setPixel(x, y, Color3f(beauty[i], beauty[i + 1], beauty[i + 2]));
-            }
-        }
-        return true;
-    } catch (const std::exception& e) {
-        std::cerr << "OIDN exception: " << e.what() << " — soft blur fallback" << std::endl;
-        return softBlurDenoise(color);
-    }
 #endif
 }
 

@@ -1,3 +1,6 @@
+// independent_sampler.cpp — Bağımsız örnekleyici: her sayı PCG32'den doğrudan gelir.
+// En basit ve yansız seçenek; ama noktalar kümelenebilir/boşluk bırakabilir, bu yüzden
+// gürültü N örnekte ~1/√N hızında azalır (düşük tutarsızlıklı dizilerden daha yavaş).
 #include "samplers/independent_sampler.h"
 
 namespace photon {
@@ -19,6 +22,8 @@ std::unique_ptr<Sampler> IndependentSampler::clone(uint64_t seed) const {
 
 void IndependentSampler::startPixel(int x, int y) {
     // Re-seed RNG based on pixel coordinates to keep frames coherent or distinct
+    // Piksel koordinatlarını büyük sabitlerle çarpıp tabana XOR'layarak pikseller arası
+    // farklı ve tekrarlanabilir bir tohum elde edilir (aynı tohum → aynı görüntü).
     uint64_t pixelSeed = m_baseSeed ^ (static_cast<uint64_t>(x) * 19123 + static_cast<uint64_t>(y) * 92183);
     m_rng = RNG(pixelSeed);
 }

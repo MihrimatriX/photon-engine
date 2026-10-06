@@ -1,103 +1,195 @@
+// theme.cpp — Renk paleti, font yükleme ve ImGui stilinin uygulanması.
 #include "ui/theme.h"
-#include "imgui.h"
+#include "ui/icons.h"
 
-namespace photon {
+#include <filesystem>
 
-void applyKeyShotTheme() {
-    ImGuiStyle& s = ImGui::GetStyle();
-    ImVec4* c = s.Colors;
+namespace photon::ui {
 
-    // KeyShot product-viz chrome: charcoal panels, soft corners, muted steel accent
-    s.WindowRounding = 6.0f;
-    s.ChildRounding = 5.0f;
-    s.FrameRounding = 4.0f;
-    s.PopupRounding = 5.0f;
-    s.ScrollbarRounding = 8.0f;
-    s.GrabRounding = 3.0f;
-    s.TabRounding = 4.0f;
-    s.WindowBorderSize = 1.0f;
-    s.FrameBorderSize = 0.0f;
-    s.PopupBorderSize = 1.0f;
-    s.TabBorderSize = 0.0f;
-    s.ItemSpacing = ImVec2(10, 8);
-    s.ItemInnerSpacing = ImVec2(6, 5);
-    s.FramePadding = ImVec2(10, 6);
-    s.WindowPadding = ImVec2(14, 12);
-    s.IndentSpacing = 18.0f;
-    s.ScrollbarSize = 12.0f;
-    s.GrabMinSize = 10.0f;
-    s.SeparatorTextBorderSize = 1.0f;
-    s.SeparatorTextPadding = ImVec2(14, 5);
-    s.CellPadding = ImVec2(6, 4);
+namespace {
 
-    // Neutrals — cool charcoal, not purple / not neon
-    const ImVec4 bg0(0.078f, 0.078f, 0.082f, 1.00f); // #141415
-    const ImVec4 bg1(0.105f, 0.105f, 0.110f, 1.00f); // #1B1B1C
-    const ImVec4 bg2(0.140f, 0.140f, 0.148f, 1.00f); // #242426
-    const ImVec4 bg3(0.175f, 0.175f, 0.185f, 1.00f); // #2C2C2F
-    const ImVec4 border(0.22f, 0.22f, 0.24f, 1.00f);
-    const ImVec4 text(0.90f, 0.90f, 0.91f, 1.00f);
-    const ImVec4 textDim(0.50f, 0.50f, 0.53f, 1.00f);
-    // Subtle steel-blue accent (KeyShot-ish, not AI purple glow)
-    const ImVec4 accent(0.32f, 0.48f, 0.62f, 1.00f);
-    const ImVec4 accentHi(0.40f, 0.58f, 0.74f, 1.00f);
-    const ImVec4 accentLo(0.24f, 0.38f, 0.50f, 1.00f);
-
-    c[ImGuiCol_Text] = text;
-    c[ImGuiCol_TextDisabled] = textDim;
-    c[ImGuiCol_WindowBg] = bg0;
-    c[ImGuiCol_ChildBg] = bg1;
-    c[ImGuiCol_PopupBg] = ImVec4(0.10f, 0.10f, 0.105f, 0.98f);
-    c[ImGuiCol_Border] = border;
-    c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_FrameBg] = bg2;
-    c[ImGuiCol_FrameBgHovered] = bg3;
-    c[ImGuiCol_FrameBgActive] = ImVec4(0.20f, 0.22f, 0.26f, 1.0f);
-    c[ImGuiCol_TitleBg] = ImVec4(0.06f, 0.06f, 0.065f, 1.0f);
-    c[ImGuiCol_TitleBgActive] = ImVec4(0.09f, 0.09f, 0.095f, 1.0f);
-    c[ImGuiCol_TitleBgCollapsed] = bg0;
-    c[ImGuiCol_MenuBarBg] = ImVec4(0.07f, 0.07f, 0.075f, 1.0f);
-    c[ImGuiCol_ScrollbarBg] = ImVec4(0.06f, 0.06f, 0.065f, 0.55f);
-    c[ImGuiCol_ScrollbarGrab] = bg3;
-    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.30f, 0.30f, 0.33f, 1.0f);
-    c[ImGuiCol_ScrollbarGrabActive] = accentLo;
-    c[ImGuiCol_CheckMark] = accentHi;
-    c[ImGuiCol_SliderGrab] = accent;
-    c[ImGuiCol_SliderGrabActive] = accentHi;
-    c[ImGuiCol_Button] = accentLo;
-    c[ImGuiCol_ButtonHovered] = accent;
-    c[ImGuiCol_ButtonActive] = accentHi;
-    c[ImGuiCol_Header] = ImVec4(accent.x, accent.y, accent.z, 0.35f);
-    c[ImGuiCol_HeaderHovered] = ImVec4(accent.x, accent.y, accent.z, 0.55f);
-    c[ImGuiCol_HeaderActive] = ImVec4(accent.x, accent.y, accent.z, 0.75f);
-    c[ImGuiCol_Separator] = border;
-    c[ImGuiCol_SeparatorHovered] = accent;
-    c[ImGuiCol_SeparatorActive] = accentHi;
-    c[ImGuiCol_ResizeGrip] = ImVec4(accent.x, accent.y, accent.z, 0.25f);
-    c[ImGuiCol_ResizeGripHovered] = ImVec4(accent.x, accent.y, accent.z, 0.55f);
-    c[ImGuiCol_ResizeGripActive] = accent;
-    c[ImGuiCol_Tab] = bg1;
-    c[ImGuiCol_TabHovered] = ImVec4(accent.x, accent.y, accent.z, 0.45f);
-    c[ImGuiCol_TabActive] = bg3;
-    c[ImGuiCol_TabUnfocused] = bg0;
-    c[ImGuiCol_TabUnfocusedActive] = bg2;
-    c[ImGuiCol_DockingPreview] = ImVec4(accent.x, accent.y, accent.z, 0.35f);
-    c[ImGuiCol_DockingEmptyBg] = bg0;
-    c[ImGuiCol_PlotLines] = accentHi;
-    c[ImGuiCol_PlotLinesHovered] = accentHi;
-    c[ImGuiCol_PlotHistogram] = accent;
-    c[ImGuiCol_PlotHistogramHovered] = accentHi;
-    c[ImGuiCol_TableHeaderBg] = bg2;
-    c[ImGuiCol_TableBorderStrong] = border;
-    c[ImGuiCol_TableBorderLight] = ImVec4(0.18f, 0.18f, 0.20f, 1.0f);
-    c[ImGuiCol_TableRowBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_TableRowBgAlt] = ImVec4(1, 1, 1, 0.02f);
-    c[ImGuiCol_TextSelectedBg] = ImVec4(accent.x, accent.y, accent.z, 0.35f);
-    c[ImGuiCol_DragDropTarget] = ImVec4(0.55f, 0.72f, 0.85f, 0.90f);
-    c[ImGuiCol_NavHighlight] = accent;
-    c[ImGuiCol_NavWindowingHighlight] = ImVec4(1, 1, 1, 0.50f);
-    c[ImGuiCol_NavWindowingDimBg] = ImVec4(0.1f, 0.1f, 0.1f, 0.40f);
-    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.05f, 0.05f, 0.05f, 0.55f);
+constexpr ImVec4 rgb(int r, int g, int b, float a = 1.0f) {
+    return ImVec4(static_cast<float>(r) / 255.0f, static_cast<float>(g) / 255.0f,
+                  static_cast<float>(b) / 255.0f, a);
 }
 
-} // namespace photon
+ImFont* loadWithIcons(const std::filesystem::path& text, const std::filesystem::path& icons, float size) {
+    ImGuiIO& io = ImGui::GetIO();
+    if (!std::filesystem::exists(text)) return nullptr;
+    // Inter'in kendisi de Özel Kullanım Alanı'nda (U+E000–F8FF) glifler taşıyor;
+    // ImGui birleşik fontta ilk bulduğu glifi kullandığı için ikonlar yerine
+    // Inter'in harfleri çıkıyordu. Bu aralık metin fontundan dışlanır.
+    static const ImWchar kExcludePUA[] = {ICON_MIN_LUCIDE, ICON_MAX_LUCIDE, 0};
+    ImFontConfig textCfg;
+    textCfg.GlyphExcludeRanges = kExcludePUA;
+    ImFont* f = io.Fonts->AddFontFromFileTTF(text.string().c_str(), size, &textCfg);
+    if (!f) return nullptr;
+    if (std::filesystem::exists(icons)) {
+        ImFontConfig cfg;
+        cfg.MergeMode = true;
+        cfg.PixelSnapH = true;
+        // İkonları metnin x-yüksekliğine hizala; Lucide çizgileri ince, biraz büyüt.
+        cfg.GlyphOffset = ImVec2(0.0f, 2.0f);
+        cfg.GlyphMinAdvanceX = size * 1.1f;
+        io.Fonts->AddFontFromFileTTF(icons.string().c_str(), size * 1.05f, &cfg);
+    }
+    return f;
+}
+
+} // namespace
+
+const Palette& palette() {
+    static const Palette p{
+        rgb(14, 15, 17),        // bg0
+        rgb(22, 23, 26),        // bg1
+        rgb(31, 33, 37),        // bg2
+        rgb(42, 44, 50),        // bg3
+        rgb(44, 46, 52),        // border
+        rgb(230, 231, 234),     // text
+        rgb(146, 150, 160),     // textDim
+        rgb(98, 102, 112),      // textFaint
+        rgb(255, 138, 61),      // accent
+        rgb(255, 160, 96),      // accentHover
+        rgb(232, 116, 42),      // accentActive
+        rgb(255, 138, 61, 0.16f), // accentSoft
+        rgb(76, 195, 138),      // success
+        rgb(245, 185, 74),      // warning
+        rgb(240, 96, 93),       // danger
+    };
+    return p;
+}
+
+ImU32 col(const ImVec4& c, float alphaMul) {
+    return ImGui::ColorConvertFloat4ToU32(ImVec4(c.x, c.y, c.z, c.w * alphaMul));
+}
+
+Fonts& fonts() {
+    static Fonts f;
+    return f;
+}
+
+void loadFonts(const std::string& assetsRoot) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::path(assetsRoot) / "fonts";
+    const fs::path icons = dir / "lucide.ttf";
+    Fonts& f = fonts();
+    // ImGui 1.92 glifleri ihtiyaç anında, istenen boyutta rasterleştirir: Türkçe
+    // karakterler (ş, ğ, İ) için glif aralığı vermeye gerek yok.
+    f.regular = loadWithIcons(dir / "Inter-Regular.ttf", icons, f.baseSize);
+    f.medium = loadWithIcons(dir / "Inter-Medium.ttf", icons, f.baseSize);
+    f.semibold = loadWithIcons(dir / "Inter-SemiBold.ttf", icons, f.baseSize);
+    if (!f.regular) {
+#ifdef _WIN32
+        if (fs::exists("C:\\Windows\\Fonts\\segoeui.ttf"))
+            f.regular = loadWithIcons("C:\\Windows\\Fonts\\segoeui.ttf", icons, f.baseSize);
+#endif
+        if (!f.regular) f.regular = ImGui::GetIO().Fonts->AddFontDefault();
+    }
+    if (!f.medium) f.medium = f.regular;
+    if (!f.semibold) f.semibold = f.medium;
+    ImGui::GetIO().FontDefault = f.regular;
+}
+
+void applyTheme(float dpiScale) {
+    ImGuiStyle& s = ImGui::GetStyle();
+    s = ImGuiStyle();
+    const Palette& p = palette();
+
+    // Geometri: sıkı (kompakt) ızgara, yumuşak köşeler; yerleşik (docked) paneller köşesiz.
+    // Profesyonel araçlar gibi yoğun: daha çok bilgi, daha az kaydırma.
+    s.WindowRounding = 0.0f;
+    s.ChildRounding = 6.0f;
+    s.FrameRounding = 5.0f;
+    s.PopupRounding = 8.0f;
+    s.ScrollbarRounding = 9.0f;
+    s.GrabRounding = 6.0f;
+    s.TabRounding = 6.0f;
+    s.WindowBorderSize = 0.0f;
+    s.ChildBorderSize = 1.0f;
+    s.PopupBorderSize = 1.0f;
+    s.FrameBorderSize = 0.0f;
+    s.TabBorderSize = 0.0f;
+    s.TabBarBorderSize = 1.0f;
+    s.WindowPadding = ImVec2(10, 8);
+    s.FramePadding = ImVec2(8, 4);
+    s.ItemSpacing = ImVec2(6, 5);
+    s.ItemInnerSpacing = ImVec2(5, 4);
+    s.CellPadding = ImVec2(5, 3);
+    s.IndentSpacing = 14.0f;
+    s.ScrollbarSize = 8.0f;
+    s.GrabMinSize = 12.0f;
+    s.WindowTitleAlign = ImVec2(0.0f, 0.5f);
+    s.WindowMenuButtonPosition = ImGuiDir_None; // panel başlığındaki üçgen menü kapalı
+    s.SeparatorTextBorderSize = 1.0f;
+    s.SeparatorTextPadding = ImVec2(0, 3);
+    s.DockingSeparatorSize = 3.0f;
+    s.DisabledAlpha = 0.45f;
+    s.HoverDelayNormal = 0.45f;
+
+    ImVec4* c = s.Colors;
+    c[ImGuiCol_Text] = p.text;
+    c[ImGuiCol_TextDisabled] = p.textDim;
+    c[ImGuiCol_WindowBg] = p.bg1;
+    c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_PopupBg] = ImVec4(p.bg2.x, p.bg2.y, p.bg2.z, 0.98f);
+    c[ImGuiCol_Border] = p.border;
+    c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_FrameBg] = p.bg2;
+    c[ImGuiCol_FrameBgHovered] = p.bg3;
+    c[ImGuiCol_FrameBgActive] = rgb(50, 53, 60);
+    c[ImGuiCol_TitleBg] = p.bg0;
+    c[ImGuiCol_TitleBgActive] = p.bg0;
+    c[ImGuiCol_TitleBgCollapsed] = p.bg0;
+    c[ImGuiCol_MenuBarBg] = p.bg0;
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_ScrollbarGrab] = rgb(58, 61, 68);
+    c[ImGuiCol_ScrollbarGrabHovered] = rgb(74, 78, 87);
+    c[ImGuiCol_ScrollbarGrabActive] = p.accent;
+    c[ImGuiCol_CheckMark] = p.accent;
+    c[ImGuiCol_SliderGrab] = rgb(200, 202, 208);
+    c[ImGuiCol_SliderGrabActive] = p.accent;
+    c[ImGuiCol_Button] = p.bg2;
+    c[ImGuiCol_ButtonHovered] = p.bg3;
+    c[ImGuiCol_ButtonActive] = rgb(56, 59, 66);
+    c[ImGuiCol_Header] = p.accentSoft;
+    c[ImGuiCol_HeaderHovered] = rgb(255, 255, 255, 0.06f);
+    c[ImGuiCol_HeaderActive] = rgb(255, 138, 61, 0.24f);
+    c[ImGuiCol_Separator] = p.border;
+    c[ImGuiCol_SeparatorHovered] = p.accent;
+    c[ImGuiCol_SeparatorActive] = p.accent;
+    c[ImGuiCol_ResizeGrip] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_ResizeGripHovered] = p.accent;
+    c[ImGuiCol_ResizeGripActive] = p.accent;
+    c[ImGuiCol_InputTextCursor] = p.accent;
+    c[ImGuiCol_Tab] = p.bg1;
+    c[ImGuiCol_TabHovered] = p.bg3;
+    c[ImGuiCol_TabSelected] = p.bg2;
+    c[ImGuiCol_TabSelectedOverline] = p.accent;
+    c[ImGuiCol_TabDimmed] = p.bg1;
+    c[ImGuiCol_TabDimmedSelected] = p.bg2;
+    c[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_DockingPreview] = rgb(255, 138, 61, 0.35f);
+    c[ImGuiCol_DockingEmptyBg] = p.bg0;
+    c[ImGuiCol_PlotLines] = p.accent;
+    c[ImGuiCol_PlotLinesHovered] = p.accentHover;
+    c[ImGuiCol_PlotHistogram] = p.accent;
+    c[ImGuiCol_PlotHistogramHovered] = p.accentHover;
+    c[ImGuiCol_TableHeaderBg] = p.bg2;
+    c[ImGuiCol_TableBorderStrong] = p.border;
+    c[ImGuiCol_TableBorderLight] = rgb(36, 38, 43);
+    c[ImGuiCol_TableRowBg] = ImVec4(0, 0, 0, 0);
+    c[ImGuiCol_TableRowBgAlt] = rgb(255, 255, 255, 0.02f);
+    c[ImGuiCol_TextLink] = p.accent;
+    c[ImGuiCol_TextSelectedBg] = rgb(255, 138, 61, 0.30f);
+    c[ImGuiCol_TreeLines] = p.border;
+    c[ImGuiCol_DragDropTarget] = p.accent;
+    c[ImGuiCol_NavCursor] = p.accent;
+    c[ImGuiCol_NavWindowingHighlight] = ImVec4(1, 1, 1, 0.5f);
+    c[ImGuiCol_NavWindowingDimBg] = ImVec4(0, 0, 0, 0.4f);
+    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0.02f, 0.02f, 0.03f, 0.62f);
+
+    s.ScaleAllSizes(dpiScale);
+    s.FontScaleDpi = dpiScale;
+}
+
+} // namespace photon::ui

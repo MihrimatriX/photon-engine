@@ -1,3 +1,7 @@
+// obj_loader.cpp — tinyobjloader üzerine güvenli OBJ okuyucu.
+// Dosya güvenilmez girdi sayılır: boyut sınırları, indeks doğrulaması ve sonlu sayı
+// (NaN/Inf olmayan) kontrolü burada yapılır; bozuk dosya yarım değil BOŞ sonuç döner.
+// Çokgenler üçgen yelpazesine bölünür, köşeler malzeme kimliğine göre kovalara ayrılır.
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
@@ -28,6 +32,8 @@ bool regularFileWithin(const std::filesystem::path& p, uintmax_t cap) {
     return !ec && sz <= cap;
 }
 
+// tinyobjloader MTL dosyasını kendisi açar. Bu yüzden "mtllib" satırları önceden taranır ve
+// başvurulan her MTL'nin de normal dosya ve boyut sınırı içinde olduğu doğrulanır.
 bool objInputsOk(const std::filesystem::path& objPath) {
     if (!regularFileWithin(objPath, kMaxObjFileBytes)) return false;
     std::ifstream in(objPath);
@@ -54,6 +60,9 @@ bool objInputsOk(const std::filesystem::path& objPath) {
     return true;
 }
 
+// İndeks → dizi elemanı erişimi güvenli mi: negatif değil, sınırın altında ve
+// [index·comps, index·comps + comps) aralığı kaynak dizinin içinde. (tinyobj OBJ'nin göreli
+// negatif indekslerini zaten mutlağa çevirir; burada negatif = eksik/bozuk demektir.)
 bool indexElemOk(int index, size_t cap, int comps, size_t srcSize) {
     if (index < 0 || comps <= 0) return false;
     size_t i = static_cast<size_t>(index);
@@ -101,6 +110,8 @@ ObjLoadResult ObjLoader::load(const std::string& path, const Material* defaultMa
     size_t cornerCount = 0;
 
     for (const auto& shape : shapes) {
+        // Bir OBJ şekli birden çok "usemtl" içerebilir. Her malzeme kimliği için ayrı bir kova
+        // (konum/normal/uv/indeks) tutulur; sonunda her kova ayrı bir TriangleMesh olur.
         struct Bucket {
             int matId = -1;
             std::vector<Vec3f> positions;
@@ -129,6 +140,8 @@ ObjLoadResult ObjLoader::load(const std::string& path, const Material* defaultMa
                 index_offset += fv;
                 continue;
             }
+            // n köşeli yüz yelpazeyle n-2 üçgen verir. Sınır "a > max - b" biçiminde, yani
+            // toplamadan ÖNCE çıkarmayla denetlenir; böylece size_t taşması hiç oluşmaz.
             size_t addTris = fv - 2;
             if (addTris > kMaxObjTriangles || triCount > kMaxObjTriangles - addTris
                 || addTris > kMaxObjCorners / 3
@@ -150,6 +163,8 @@ ObjLoadResult ObjLoader::load(const std::string& path, const Material* defaultMa
                 float z = attrib.vertices[3 * vi + 2];
                 if (!finite3(x, y, z)) return false;
                 bucket.positions.push_back(Vec3f(x, y, z));
+                // Normal yoksa dizi boş kalır; TriangleMesh o zaman normalleri üçgenlerden kendisi
+                // hesaplar. Köşeler paylaşılmadığı için sonuç düz (faceted) gölgelemedir.
                 if (idx.normal_index >= 0) {
                     if (!indexElemOk(idx.normal_index, kMaxObjVertices, 3, attrib.normals.size()))
                         return false;
@@ -168,8 +183,11 @@ ObjLoadResult ObjLoader::load(const std::string& path, const Material* defaultMa
                     float v = attrib.texcoords[2 * ti + 1];
                     if (!finiteFloat(u) || !finiteFloat(v)) return false;
                     // OBJ puts v = 0 at the bottom of the image; Image rows start at the top.
+                    // (glTF'te v=0 zaten görüntünün üstüdür; gltf_loader bu yüzden v'yi çevirmez.)
                     bucket.uvs.push_back(Vec2f(u, 1.0f - v));
                 }
+                // Köşeler kaynaklanmaz (weld yok), her köşe ayrı kopyalanır: OBJ'de konum/normal/uv
+                // indeksleri birbirinden bağımsız olduğu için en basit doğru yol bu. Bedeli bellek.
                 bucket.indices.push_back(static_cast<uint32_t>(bucket.indices.size()));
                 return true;
             };
@@ -186,6 +204,8 @@ ObjLoadResult ObjLoader::load(const std::string& path, const Material* defaultMa
             index_offset += fv;
         }
 
+        // MTL'den yalnız Kd okunur → Lambertian. Ks/Ns/map_Kd vb. şimdilik yok sayılır.
+        // owned boşsa mesh çağıranın varsayılan malzemesini kullanır (materials, meshes'e paralel).
         for (auto& bucket : buckets) {
             if (bucket.positions.empty()) continue;
             std::shared_ptr<Material> owned;

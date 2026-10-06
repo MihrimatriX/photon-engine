@@ -1,3 +1,7 @@
+// pool_allocator.h — Sabit boyutlu nesne havuzu (T türünde yuvalar).
+// Boş yuvalar "gömülü serbest liste" (intrusive free list) ile bağlanır: boş bir yuvanın
+// kendi belleği bir sonraki boş yuvanın işaretçisini tutar, ek bellek gerekmez.
+// allocate/deallocate O(1); yapıcı/yıkıcı çağrılmaz (yalnızca ham bellek verir).
 #pragma once
 
 #include <cstddef>
@@ -26,6 +30,8 @@ public:
         m_block = static_cast<uint8_t*>(::operator new(totalSize, std::align_val_t{alignof(T)}));
 
         // Build the free list
+        // Sondan başa doğru eklenir ki liste başı yuva 0 olsun ve ayırmalar artan adreslerle
+        // (önbellek dostu sırayla) ilerlesin.
         m_freeList = nullptr;
         for (size_t i = m_poolSize; i > 0; --i) {
             auto* node = reinterpret_cast<FreeNode*>(m_block + (i - 1) * m_slotSize);

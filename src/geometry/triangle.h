@@ -1,3 +1,5 @@
+// triangle.h — Tek üçgen şekli. Mesh dışındaki bağımsız üçgenler (alan ışığı dörtgenleri)
+// bunu kullanır; mesh üçgenleri de isabet sonrası yüzey verisi için geçici olarak kurulur.
 #pragma once
 
 /// @file triangle.h
@@ -21,6 +23,11 @@ public:
 
     bool intersect(Ray& ray, SurfaceInteraction& isect) const override;
     AABB bounds() const override;
+
+    /// Kesişim bulunduktan sonra (t ve barisentrik u, v biliniyorsa) yüzey verisini
+    /// doldurur: nokta, geometrik/gölgelendirme normali, UV, teğet, malzeme. Hem kendi
+    /// testimiz hem Embree aynı fonksiyonu kullanır; sonuçlar birebir aynı olur.
+    void fillHit(const Ray& ray, float t, float u, float v, SurfaceInteraction& isect) const;
 
     const Vec3f& v0() const { return m_v0; }
     const Vec3f& v1() const { return m_v1; }

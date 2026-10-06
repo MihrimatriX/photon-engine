@@ -1,3 +1,5 @@
+// Malzeme (BSDF) arayüzü: sample / eval / pdf / emitted. Tüm malzemeler bunu uygular.
+// Yön kuralı PBRT ile aynı: wo ve wi yüzeyden DIŞARI bakar, birim uzunluktadır.
 #pragma once
 
 /// @file material.h
@@ -29,11 +31,36 @@ public:
     virtual bool sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& sample,
                         Vec3f& wi, Color3f& brdf, float& pdf) const = 0;
 
+    /// @brief sample() ile aynı, ama lob seçimi için ayrı bir 1B örnek @p uc alır.
+    ///
+    /// Neden: Kaba camda (PBRT-v4 DielectricBxDF) önce mikro-normal h iki boyutlu
+    /// @p u ile örneklenir, SONRA yansıma/kırılma kararı F(wo·h) olasılığıyla verilir.
+    /// Bu karar için u'dan bağımsız üçüncü bir sayı gerekir; u.x'i yeniden kullanmak
+    /// h ile kararı ilişkilendirir. Varsayılan uygulama uc'yi yok sayar, yani bu ek
+    /// arayüze ihtiyaç duymayan malzemeler değişmeden çalışır. Integratör bunu çağırır.
+    virtual bool sampleWithLobe(const Vec3f& wo, const SurfaceInteraction& si, float /*uc*/,
+                                const Vec2f& u, Vec3f& wi, Color3f& brdf, float& pdf) const {
+        return sample(wo, si, u, wi, brdf, pdf);
+    }
+
     /// @brief Evaluate the BRDF/BSDF for a given pair of directions (wo, wi).
     virtual Color3f eval(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const = 0;
 
     /// @brief Evaluate the probability density function for sampling wi.
     virtual float pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const = 0;
+
+    /// Yalnız delta (Dirac) lobları varsa true: kusursuz ayna, pürüzsüz cam. Bu yüzeylerde
+    /// ışık örneklemesi (NEE) anlamsızdır (BSDF tek bir yön dışında 0) ve bir sonraki
+    /// isabetteki ışık yayımı MIS ağırlığı olmadan eklenir. Eskiden integratör bunu
+    /// eval() sonucunun siyah olmasından çıkarıyordu: köşe başına iki gereksiz eval.
+    virtual bool isDelta() const { return false; }
+
+    /// eval + pdf tek çağrıda. Doku okuma gibi parametre çözümleme işi olan malzemeler
+    /// (Disney) bunu bir kez yapmak için üzerine yazar.
+    virtual Color3f evalPdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si, float& pdfOut) const {
+        pdfOut = pdf(wo, wi, si);
+        return eval(wo, wi, si);
+    }
 
     /// @brief Returns emitted radiance from the surface (for light sources).
     virtual Color3f emitted(const SurfaceInteraction&) const {

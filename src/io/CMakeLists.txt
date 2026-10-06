@@ -1,3 +1,6 @@
+# src/io/CMakeLists.txt — photon_io: model dosyası yükleyicileri (OBJ, glTF).
+# Dış dosya biçimlerini motorun TriangleMesh + Material türlerine çevirir. tinyobjloader ve
+# cgltf tek başlıklı (single-header) kütüphanelerdir; uygulamaları yalnız bu hedefte derlenir.
 add_library(photon_io STATIC
     obj_loader.cpp
     gltf_loader.cpp

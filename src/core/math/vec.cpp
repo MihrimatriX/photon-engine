@@ -1,3 +1,5 @@
+// vec.cpp — vec.h için boş derleme birimi. Tüm vektör işlemleri başlıkta inline/constexpr;
+// bu dosya yalnızca derleme sistemine bir çapa sağlar.
 /// @file vec.cpp
 /// @brief Compilation unit for vec.h.
 ///

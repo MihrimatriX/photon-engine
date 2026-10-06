@@ -1,177 +1,204 @@
+// application.h — Masaüstü uygulamasının ana sınıfı.
+//
+// Uygulama tek bir sınıf, ama kodu sorumluluklarına göre birkaç dosyaya bölünmüş:
+//   application.cpp   pencere, ImGui, ana döngü, kısayollar, ekran görüntüsü
+//   scene_ops.cpp     belge işlemleri: içe aktarma, malzeme/ortam/stüdyo uygulama,
+//                     ışıklar, seçim, geri al, sahne derleme, proje kaydet/aç
+//   final_render.cpp  son render ve turntable (arka plan iş parçacığı)
+//   ui_*.cpp          paneller: menü, kütüphane, viewport, sahne, özellikler, render
+// Hepsi aynı AppState'i paylaşır; paneller yalnız UI thread'inde çalışır.
 #pragma once
 
-#include "scene/scene_graph.h"
-#include "scene/material_library.h"
-#include "scene/project_io.h"
-#include "ui/orbit_camera.h"
-#include "preview/viewport_texture.h"
-#include "preview/gl_preview.h"
-#include "engine/renderer.h"
-#include "engine/render_settings.h"
-#include "core/image/film.h"
-#include "core/image/image.h"
-#include "lights/light.h"
-#include "lights/environment_light.h"
-#include "camera/camera.h"
-#include <atomic>
-#include <memory>
-#include <mutex>
+#include "app/app_state.h"
+#include "scene/primitives.h"
+
+#include <imgui.h>
+
+#include <functional>
+#include <future>
 #include <string>
-#include <thread>
-#include <unordered_map>
-#include <vector>
 
 struct GLFWwindow;
 
 namespace photon {
 
-struct FullRenderState {
-    std::atomic<bool> active{false};
-    std::atomic<bool> done{false};
-    std::atomic<int> currentSpp{0};
-    std::atomic<int> targetSpp{0};
-    int width = 1920;
-    int height = 1080;
-    int spp = 256;
-    int numThreads = 0; // 0 = hardware_concurrency
-    std::string outputPath;
-    std::string status;
-    std::thread thread;
-};
-
-struct EnvEntry {
-    std::string id;
-    std::string name;
-    std::string path;       ///< HDR path (empty = procedural sky)
-    Color3f preview{0.5f, 0.55f, 0.7f};
-    Color3f zenith{0.45f, 0.55f, 0.85f};
-    Color3f horizon{0.75f, 0.7f, 0.65f};
-};
-
-struct AppState {
-    SceneGraph graph;
-    Scene flatScene;
-    std::vector<std::shared_ptr<Light>> lights;
-    std::shared_ptr<EnvironmentLight> environment;
-    Image envMap;
-
-    MaterialLibrary materialLib;
-    OrbitCamera orbitCam;
-    RenderSettings settings;
-    Renderer renderer;
-
-    ViewportTexture cpuTexture;
-    GLPreview glPreview;
-    PickingPass picking;
-    UndoStack undo;
-
-    Film accumFilm;              ///< Preview accumulator, written by the render thread.
-    Image displayImage;          ///< Last resolved (and maybe denoised) preview, UI thread only.
-                                 ///< The viewport shows it and Export saves it.
-    std::atomic<int> currentSpp{0};
-    std::atomic<bool> renderDirty{true};
-    std::atomic<bool> shutdown{false};
-    std::atomic<bool> imageReady{false};   ///< A new pass landed in accumFilm.
-    bool displayDirty = false;             ///< Re-upload displayImage (tone map / exposure changed).
-    std::mutex imageMutex;
-    std::thread renderThread;
-
-    FullRenderState fullRender;
-    bool showFullRenderDialog = false;
-    bool showRenderPanel = true;
-
-    SceneNode* selected = nullptr;
-    bool advancedMode = false;
-    bool fastPreview = true;
-    bool showOnboarding = true;
-    float fps = 0.0f;
-    int viewportW = 512;
-    int viewportH = 512;
-    int previewSpp = 128;
-
-    std::string assetsRoot;
-    std::string projectPath = "scene.photon";
-    std::string exportPath = "export.png";
-    std::string activeEnvPath;
-    std::string pendingModelDrop;
-    std::string pendingHdrDrop;
-    std::string pendingTextureDrop;
-    std::string statusMessage;
-    float statusMessageT = 0.0f;
-    std::unordered_map<std::string, unsigned int> materialThumbs;
-    std::vector<EnvEntry> environments;
-    std::unordered_map<std::string, unsigned int> envThumbs;
-    std::vector<std::string> textureLibrary; ///< Dokular tab + recent drops
-    int turntableExportFrames = 36;
-    int turntableExportSpp = 8;
+struct LaunchOptions {
+    std::string screenshotPath;  ///< Doluysa: kareleri çiz, ekran görüntüsü al, çık
+    int screenshotSpp = 16;      ///< Görüntü almadan önce beklenen viewport örnek sayısı
+    float screenshotTimeout = 60.0f;
+    int windowW = 1600;
+    int windowH = 940;
+    std::string openPath;        ///< Açılışta yüklenecek proje ya da model
+    std::string scene = "sample";///< Boş belge yerine: "sample" | "cornell" | "empty"
+    std::string uiState;         ///< Ekran görüntüsü için: "render", "material", ...
+    std::string saveProjectPath; ///< Açılış sahnesini bu .photon dosyasına kaydet (test/ölçüm)
 };
 
 class Application {
 public:
-    Application();
+    explicit Application(LaunchOptions options = {});
     ~Application();
     int run();
 
-    void queueModelDrop(const std::string& path);
-    void queueHdrDrop(const std::string& path);
-    void queueTextureDrop(const std::string& path);
+    void onDrop(const std::vector<std::string>& paths);
 
 private:
     GLFWwindow* m_window = nullptr;
-    AppState m_state;
+    AppState m_s;
+    LaunchOptions m_opts;
+    std::vector<std::string> m_pendingDrops;
+    unsigned int m_viewTex = 0;
+    int m_viewTexW = 0;
+    int m_viewTexH = 0;
+    bool m_viewHasAlpha = false;
+    unsigned int m_checkerTex = 0;
+    unsigned int m_logoTex = 0;
+    bool m_layoutBuilt = false;
+    // Tutamaç (gizmo): sürükleme boyunca sabit tutulan pivot matrisi. Her karede
+    // değişim = yeni · eski⁻¹ seçili tüm düğümlere uygulanır (bkz. drawGizmo).
+    Mat4f m_gizmoPivot = Mat4f::identity();
+    bool m_gizmoUndoPushed = false;
+    uint64_t m_treePendingUid = 0;    ///< Seçili satıra basıldı: bırakınca tek seçime in (sürüklenmediyse)
+    RasterView m_raster;               ///< GPU görüntü modları (Katı, Tel kafes, Normaller, bindirme)
+    bool m_rasterOk = false;           ///< Sürücü gerekli GL işlevlerini verdi mi
+    unsigned int m_rasterTex = 0;      ///< Son GPU çiziminin dokusu (kimlik sabit kalır)
+    size_t m_rasterTris = 0;           ///< Son GPU çizimindeki üçgen sayısı (rozet)
+    /// ImGui::Render() sonrası, çizim listesi GPU'ya gitmeden hemen önce: GPU modunun
+    /// dokusunu bu karenin kamerasıyla günceller (bir kare gecikme olmaz).
+    void renderRasterView();
 
+    // ── application.cpp ──
     void initWindow();
     void initImGui();
-    void setupDocking();
     void loadAssets();
-    void rebuildScene();
-    void startRenderThread();
-    void markDirty();
-    void applyQualityPreset(int spp);
-    void applyStudioPreset(const std::string& path);
-    void startFullRender();
-    void exportImage(bool exr);
-    void importModelDialog();
-    void importHdrDialog();
-    std::unique_ptr<Camera> makeCamera(float aspect) const;
-    void importModel(const std::string& path);
-    SceneNode* importModelInternal(const std::string& path); ///< no undo push
-    void applyProjectFile(const ProjectFile& proj);
-    std::string serializeCameraJson() const;
-    void applyCameraJson(const std::string& json);
-    void pushMaterialUndo(SceneNode* node, std::shared_ptr<Material> before, std::shared_ptr<Material> after);
-    void dismissOnboarding();
-    void applyHdrEnvironment(const std::string& path);
-    void applyEnvironmentEntry(const EnvEntry& e);
-    void addAreaLight();
-    void addDirectionalLight();
+    void frame(float dt);
     void handleShortcuts();
-    void drawMenubar();
-    void drawLibraryPanel();
-    void drawViewportPanel();
-    void drawSceneTreePanel();
-    void drawInspectorPanel();
-    void drawRenderPanel();
-    void drawStatusBar();
-    void drawOnboarding();
-    void drawFullRenderDialog();
-    void processPendingDrops();
+    void processDrops();
+    void uploadViewportFrame();
+    bool takeScreenshot(const std::string& path);
+    void setStatus(const std::string& msg, bool error = false);
+
+    /// Arka plan işi: @p work başka bir thread'de çalışır ve UI thread'inde çalıştırılacak
+    /// bir "tamamlama" fonksiyonu döndürür (belge yalnız UI thread'inde değişir).
+    void runAsync(std::string label, std::function<std::function<void()>()> work);
+    void pollAsync();
+    struct AsyncJob {
+        std::string label;
+        std::future<std::function<void()>> result;
+    };
+    std::vector<AsyncJob> m_jobs;
     void scanEnvironments();
-    void buildMaterialThumbnails();
-    void destroyMaterialThumbnails();
-    void buildEnvThumbnails();
-    void destroyEnvThumbnails();
-    void applyMaterialPreset(SceneNode* node, const std::string& presetId);
-    bool drawTextureSlot(const char* label, std::string& path);
+    void scanFolderAssets();
+
+    // ── scene_ops.cpp ──
+public:
+    // Paneller (ui_*.cpp) bunları çağırır.
+    void rebuildScene(bool interactive = false);
+    void compileIfDirty();
+    /// Belgeden render sahnesi. isolate: malzemeler kopyalanır (son render için).
+    std::shared_ptr<Scene> buildScene(bool isolate);
+    void pushUndo();
+    void undo();
+    void redo();
+    void markDocumentChanged(bool interactive = false);
+    /// Birincil seçili düğüm (çoklu seçimde son tıklanan).
+    SceneNode* selectedNode();
+    /// Tüm seçili düğümler; içi de seçili grupların çocukları atılır, ağaç sırasıyla.
+    std::vector<SceneNode*> selectedNodes();
+    bool isNodeSelected(uint64_t uid) const;
+    /// Tek seçim (öncekiler bırakılır). kGroundNodeUid zemini seçer.
+    void selectNode(uint64_t uid);
+    /// Ctrl+tık: seçime ekle / çıkar.
+    void toggleNodeSelection(uint64_t uid);
+    /// Shift+tık: çapadan bu düğüme kadar sahne panelinde görünen satırlar.
+    void selectNodeRange(uint64_t uid);
+    void selectAllNodes();
+    void selectLight(int index);
+    void clearSelection();
+    /// Geri al/yinele sonrası artık var olmayan düğümleri seçimden çıkarır.
+    void pruneSelection();
+
+    // Sahne düzenleme (seçime uygulanır)
+    void toggleSelectionVisibility();
+    void isolateSelection();
+    void showAllNodes();
+    void groupSelection();
+    void ungroupSelection();
+    /// Sürükle-bırak: düğümleri @p newParent altına @p index sırasına taşır.
+    void moveNodes(const std::vector<uint64_t>& uids, uint64_t newParentUid, size_t index);
+    void beginRename();
+    /// Temel şekil ekler. @p at doluysa tabanı o noktaya (sürükle-bırak), değilse
+    /// sahnenin yanına; boyutu sahneye göre. Seçilir ve taşıma tutamacı açılır.
+    void addPrimitive(PrimitiveKind kind, const Vec3f* at = nullptr);
+    /// Görüntü modunu değiştirir (Render ↔ Kil sahneyi yeniden derler).
+    void setViewMode(ViewMode mode);
+    void newScene();
     void loadSampleScene();
     void loadCornellScene();
-    void frameProductCamera();
-    bool sampleModelsAvailable() const;
-    void setStatus(const std::string& msg);
-    void registerTexture(const std::string& path);
-    void scanTextures();
-    void applyCameraPreset(const std::string& id);
-    void exportTurntableSequence();
+    bool importModel(const std::string& path, bool undoable = true);
+    void attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable);
+    void applyMaterialPreset(uint64_t nodeUid, const MaterialPreset& preset);
+    void applyEnvironment(const EnvAsset& env);
+    void applyEnvironmentNow(const EnvAsset& env);
+    void applyStudio(const StudioPreset& studio);
+    void addLight(LightDesc::Type type);
+    void deleteSelection();
+    void duplicateSelection();
+    void frameSelection();
+    void frameAll();
+    void placeSelectionOnGround();
+    void applyCameraPreset(const char* id);
+    CameraParams cameraParams() const;
+    uint64_t pickAt(float u, float v, Vec3f* hitPoint = nullptr);
+    void saveProjectAs();
+    void saveProject();
+    void openProjectDialog();
+    bool openProject(const std::string& path);
+    void openModelDialog();
+    void openHdrDialog();
+    void exportViewport();
+    void saveMaterialToLibrary(const std::string& name);
+    void copyMaterial();
+    void pasteMaterial();
+    template <typename F>
+    void editLive(F&& fn) {
+        m_s.viewport.edit(std::forward<F>(fn), true);
+        m_s.documentDirty = true;
+    }
+
+    // ── final_render.cpp ──
+    void startFinalRender();
+    void startTurntable();
+    void cancelFinalRender();
+    void joinFinalRender();
+
+private:
+    // ── ui_*.cpp ──
+    void drawDockspace();
+    void buildDefaultLayout(unsigned int dockId);
+    void drawMenuBar();
+    void drawStatusBar();
+    void drawLibrary();
+    void drawLibraryMaterials();
+    void drawLibraryEnvironments();
+    void drawLibraryStudios();
+    void drawLibraryModels();
+    void drawLibraryTextures();
+    void drawViewport();
+    void drawViewportOverlay(const ImVec2& origin, const ImVec2& size);
+    void drawSelectionOutline(const ImVec2& origin, const ImVec2& size);
+    void drawGizmo(const ImVec2& origin, const ImVec2& size);
+    void drawWelcome(const ImVec2& origin, const ImVec2& size);
+    void drawSceneTree();
+    void drawProperties();
+    void drawMaterialProps();
+    void drawEnvironmentProps();
+    void drawLightProps();
+    void drawCameraProps();
+    void drawImageProps();
+    void drawRenderDialog();
+    void drawAboutWindows();
+    bool textureSlot(const char* label, std::string& path);
 };
 
 } // namespace photon

@@ -1,3 +1,6 @@
+// quaternion.h — Birim kuaterniyon ile 3B döndürme (eksen-açı, Euler, matris, SLERP).
+// q = (sin(θ/2)·eksen, cos(θ/2)); v' = q·v·q* bir θ dönmesidir. Gimbal kilidi yoktur ve
+// iki yönelim arasında pürüzsüz ara değer (SLERP) almak kolaydır.
 #pragma once
 
 /// @file quaternion.h
@@ -21,6 +24,7 @@ struct Quaternion {
     constexpr Quaternion(float x, float y, float z, float w) : x(x), y(y), z(z), w(w) {}
 
     /// Construct from axis and angle (in radians)
+    // Yarım açı kullanılır çünkü q·v·q* çarpımında q iki kez geçer: açılar toplanır → θ.
     inline static Quaternion fromAxisAngle(const Vec3f& axis, float angle) {
         float halfAngle = angle * 0.5f;
         float sinHalf = std::sin(halfAngle);
@@ -78,6 +82,8 @@ struct Quaternion {
     }
 
     // ── Operators ────────────────────────────────────────────
+    // Hamilton çarpımı: (v1,w1)(v2,w2) = (w1·v2 + w2·v1 + v1×v2, w1·w2 − v1·v2).
+    // Değişmeli değildir; p*q önce q'yu, sonra p'yi uygular (matrislerdeki gibi).
     inline Quaternion operator*(const Quaternion& q) const {
         return {
             w * q.x + x * q.w + y * q.z - z * q.y,
@@ -88,6 +94,8 @@ struct Quaternion {
     }
 
     // ── Rotate Vector ────────────────────────────────────────
+    // q·v·q* çarpımının açılmış, hızlı biçimi: v' = v + 2w(u×v) + 2u×(u×v), u = (x,y,z).
+    // İki çapraz çarpım yeter; tam kuaterniyon çarpımından ucuzdur (birim q varsayar).
     inline Vec3f rotateVector(const Vec3f& v) const {
         Vec3f qv(x, y, z);
         Vec3f uv = qv.cross(v);
@@ -118,11 +126,14 @@ struct Quaternion {
     }
 
     // ── Spherical Linear Interpolation (SLERP) ──────────────
+    // 4B birim küre üzerinde büyük çember boyunca sabit açısal hızla ara değer:
+    // slerp = sin((1−t)Ω)/sinΩ · a + sin(tΩ)/sinΩ · b, cosΩ = a·b (Shoemake 1985).
+    // q ve −q aynı dönmeyi temsil eder; a·b < 0 ise birini çevirip kısa yolu seçeriz.
     inline static Quaternion slerp(const Quaternion& a, const Quaternion& b, float t) {
         Quaternion na = a.normalized();
         Quaternion nb = b.normalized();
 
-        float cosHalfTheta = na.x * nb.x + na.y * nb.y + na.z * nb.z + na.w * na.w;
+        float cosHalfTheta = na.x * nb.x + na.y * nb.y + na.z * nb.z + na.w * nb.w;
 
         // If the dot product is negative, slerp won't take the shorter path.
         // We can fix this by reversing one quaternion.

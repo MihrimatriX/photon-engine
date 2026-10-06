@@ -1,3 +1,4 @@
+// image.cpp — Image sınıfının uygulaması; en önemli kısmı sarmalayan (wrap) bilineer örnekleme.
 #include "image.h"
 #include <cmath>
 
@@ -31,6 +32,11 @@ Color3f Image::getPixel(int x, int y) const {
     return Color3f(m_data[idx + 0], m_data[idx + 1], m_data[idx + 2]);
 }
 
+// Bilineer filtreleme: (u,v)'yi piksel koordinatına çevir, çevredeki 2×2 pikseli bul ve
+// önce x'te, sonra y'de doğrusal ara değer al: c = lerp(lerp(c00,c10,fx), lerp(c01,c11,fx), fy).
+// −0.5 kaydırması: piksel merkezleri tamsayı+0.5'tedir (piksel i, [i, i+1) aralığını kaplar);
+// böylece tam bir piksel merkezine bakan UV o pikselin değerini aynen döndürür.
+// Kenarlarda indeksler modülo ile sarılır (tekrarlanan doku / ortam haritasında φ dikişi).
 Color3f Image::sampleBilinear(float u, float v) const {
     if (m_width <= 0 || m_height <= 0) return Color3f::black();
 

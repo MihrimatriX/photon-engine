@@ -1,3 +1,5 @@
+// test_vec.cpp — Vec3f temel testleri: kurulum, aritmetik, nokta/vektörel çarpım, uzunluk,
+// normalize, indeksleme ve yazdırma. Tüm geometri bu işlemlere dayanır.
 #include "gtest/gtest.h"
 #include "core/math/vec.h"
 #include <sstream>

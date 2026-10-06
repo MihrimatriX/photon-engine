@@ -1,3 +1,5 @@
+// Disney Principled BRDF malzemesinin arayüzü: parametreler (metallic, roughness, specular,
+// clearcoat, sheen, anizotropi, difüz geçirgenlik) ve doku haritaları. Matematik disney.cpp'de.
 #pragma once
 
 /// @file disney.h
@@ -30,6 +32,8 @@ public:
 
     float pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const override;
 
+    Color3f evalPdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si, float& pdfOut) const override;
+
     const Color3f& baseColor() const { return m_baseColor; }
     float metallic() const { return m_metallic; }
     float roughness() const { return m_roughness; }
@@ -48,6 +52,15 @@ public:
     /// Thin-surface diffuse transmission. Burley random-walk SSS does not fit this BRDF.
     void setDiffuseTransmission(float v) { m_diffuseTransmission = std::clamp(v, 0.0f, 1.0f); }
     void setEmission(const Color3f& e) { m_emission = e; }
+
+    /// Doku koordinatı kaynağı. Box: UV'si olmayan modeller için dünya uzayında
+    /// üç eksenden izdüşüm (yüzey normalinin baskın eksenine göre).
+    enum class TextureMapping { UV, Box };
+    void setTextureMapping(TextureMapping m) { m_mapping = m; }
+    TextureMapping textureMapping() const { return m_mapping; }
+    /// Doku tekrarı: UV'de çarpan, kutu eşlemede 1 dünya biriminde kaç tekrar.
+    void setTextureScale(float s) { m_texScale = s > 1e-4f ? s : 1e-4f; }
+    float textureScale() const { return m_texScale; }
     float anisotropy() const { return m_anisotropy; }
     float sheen() const { return m_sheen; }
     float diffuseTransmission() const { return m_diffuseTransmission; }
@@ -101,6 +114,10 @@ private:
     std::shared_ptr<Image> m_normalTex;
     std::shared_ptr<Image> m_roughnessTex;
     std::shared_ptr<Image> m_metalnessTex;
+    TextureMapping m_mapping = TextureMapping::UV;
+    float m_texScale = 1.0f;
+
+    Vec2f textureCoord(const SurfaceInteraction& si) const;
 };
 
 } // namespace photon

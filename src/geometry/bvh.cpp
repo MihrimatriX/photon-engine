@@ -1,3 +1,5 @@
+// bvh.cpp — BVH yapımı (12 kovalı SAH, düzleştirilmiş 32 baytlık düğümler) ve gezinme:
+// en yakın isabet için yakın-çocuk-önce sıralı gezinme, gölge ışınları için erken çıkış.
 #include "geometry/bvh.h"
 #include "geometry/mesh.h"
 #include <algorithm>
@@ -36,6 +38,16 @@ void BVH::build(std::vector<std::shared_ptr<Shape>> primitives) {
     BVHBuildNode* root = recursiveBuild(buildPrims, 0, static_cast<int>(buildPrims.size()),
                                         &totalNodes, orderedPrims, refs);
     m_prims = std::move(orderedPrims);
+    m_tris.resize(m_prims.size());
+    for (size_t i = 0; i < m_prims.size(); ++i) {
+        if (!m_prims[i].mesh) continue;
+        Vec3f p0, p1, p2;
+        m_prims[i].mesh->triangleVertices(m_prims[i].tri, p0, p1, p2);
+        // Kenarlar Triangle::intersect ile AYNI işlemle hesaplanır: aday testi ile
+        // son gölgelendirme hesabı bit bit aynı t değerini bulur.
+        const Vec3f e1 = p1 - p0, e2 = p2 - p0;
+        m_tris[i] = TriAccel{p0, e1, e2, 1e-14f * e1.lengthSquared() * e2.lengthSquared()};
+    }
 
     m_nodes.resize(totalNodes);
     int offset = 0;
@@ -109,6 +121,11 @@ BVH::BVHBuildNode* BVH::recursiveBuild(
                              return a.centroid[dim] < b.centroid[dim];
                          });
     } else {
+        // Kovalı SAH (Surface Area Heuristic, yüzey alanı sezgiseli). Rastgele bir ışının
+        // bir kutuya çarpma olasılığı kutunun yüzey alanıyla orantılıdır. Bir bölmenin
+        // beklenen maliyeti: C = C_gezinme + (A_sol/A)·N_sol + (A_sağ/A)·N_sağ.
+        // Merkezler en uzun eksende 12 kovaya dağıtılır, 11 kesim noktası denenir ve
+        // en ucuzu seçilir; yaprak maliyetinden (N) pahalıysa yaprak yapılır.
         // Binned SAH building (12 bins)
         constexpr int nBuckets = 12;
         BucketInfo buckets[nBuckets];
@@ -209,101 +226,179 @@ void BVH::freeBuildTree(BVHBuildNode* node) {
 
 namespace {
 
-bool hitPrim(const PrimRef& prim, Ray& ray, SurfaceInteraction& isect) {
-    if (prim.mesh) return prim.mesh->intersectTriangle(prim.tri, ray, isect);
-    return prim.shape && prim.shape->intersect(ray, isect);
+// Sınırlayıcı kutu ile ışın (slab yöntemi). 1/d önceden hesaplanır: düğüm başına
+// bölme yok. Her eksen için ışının kutuya girdiği ve çıktığı t değerleri bulunur;
+// en geç giriş, en erken çıkıştan küçükse kesişim vardır. tNear: giriş mesafesi.
+inline bool hitBox(const AABB& b, const Vec3f& o, const Vec3f& inv, float tMin, float tMax, float& tNear) {
+    float tx0 = (b.pMin.x - o.x) * inv.x, tx1 = (b.pMax.x - o.x) * inv.x;
+    if (tx0 > tx1) std::swap(tx0, tx1);
+    float ty0 = (b.pMin.y - o.y) * inv.y, ty1 = (b.pMax.y - o.y) * inv.y;
+    if (ty0 > ty1) std::swap(ty0, ty1);
+    float tz0 = (b.pMin.z - o.z) * inv.z, tz1 = (b.pMax.z - o.z) * inv.z;
+    if (tz0 > tz1) std::swap(tz0, tz1);
+    // NaN (0·∞) her karşılaştırmada false döner; std::max(a, NaN) = a olduğu için
+    // NaN olabilecek değerler ikinci argümanda tutulur. Çıkış biraz büyütülür
+    // (pbrt'deki 1 + 2γ3 payı): kayan nokta yuvarlaması ince kutuları kaçırmasın.
+    const float t0 = std::max(std::max(tMin, tx0), std::max(ty0, tz0));
+    const float t1 = std::min(std::min(tMax, tx1), std::min(ty1, tz1)) * 1.0000004f;
+    tNear = t0;
+    return t0 <= t1;
 }
 
-// ponytail: thread_local heap stack. A fixed 64 overflowed and dropped the branch.
-// Upgrade = a bounded restart stack if you need no per-thread allocation.
-std::vector<int>& traversalStack() {
-    thread_local std::vector<int> stack;
+// ponytail: thread_local yığın; derinlik sınırı yok. Sabit dizi + derinlik sınırlı
+// yapım daha hızlı olur (Faz 6, TLAS/BLAS ile birlikte).
+struct StackEntry {
+    int node;
+    float tNear;
+};
+
+std::vector<StackEntry>& traversalStack() {
+    thread_local std::vector<StackEntry> stack;
     stack.clear();
     return stack;
 }
 
 } // namespace
 
-bool BVH::intersect(Ray& ray, SurfaceInteraction& isect) const {
-    if (m_nodes.empty()) return false;
-
-    bool hit = false;
-    std::vector<int>& stack = traversalStack();
-    int currentNodeIndex = 0;
-
-    Vec3f invDir(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
-    int dirIsNeg[3] = { invDir.x < 0.0f ? 1 : 0, invDir.y < 0.0f ? 1 : 0, invDir.z < 0.0f ? 1 : 0 };
-
-    while (true) {
-        const BVHNode& node = m_nodes[currentNodeIndex];
-
-        float tNear, tFar;
-        if (node.bounds.intersect(ray, tNear, tFar)) {
-            if (node.isLeaf()) {
-                for (int i = 0; i < node.nPrimitives; ++i) {
-                    if (hitPrim(m_prims[node.primitivesOffset + i], ray, isect)) hit = true;
-                }
-                if (stack.empty()) break;
-                currentNodeIndex = stack.back();
-                stack.pop_back();
-            } else {
-                if (dirIsNeg[node.splitAxis]) {
-                    stack.push_back(currentNodeIndex + 1);
-                    currentNodeIndex = node.secondChildOffset;
-                } else {
-                    stack.push_back(static_cast<int>(node.secondChildOffset));
-                    currentNodeIndex = currentNodeIndex + 1;
-                }
-            }
-        } else {
-            if (stack.empty()) break;
-            currentNodeIndex = stack.back();
-            stack.pop_back();
-        }
-    }
-
-    return hit;
+// Yalın Möller–Trumbore: yalnız t (u, v kontrol için). Triangle::intersect ile aynı
+// işlemler ve aynı eşik; böylece en yakın isabet için yapılan tam hesap aynı t'yi bulur.
+bool BVH::hitTriangleLean(uint32_t i, const Ray& r, float& t) const {
+    const TriAccel& T = m_tris[i];
+    const Vec3f h = r.direction.cross(T.e2);
+    const float a = T.e1.dot(h);
+    if (a * a <= T.parallelEps) return false;
+    const float f = 1.0f / a;
+    const Vec3f s = r.origin - T.v0;
+    const float u = f * s.dot(h);
+    if (!(u >= 0.0f && u <= 1.0f)) return false;
+    const Vec3f q = s.cross(T.e1);
+    const float v = f * r.direction.dot(q);
+    if (!(v >= 0.0f && u + v <= 1.0f)) return false;
+    t = f * T.e2.dot(q);
+    return t >= r.tMin && t <= r.tMax;
 }
 
-bool BVH::intersectAny(const Ray& ray) const {
+// En yakın kesişim. Önce yakın çocuk gezilir, uzak çocuk giriş mesafesiyle yığına
+// konur; yığından alınırken o mesafe şimdiye dek bulunan isabetten uzaksa atlanır.
+// Adaylarda yalnız yalın üçgen testi yapılır; normal, UV ve teğet gibi gölgelendirme
+// verisi döngü bitince yalnız en yakın üçgen için bir kez hesaplanır.
+bool BVH::intersect(Ray& ray, SurfaceInteraction& isect) const {
     if (m_nodes.empty()) return false;
+    const Vec3f inv(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
+    std::vector<StackEntry>& stack = traversalStack();
 
-    Ray localRay = ray;
-    std::vector<int>& stack = traversalStack();
-    int currentNodeIndex = 0;
-
-    Vec3f invDir(1.0f / localRay.direction.x, 1.0f / localRay.direction.y, 1.0f / localRay.direction.z);
-    int dirIsNeg[3] = { invDir.x < 0.0f ? 1 : 0, invDir.y < 0.0f ? 1 : 0, invDir.z < 0.0f ? 1 : 0 };
+    int bestTri = -1;       // en yakın mesh üçgeninin m_prims indeksi
+    bool shapeHit = false;  // en yakın isabet bir küre / tek üçgen şekli mi (isect dolu)
+    int node = 0;
+    float tNear = 0.0f;
+    if (!hitBox(m_nodes[0].bounds, ray.origin, inv, ray.tMin, ray.tMax, tNear)) return false;
 
     while (true) {
-        const BVHNode& node = m_nodes[currentNodeIndex];
-
-        float tNear, tFar;
-        if (node.bounds.intersect(localRay, tNear, tFar)) {
-            if (node.isLeaf()) {
-                SurfaceInteraction dummyIsect;
-                for (int i = 0; i < node.nPrimitives; ++i) {
-                    if (hitPrim(m_prims[node.primitivesOffset + i], localRay, dummyIsect)) return true;
-                }
-                if (stack.empty()) break;
-                currentNodeIndex = stack.back();
-                stack.pop_back();
-            } else {
-                if (dirIsNeg[node.splitAxis]) {
-                    stack.push_back(currentNodeIndex + 1);
-                    currentNodeIndex = node.secondChildOffset;
-                } else {
-                    stack.push_back(static_cast<int>(node.secondChildOffset));
-                    currentNodeIndex = currentNodeIndex + 1;
+        const BVHNode& n = m_nodes[static_cast<size_t>(node)];
+        if (n.isLeaf()) {
+            for (int k = 0; k < n.nPrimitives; ++k) {
+                const uint32_t pi = n.primitivesOffset + static_cast<uint32_t>(k);
+                const PrimRef& p = m_prims[pi];
+                if (p.mesh) {
+                    float t;
+                    if (hitTriangleLean(pi, ray, t)) {
+                        ray.tMax = t;
+                        bestTri = static_cast<int>(pi);
+                        shapeHit = false;
+                    }
+                } else if (p.shape && p.shape->intersect(ray, isect)) {
+                    isect.hitObject = p.shape;
+                    bestTri = -1;
+                    shapeHit = true;
                 }
             }
         } else {
-            if (stack.empty()) break;
-            currentNodeIndex = stack.back();
-            stack.pop_back();
+            const int c0 = node + 1;
+            const int c1 = static_cast<int>(n.secondChildOffset);
+            float t0, t1;
+            const bool h0 = hitBox(m_nodes[static_cast<size_t>(c0)].bounds, ray.origin, inv, ray.tMin, ray.tMax, t0);
+            const bool h1 = hitBox(m_nodes[static_cast<size_t>(c1)].bounds, ray.origin, inv, ray.tMin, ray.tMax, t1);
+            if (h0 && h1) {
+                if (t1 < t0) {
+                    stack.push_back({c0, t0});
+                    node = c1;
+                } else {
+                    stack.push_back({c1, t1});
+                    node = c0;
+                }
+                continue;
+            }
+            if (h0) { node = c0; continue; }
+            if (h1) { node = c1; continue; }
         }
+        // Yığından sıradaki düğüm; bulunan isabetten uzak olanlar atlanır.
+        bool found = false;
+        while (!stack.empty()) {
+            const StackEntry e = stack.back();
+            stack.pop_back();
+            if (e.tNear <= ray.tMax) {
+                node = e.node;
+                found = true;
+                break;
+            }
+        }
+        if (!found) break;
     }
 
+    if (bestTri >= 0) {
+        const PrimRef& p = m_prims[static_cast<size_t>(bestTri)];
+        const float bestT = ray.tMax;
+        if (!p.mesh->intersectTriangle(p.tri, ray, isect)) {
+            // Olmaması gerekir (aynı işlemler); yine de yuvarlamaya karşı payla dene.
+            ray.tMax = bestT * 1.000001f + 1e-7f;
+            if (!p.mesh->intersectTriangle(p.tri, ray, isect)) return false;
+        }
+        isect.hitObject = p.mesh;
+        return true;
+    }
+    return shapeHit;
+}
+
+// Gölge ışını: herhangi bir isabette hemen dön; gölgelendirme verisi hiç hesaplanmaz.
+bool BVH::intersectAny(const Ray& ray) const {
+    if (m_nodes.empty()) return false;
+    const Vec3f inv(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
+    const bool dirIsNeg[3] = {inv.x < 0.0f, inv.y < 0.0f, inv.z < 0.0f};
+    std::vector<StackEntry>& stack = traversalStack();
+    int node = 0;
+    float tNear;
+    while (true) {
+        const BVHNode& n = m_nodes[static_cast<size_t>(node)];
+        if (hitBox(n.bounds, ray.origin, inv, ray.tMin, ray.tMax, tNear)) {
+            if (n.isLeaf()) {
+                for (int k = 0; k < n.nPrimitives; ++k) {
+                    const uint32_t pi = n.primitivesOffset + static_cast<uint32_t>(k);
+                    const PrimRef& p = m_prims[pi];
+                    float t;
+                    if (p.mesh) {
+                        if (hitTriangleLean(pi, ray, t)) return true;
+                    } else if (p.shape) {
+                        Ray r = ray;
+                        SurfaceInteraction dummy;
+                        if (p.shape->intersect(r, dummy)) return true;
+                    }
+                }
+            } else {
+                // Gölge ışınında sıra önemsiz; yön işaretine göre yakın olan önce.
+                if (dirIsNeg[n.splitAxis]) {
+                    stack.push_back({node + 1, 0.0f});
+                    node = static_cast<int>(n.secondChildOffset);
+                } else {
+                    stack.push_back({static_cast<int>(n.secondChildOffset), 0.0f});
+                    node = node + 1;
+                }
+                continue;
+            }
+        }
+        if (stack.empty()) break;
+        node = stack.back().node;
+        stack.pop_back();
+    }
     return false;
 }
 
