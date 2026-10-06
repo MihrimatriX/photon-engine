@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <unordered_map>
 
 namespace photon {
 
@@ -86,12 +87,19 @@ void Application::drawViewport() {
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 end(origin.x + size.x, origin.y + size.y);
-    if (m_viewHasAlpha && m_checkerTex) {
-        dl->AddImage(static_cast<ImTextureID>(static_cast<intptr_t>(m_checkerTex)), origin, end, ImVec2(0, 0),
-                     ImVec2(size.x / 16.0f, size.y / 16.0f));
-    }
-    if (m_viewTex) {
-        dl->AddImage(static_cast<ImTextureID>(static_cast<intptr_t>(m_viewTex)), origin, end);
+    // GPU dokusu alttan üste saklanır: uv (0,1)-(1,0) ile dikey çevrilir. İçeriği bu
+    // karenin sonunda renderRasterView() doldurur; kimlik sabit olduğu için şimdiden konabilir.
+    const ImTextureID rasterId = static_cast<ImTextureID>(static_cast<intptr_t>(m_rasterTex));
+    if (isRasterMode(m_s.viewMode) && m_rasterTex) {
+        dl->AddImage(rasterId, origin, end, ImVec2(0, 1), ImVec2(1, 0));
+    } else {
+        if (m_viewHasAlpha && m_checkerTex) {
+            dl->AddImage(static_cast<ImTextureID>(static_cast<intptr_t>(m_checkerTex)), origin, end, ImVec2(0, 0),
+                         ImVec2(size.x / 16.0f, size.y / 16.0f));
+        }
+        if (m_viewTex) dl->AddImage(static_cast<ImTextureID>(static_cast<intptr_t>(m_viewTex)), origin, end);
+        if (m_s.wireOverlay && m_rasterTex)
+            dl->AddImage(rasterId, origin, end, ImVec2(0, 1), ImVec2(1, 0), IM_COL32(255, 255, 255, 150));
     }
 
     // Tüm alanı kaplayan görünmez düğme: fare etkileşimi ve sürükle-bırak hedefi.
@@ -240,6 +248,14 @@ void Application::drawViewport() {
         }
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kPayloadModel)) {
             importModel(static_cast<const char*>(p->Data));
+        }
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kPayloadPrimitive)) {
+            // Şekil imlecin altındaki yüzeye (zemin ya da başka bir nesnenin üstü) konur.
+            int kind = 0;
+            std::memcpy(&kind, p->Data, sizeof(kind));
+            Vec3f hit;
+            if (pickAt(u, v, &hit)) addPrimitive(static_cast<PrimitiveKind>(kind), &hit);
+            else addPrimitive(static_cast<PrimitiveKind>(kind));
         }
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kPayloadTexture)) {
             SceneNode* n = m_s.graph.findByUid(under);
@@ -491,19 +507,111 @@ void Application::drawGizmo(const ImVec2& origin, const ImVec2& size) {
     }
 }
 
+// GPU modu ya da tel kafes bindirmesi açıksa: görünür parçaları (dünya matrisi,
+// katı modda gösterilecek renk, seçili mi) topla ve RasterView'a çizdir. Renk,
+// malzemenin taban rengidir; cam şeffaf çizilemediği için açık mavi-gri gösterilir.
+void Application::renderRasterView() {
+    const bool raster = isRasterMode(m_s.viewMode);
+    if (!m_rasterOk || (!raster && !m_s.wireOverlay) || m_s.viewportPxW <= 0 || m_s.viewportPxH <= 0) return;
+    const float fb = ImGui::GetIO().DisplayFramebufferScale.x;
+    const ViewProj vp = viewProj(m_s.camera, static_cast<float>(m_s.viewportPxW) / static_cast<float>(m_s.viewportPxH));
+    RasterView::Frame f;
+    f.width = static_cast<int>(static_cast<float>(m_s.viewportPxW) * fb);
+    f.height = static_cast<int>(static_cast<float>(m_s.viewportPxH) * fb);
+    f.view = vp.view;
+    f.proj = vp.proj;
+    f.eye = m_s.camera.position();
+    f.focus = m_s.camera.targetVec();
+    const AABB box = m_s.graph.worldBounds();
+    const bool has = box.pMin.x <= box.pMax.x;
+    const float diag = has ? (box.pMax - box.pMin).length() : 3.0f;
+    f.groundY = has ? box.pMin.y : 0.0f;
+    // Hücre: sahne boyunun yuvarlak bir kesri (3 birimlik sahnede 0.25) — sık ama kalabalık değil.
+    f.gridStep = std::pow(10.0f, std::floor(std::log10(std::max(diag, 1e-3f)))) * 0.25f;
+    f.grid = m_s.environment.groundEnabled;
+
+    static const std::shared_ptr<const TriangleMesh> unitSphere = makePrimitiveMesh(PrimitiveKind::Sphere);
+    std::unordered_map<const Material*, Color3f> colors;
+    auto colorOf = [&](const Material* m) -> Color3f {
+        if (!m) return Color3f(0.7f);
+        auto it = colors.find(m);
+        if (it != colors.end()) return it->second;
+        const MaterialPreset p = MaterialLibrary::presetFromMaterial(*m, "");
+        const Color3f c = p.kind == MaterialKind::Glass ? Color3f(0.72f, 0.82f, 0.9f) : p.baseColor;
+        return colors[m] = c;
+    };
+    std::vector<RasterView::Item> items;
+    size_t tris = 0;
+    auto walk = [&](auto&& self, const SceneNode& n, const Mat4f& parent, bool parentSel) -> void {
+        if (!n.visible) return;
+        const Mat4f world = parent * n.localTransform.matrix();
+        const bool sel = parentSel || isNodeSelected(n.uid);
+        if (n.type == SceneNodeType::Mesh && n.mesh) {
+            items.push_back({n.mesh, world, colorOf(n.material.get()), sel});
+            tris += n.mesh->numTriangles();
+        } else if (n.type == SceneNodeType::Sphere && n.sphereRadius > 0.0f) {
+            // Birim küre (merkez 0, 0.5, 0; yarıçap 0.5) → düğümün merkezine ve yarıçapına.
+            const Mat4f m = world * Transform::scale(Vec3f(2.0f * n.sphereRadius)).matrix() *
+                            Transform::translate(Vec3f(0.0f, -0.5f, 0.0f)).matrix();
+            items.push_back({unitSphere, m, colorOf(n.material.get()), sel});
+            tris += unitSphere->numTriangles();
+        }
+        for (const auto& c : n.children) self(self, *c, world, sel);
+    };
+    walk(walk, *m_s.graph.root(), Mat4f::identity(), false);
+    m_rasterTris = tris;
+    m_rasterTex = m_raster.render(f, items, raster ? m_s.viewMode : ViewMode::Wire, !raster);
+}
+
 void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) {
     const ui::Palette& pal = ui::palette();
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
     // ── Sol üst: araç çubuğu ──
-    const float btn = ImGui::GetFrameHeight() + 4.0f;
-    const ImVec2 tb(origin.x + 12.0f, origin.y + 12.0f);
-    const int count = 11;
-    const float tbW = btn * static_cast<float>(count) + 4.0f * static_cast<float>(count - 1) + 16.0f + 3 * 10.0f;
-    dl->AddRectFilled(tb, ImVec2(tb.x + tbW, tb.y + btn + 8.0f), ui::col(pal.bg1, 0.88f), 10.0f);
-    dl->AddRect(tb, ImVec2(tb.x + tbW, tb.y + btn + 8.0f), ui::col(pal.border), 10.0f);
-    ImGui::SetCursorScreenPos(ImVec2(tb.x + 8.0f, tb.y + 4.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 4));
+    // Önce düğmeler (kanal 1), sonra gerçek boyutlarına göre arkalarına kutu (kanal 0):
+    // düğme eklenip çıkarılınca genişliği elle hesaplamaya gerek kalmaz.
+    const float btn = ImGui::GetFrameHeight() + 2.0f;
+    const ImVec2 tb(origin.x + 10.0f, origin.y + 10.0f);
+    dl->ChannelsSplit(2);
+    dl->ChannelsSetCurrent(1);
+    ImGui::SetCursorScreenPos(ImVec2(tb.x + 5.0f, tb.y + 4.0f));
+    ImGui::BeginGroup();
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 2));
+    // Görüntü modu: ikon + ad + ok; açılır listede tüm modlar ve tel kafes bindirmesi.
+    {
+        static const char* kModeIcons[kViewModeCount] = {ICON_SPARKLES, ICON_CIRCLE, ICON_CUBOID, ICON_GRID_3X3, ICON_CONTRAST};
+        static const char* kModeHints[kViewModeCount] = {
+            "Işın izleme: son görüntü, malzemeler ve ışık",
+            "Işın izleme, tüm yüzeyler mat gri: ışık ve formu değerlendirmek için",
+            "GPU: anında, gölgesiz; büyük modellerde yerleştirme için",
+            "GPU: üçgen ağı (arkadaki çizgiler gizli)",
+            "GPU: yüzey yönleri renkli (ters dönmüş yüzleri bulmak için)"};
+        const int cur = static_cast<int>(m_s.viewMode);
+        char label[96];
+        std::snprintf(label, sizeof(label), "%s  %s  " ICON_CHEVRON_DOWN, kModeIcons[cur], viewModeName(m_s.viewMode));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, (btn - ImGui::GetFontSize()) * 0.5f));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, pal.bg3);
+        if (ImGui::Button(label)) ImGui::OpenPopup("viewmodes");
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar();
+        ui::Tooltip("Görüntü modu (Z ile sırayla değiştir)");
+        if (ImGui::BeginPopup("viewmodes")) {
+            for (int i = 0; i < kViewModeCount; ++i) {
+                const ViewMode m = static_cast<ViewMode>(i);
+                char item[96];
+                std::snprintf(item, sizeof(item), "%s  %s", kModeIcons[i], viewModeName(m));
+                if (ImGui::MenuItem(item, i == 2 ? "GPU" : nullptr, cur == i, !isRasterMode(m) || m_rasterOk)) setViewMode(m);
+                ui::Tooltip(kModeHints[i]);
+            }
+            ImGui::Separator();
+            ImGui::MenuItem(ICON_GRID_3X3 "  Tel kafes bindir", nullptr, &m_s.wireOverlay,
+                            m_rasterOk && !isRasterMode(m_s.viewMode));
+            ui::Tooltip("Render ve Kil görüntüsünün üstüne üçgen ağını çizer");
+            ImGui::EndPopup();
+        }
+    }
+    ImGui::SameLine(0, 10);
     if (ui::IconButton(ICON_MOUSE_POINTER_2, "Seç (Q)", m_s.gizmoOp == 0, btn)) m_s.gizmoOp = 0;
     ImGui::SameLine();
     if (ui::IconButton(ICON_MOVE, "Taşı (W)", m_s.gizmoOp == 1, btn)) m_s.gizmoOp = 1;
@@ -511,7 +619,7 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
     if (ui::IconButton(ICON_ROTATE_3D, "Döndür (E)", m_s.gizmoOp == 2, btn)) m_s.gizmoOp = 2;
     ImGui::SameLine();
     if (ui::IconButton(ICON_SCALE_3D, "Ölçekle (R)", m_s.gizmoOp == 3, btn)) m_s.gizmoOp = 3;
-    ImGui::SameLine(0, 14);
+    ImGui::SameLine(0, 10);
     if (ui::IconButton(m_s.gizmoLocal ? ICON_LOCATE_FIXED : ICON_EARTH,
                        m_s.gizmoLocal ? "Eksenler: nesnenin kendi eksenleri (tıkla: dünya)" : "Eksenler: dünya (tıkla: nesnenin kendi eksenleri)",
                        m_s.gizmoLocal, btn))
@@ -520,7 +628,7 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
     if (ui::IconButton(ICON_MAGNET, m_s.snap ? "Adımlı hareket açık (Ctrl basılıyken serbest)" : "Adımlı hareket (Ctrl basılı tutarak da olur)",
                        m_s.snap, btn))
         m_s.snap = !m_s.snap;
-    ImGui::SameLine(0, 14);
+    ImGui::SameLine(0, 10);
     if (ui::IconButton(ICON_FOCUS, "Seçime odaklan (F)", false, btn)) frameSelection();
     ImGui::SameLine();
     if (ui::IconButton(ICON_CAMERA, "Kamera açıları", false, btn)) ImGui::OpenPopup("campresets");
@@ -534,32 +642,51 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
     }
     ImGui::SameLine();
     if (ui::IconButton(ICON_ORBIT, "Turntable önizleme (T)", m_s.camera.turntable, btn)) m_s.camera.turntable = !m_s.camera.turntable;
-    ImGui::SameLine(0, 14);
-    if (ui::IconButton(ICON_WAND_SPARKLES, denoiseAvailable() ? "Gürültü giderme (OIDN)" : "OIDN bulunamadı", m_s.denoise, btn))
-        m_s.denoise = !m_s.denoise;
-    ImGui::SameLine();
-    if (ui::IconButton(ICON_REFRESH_CW, "Önizlemeyi yeniden başlat (F5)", false, btn)) m_s.viewport.restart(false);
+    if (!isRasterMode(m_s.viewMode)) {
+        ImGui::SameLine(0, 10);
+        if (ui::IconButton(ICON_WAND_SPARKLES, denoiseAvailable() ? "Gürültü giderme (OIDN)" : "OIDN bulunamadı", m_s.denoise, btn))
+            m_s.denoise = !m_s.denoise;
+        ImGui::SameLine();
+        if (ui::IconButton(ICON_REFRESH_CW, "Önizlemeyi yeniden başlat (F5)", false, btn)) m_s.viewport.restart(false);
+    }
     ImGui::PopStyleVar();
+    ImGui::EndGroup();
+    {
+        const ImVec2 gMax = ImGui::GetItemRectMax();
+        dl->ChannelsSetCurrent(0);
+        const ImVec2 bMax(gMax.x + 5.0f, gMax.y + 4.0f);
+        dl->AddRectFilled(tb, bMax, ui::col(pal.bg1, 0.9f), 8.0f);
+        dl->AddRect(tb, bMax, ui::col(pal.border), 8.0f);
+        dl->ChannelsMerge();
+    }
 
-    // ── Sağ üst: ilerleme rozeti ──
+    // ── Sağ üst: ilerleme rozeti (GPU modunda: mod adı ve üçgen sayısı) ──
     const ViewportStats st = m_s.viewport.stats();
     char line1[64], line2[96];
-    if (st.targetSpp > 0) std::snprintf(line1, sizeof(line1), "%d / %d örnek", st.spp, st.targetSpp);
-    else std::snprintf(line1, sizeof(line1), "%d örnek", st.spp);
-    std::snprintf(line2, sizeof(line2), "%s%s", ui::formatDuration(st.seconds).c_str(),
-                  st.interactive ? "  •  hareket" : (st.denoised ? "  •  OIDN" : ""));
+    if (isRasterMode(m_s.viewMode)) {
+        std::snprintf(line1, sizeof(line1), "%s", viewModeName(m_s.viewMode));
+        std::snprintf(line2, sizeof(line2), "GPU  •  %s üçgen", ui::formatCount(m_rasterTris).c_str());
+    } else {
+        if (st.targetSpp > 0) std::snprintf(line1, sizeof(line1), "%d / %d örnek", st.spp, st.targetSpp);
+        else std::snprintf(line1, sizeof(line1), "%d örnek", st.spp);
+        std::snprintf(line2, sizeof(line2), "%s%s%s", ui::formatDuration(st.seconds).c_str(),
+                      st.interactive ? "  •  hareket" : (st.denoised ? "  •  OIDN" : ""),
+                      m_s.viewMode == ViewMode::Clay ? "  •  kil" : "");
+    }
     const ImVec2 t1 = ImGui::CalcTextSize(line1);
     const ImVec2 t2 = ImGui::CalcTextSize(line2);
-    const float boxW = std::max(t1.x, t2.x) + 52.0f;
-    const float boxH = t1.y + t2.y + 18.0f;
-    const ImVec2 bp(origin.x + size.x - boxW - 12.0f, origin.y + 12.0f);
-    dl->AddRectFilled(bp, ImVec2(bp.x + boxW, bp.y + boxH), ui::col(pal.bg1, 0.88f), 10.0f);
-    dl->AddRect(bp, ImVec2(bp.x + boxW, bp.y + boxH), ui::col(pal.border), 10.0f);
-    // İlerleme halkası: hedef varsa doluluk, sınırsızsa dönen yay.
-    const ImVec2 rc(bp.x + 20.0f, bp.y + boxH * 0.5f);
-    const float rr = 9.0f;
-    dl->AddCircle(rc, rr, ui::col(pal.bg3), 32, 3.0f);
-    if (st.targetSpp > 0) {
+    const float boxW = std::max(t1.x, t2.x) + 44.0f;
+    const float boxH = t1.y + t2.y + 12.0f;
+    const ImVec2 bp(origin.x + size.x - boxW - 10.0f, origin.y + 10.0f);
+    dl->AddRectFilled(bp, ImVec2(bp.x + boxW, bp.y + boxH), ui::col(pal.bg1, 0.9f), 8.0f);
+    dl->AddRect(bp, ImVec2(bp.x + boxW, bp.y + boxH), ui::col(pal.border), 8.0f);
+    // İlerleme halkası: hedef varsa doluluk, sınırsızsa dönen yay; GPU modunda dolu yeşil daire.
+    const ImVec2 rc(bp.x + 17.0f, bp.y + boxH * 0.5f);
+    const float rr = 7.5f;
+    dl->AddCircle(rc, rr, ui::col(pal.bg3), 32, 2.5f);
+    if (isRasterMode(m_s.viewMode)) {
+        dl->AddCircleFilled(rc, rr - 2.0f, ui::col(pal.success), 24);
+    } else if (st.targetSpp > 0) {
         const float f = std::clamp(static_cast<float>(st.spp) / static_cast<float>(st.targetSpp), 0.0f, 1.0f);
         dl->PathArcTo(rc, rr, -PI * 0.5f, -PI * 0.5f + TWO_PI * f, 32);
         dl->PathStroke(ui::col(st.converged ? pal.success : pal.accent), 0, 3.0f);
@@ -568,8 +695,8 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
         dl->PathArcTo(rc, rr, a, a + PI * 0.6f, 16);
         dl->PathStroke(ui::col(pal.accent), 0, 3.0f);
     }
-    dl->AddText(ImVec2(bp.x + 38.0f, bp.y + 7.0f), ui::col(pal.text), line1);
-    dl->AddText(ImVec2(bp.x + 38.0f, bp.y + 9.0f + t1.y), ui::col(pal.textDim), line2);
+    dl->AddText(ImVec2(bp.x + 32.0f, bp.y + 5.0f), ui::col(pal.text), line1);
+    dl->AddText(ImVec2(bp.x + 32.0f, bp.y + 7.0f + t1.y), ui::col(pal.textDim), line2);
 
     // Odak seçme modu ipucu.
     if (m_s.pickFocus) {

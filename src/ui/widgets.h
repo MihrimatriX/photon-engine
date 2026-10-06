@@ -62,5 +62,7 @@ std::string fileName(const std::string& path);
 
 /// Saniyeyi "1 dk 05 sn" biçiminde yazar.
 std::string formatDuration(double seconds);
+/// Büyük sayıyı kısa yazar: 950, "12,4 bin", "1,2 milyon" (Türkçe ondalık virgülü).
+std::string formatCount(size_t n);
 
 } // namespace photon::ui

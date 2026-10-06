@@ -106,6 +106,11 @@
 #define ICON_FOLDER_INPUT            "\xEE\x8C\xB4" // U+E334
 #define ICON_LIST_FILTER             "\xEE\x91\xA0" // U+E460
 #define ICON_SCAN                    "\xEE\x89\x97" // U+E257
+#define ICON_CONE                    "\xEE\x94\xA3" // U+E523
+#define ICON_TORUS                   "\xEE\x94\xAF" // U+E52F
+#define ICON_CIRCLE                  "\xEE\x81\xB6" // U+E076
+#define ICON_SHELL                   "\xEE\x93\xB7" // U+E4F7
+#define ICON_VECTOR_SQUARE           "\xEE\x99\xBC" // U+E67C
 
 // Font yüklerken ikon aralığı (1.92 dinamik yükler; yine de birleşim sınırı için).
 #define ICON_MIN_LUCIDE 0xE000

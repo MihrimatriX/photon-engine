@@ -95,10 +95,11 @@ void applyTheme(float dpiScale) {
     s = ImGuiStyle();
     const Palette& p = palette();
 
-    // Geometri: 8 px ızgara, yumuşak köşeler; yerleşik (docked) paneller köşesiz.
+    // Geometri: sıkı (kompakt) ızgara, yumuşak köşeler; yerleşik (docked) paneller köşesiz.
+    // Profesyonel araçlar gibi yoğun: daha çok bilgi, daha az kaydırma.
     s.WindowRounding = 0.0f;
     s.ChildRounding = 6.0f;
-    s.FrameRounding = 6.0f;
+    s.FrameRounding = 5.0f;
     s.PopupRounding = 8.0f;
     s.ScrollbarRounding = 9.0f;
     s.GrabRounding = 6.0f;
@@ -109,18 +110,18 @@ void applyTheme(float dpiScale) {
     s.FrameBorderSize = 0.0f;
     s.TabBorderSize = 0.0f;
     s.TabBarBorderSize = 1.0f;
-    s.WindowPadding = ImVec2(12, 12);
-    s.FramePadding = ImVec2(10, 6);
-    s.ItemSpacing = ImVec2(8, 7);
-    s.ItemInnerSpacing = ImVec2(6, 6);
-    s.CellPadding = ImVec2(6, 5);
-    s.IndentSpacing = 16.0f;
-    s.ScrollbarSize = 10.0f;
+    s.WindowPadding = ImVec2(10, 8);
+    s.FramePadding = ImVec2(8, 4);
+    s.ItemSpacing = ImVec2(6, 5);
+    s.ItemInnerSpacing = ImVec2(5, 4);
+    s.CellPadding = ImVec2(5, 3);
+    s.IndentSpacing = 14.0f;
+    s.ScrollbarSize = 8.0f;
     s.GrabMinSize = 12.0f;
     s.WindowTitleAlign = ImVec2(0.0f, 0.5f);
     s.WindowMenuButtonPosition = ImGuiDir_None; // panel başlığındaki üçgen menü kapalı
     s.SeparatorTextBorderSize = 1.0f;
-    s.SeparatorTextPadding = ImVec2(0, 4);
+    s.SeparatorTextPadding = ImVec2(0, 3);
     s.DockingSeparatorSize = 3.0f;
     s.DisabledAlpha = 0.45f;
     s.HoverDelayNormal = 0.45f;

@@ -6,6 +6,7 @@ add_library(photon_scene STATIC
     document.cpp
     model_import.cpp
     project_io.cpp
+    primitives.cpp
 )
 
 target_link_libraries(photon_scene PUBLIC

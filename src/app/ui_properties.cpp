@@ -86,7 +86,7 @@ void Application::drawProperties() {
     const int n = 6;
     const float w = ImGui::GetContentRegionAvail().x;
     const float bw = (w - 3.0f * static_cast<float>(n - 1)) / static_cast<float>(n);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 7));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 5));
     for (int i = 0; i < n; ++i) {
         if (i) ImGui::SameLine(0, 3);
         const bool active = m_s.rightTab == i;

@@ -101,8 +101,10 @@ constexpr uint64_t kGroundNodeUid = ~0ull;
 /// Belgeden (ağaç + ışıklar + ortam) render'a hazır sahne: geometri, otomatik
 /// zemin, ışıklar, ortam, arka plan ve BVH. Uygulama ve CLI aynı yolu kullanır.
 /// @param isolate Malzemeleri kopyala (son render; kullanıcı düzenlemesinden bağımsız).
+/// @param clay    Kil modu: tüm parçalar aynı nötr mat griyle (ışık ve formu görmek için).
 std::shared_ptr<Scene> buildRenderScene(const SceneGraph& graph, const std::vector<LightDesc>& lights,
-                                        const EnvironmentDesc& env, EnvironmentCache& cache, bool isolate);
+                                        const EnvironmentDesc& env, EnvironmentCache& cache, bool isolate,
+                                        bool clay = false);
 
 /// assets/studios/*.json dosyalarını oku.
 std::vector<StudioPreset> loadStudioPresets(const std::string& dir);

@@ -82,7 +82,13 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - Tutamaç: pivot seçimin ortası, çoklu nesne, ışık taşıma, adımlı hareket (mıknatıs / Ctrl), yerel/dünya eksen; geri al adımı ilk değişiklikte (önceden ilk kare değişmezse kaçıyordu).
   - Malzeme: "Bağımsız yap" (paylaşılan malzemeyi ayır). Nesne sekmesi çoklu seçimde toplu işlemler.
   - `--ui multi|group|filter|lightgizmo` ekran görüntüsü durumları.
+- **2026-10-06 (oturum 6, şekiller, görüntü modları, kompakt arayüz):**
+  - `scene/primitives.*`: küp, küre, silindir, koni, düzlem, simit (1 birimlik kutu, taban y=0, dışa bakan sarma; `test_primitives`). Kütüphane → Model'de sürüklenebilir kutucuklar, Ekle menüsü, sahne panelindeki "+". Boyut sahnedeki nesnelerin ortanca boyu (toplam boyuna bağlıyken her şekil bir öncekinden büyük geliyordu).
+  - Görüntü modları (`ViewMode`, Z): Render, Kil (`buildRenderScene(..., clay)` → tek mat gri malzeme, yalnız viewport), Katı / Tel kafes / Normaller (`app/raster_view.*`: OpenGL 3.3, 3.x işlevleri glfwGetProcAddress ile, 4× MSAA FBO, hidden-line tel kafes, zemin ızgarası). GPU modlarında ışın izleyici duraklar. "Tel kafes bindir" Render/Kil üstüne.
+  - Kompakt tema: 14 px yazı, dar dolgular; malzeme ızgarası 4 sütun; araç çubuğu kutusu düğmelerin gerçek boyutundan (ImDrawList kanalları).
 - **Sıradaki adımlar:**
+  - Stüdyo alan ışıkları kameraya görünüyor (beyaz dörtgenler); KeyShot gibi "kameraya görünmez" seçeneği.
+  - GPU Katı modunda dokular ve ışıklar yok (yalnız taban rengi).
   - Tutamaç sürüklenirken Esc ile iptal (şimdilik Ctrl+Z).
   - Kurulum paketi (Inno Setup, makinede yok), kod imzalama, log + çökme dökümü, otomatik kaydetme (eksik analizi "Faz 1").
   - Embree sonrası ölçüm ve `bench/BASELINE.md` (F2.13).

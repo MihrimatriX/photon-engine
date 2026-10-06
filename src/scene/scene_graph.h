@@ -37,7 +37,9 @@ public:
 
     /// Yalnız geometriyi ekler: sıfırlama, ışık ve BVH yok. Çağıran ek şekilleri
     /// (ör. zemin) ekleyip buildAccelerator() ile bitirir.
-    void compileInto(Scene& outScene, bool isolateMaterials = false) const;
+    /// @p overrideMaterial doluysa her parça bu malzemeyle derlenir (viewport "kil" modu).
+    void compileInto(Scene& outScene, bool isolateMaterials = false,
+                     const std::shared_ptr<Material>& overrideMaterial = nullptr) const;
 
     /// Ağacın derin kopyası. Geometri (değişmez) paylaşılır; cloneMaterials true ise
     /// malzemeler de kopyalanır (aynı malzemeyi paylaşan düğümler kopyada da paylaşır).
@@ -92,7 +94,7 @@ private:
     uint32_t m_revision = 1;
 
     void compileNode(const SceneNode& node, Scene& outScene, const Transform& parentXform,
-                     bool isolateMaterials) const;
+                     bool isolateMaterials, const std::shared_ptr<Material>& overrideMaterial = nullptr) const;
     std::shared_ptr<TriangleMesh> bakeMesh(const TriangleMesh& mesh, const Transform& xform,
                                            const Material* material) const;
 };

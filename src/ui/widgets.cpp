@@ -218,6 +218,17 @@ std::string fileName(const std::string& path) {
     return pathToUtf8(pathFromUtf8(path).filename());
 }
 
+std::string formatCount(size_t n) {
+    char buf[32];
+    if (n < 1000) std::snprintf(buf, sizeof(buf), "%zu", n);
+    else if (n < 1000000) std::snprintf(buf, sizeof(buf), "%.1f bin", static_cast<double>(n) / 1e3);
+    else std::snprintf(buf, sizeof(buf), "%.1f milyon", static_cast<double>(n) / 1e6);
+    std::string s = buf;
+    for (char& c : s)
+        if (c == '.') c = ',';
+    return s;
+}
+
 std::string formatDuration(double seconds) {
     char buf[64];
     if (seconds < 60.0) {

@@ -126,6 +126,11 @@ void Application::drawSceneTree() {
     if (ui::IconButton(ICON_PLUS, "Ekle")) ImGui::OpenPopup("addmenu");
     if (ImGui::BeginPopup("addmenu")) {
         if (ImGui::MenuItem(ICON_BOX "  Model…")) openModelDialog();
+        if (ImGui::BeginMenu(ICON_SHAPES "  Şekil")) {
+            for (int k = 0; k < kPrimitiveCount; ++k)
+                if (ImGui::MenuItem(primitiveName(static_cast<PrimitiveKind>(k)))) addPrimitive(static_cast<PrimitiveKind>(k));
+            ImGui::EndMenu();
+        }
         ImGui::Separator();
         if (ImGui::MenuItem(ICON_LAMP_CEILING "  Alan ışığı")) addLight(LightDesc::Type::Area);
         if (ImGui::MenuItem(ICON_SUN "  Güneş")) addLight(LightDesc::Type::Directional);
@@ -186,7 +191,7 @@ void Application::drawSceneTree() {
         if (!q.empty() && !inside && !selfMatch && !n.children.empty()) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
         const bool shown = parentVisible && n.visible;
 
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 3));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4, 2));
         bool open;
         if (m_s.renamingUid == n.uid) {
             open = ImGui::TreeNodeEx("##rn", f, "%s", nodeIcon(n));

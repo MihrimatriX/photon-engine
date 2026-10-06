@@ -65,7 +65,7 @@ void Application::drawLibrary() {
     const int n = static_cast<int>(sizeof(tabs) / sizeof(tabs[0]));
     const float w = ImGui::GetContentRegionAvail().x;
     const float bw = (w - 4.0f * static_cast<float>(n - 1)) / static_cast<float>(n);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 6));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 4));
     for (int i = 0; i < n; ++i) {
         if (i) ImGui::SameLine(0, 4);
         const bool active = m_s.leftTab == i;
@@ -101,7 +101,7 @@ void Application::drawLibraryMaterials() {
     cats.insert(cats.begin(), "");
     float x = 0.0f;
     const float avail = ImGui::GetContentRegionAvail().x;
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(9, 3));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 2));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 20.0f);
     for (const auto& c : cats) {
         const char* label = c.empty() ? "Tümü" : c.c_str();
@@ -117,11 +117,10 @@ void Application::drawLibraryMaterials() {
     }
     ImGui::PopStyleVar(2);
     ImGui::Spacing();
-    ImGui::Spacing();
 
-    const float spacing = 8.0f;
+    const float spacing = 6.0f;
     Grid grid;
-    grid.begin(86.0f, spacing);
+    grid.begin(66.0f, spacing);
     SceneNode* sel = selectedNode();
     int shown = 0;
     for (const auto& p : m_s.materials.presets()) {
@@ -159,11 +158,10 @@ void Application::drawLibraryMaterials() {
 }
 
 void Application::drawLibraryEnvironments() {
-    const float spacing = 8.0f;
+    const float spacing = 6.0f;
     if (ui::GhostButton(ICON_FOLDER_OPEN "  HDRI dosyası aç…", ImVec2(-FLT_MIN, 0))) openHdrDialog();
-    ImGui::Spacing();
     Grid grid;
-    grid.begin(140.0f, spacing);
+    grid.begin(120.0f, spacing);
     for (const auto& e : m_s.environments) {
         if (!matches(e.name, m_s.librarySearch)) continue;
         const bool active = m_s.environment.hdrPath == e.path &&
@@ -185,35 +183,34 @@ void Application::drawLibraryEnvironments() {
 void Application::drawLibraryStudios() {
     const ui::Palette& pal = ui::palette();
     ui::Hint("Stüdyo = ortam + ışık düzeni. Işıklar sahnenin boyutuna göre yerleşir.");
-    ImGui::Spacing();
     for (const auto& s : m_s.studios) {
         if (!matches(s.name, m_s.librarySearch)) continue;
         ImGui::PushID(s.id.c_str());
         const ImVec2 p = ImGui::GetCursorScreenPos();
         const float w = ImGui::GetContentRegionAvail().x;
-        const float h = 64.0f;
+        const float h = 50.0f;
         const bool clicked = ImGui::InvisibleButton("studio", ImVec2(w, h));
         const bool hovered = ImGui::IsItemHovered();
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ui::col(hovered ? pal.bg3 : pal.bg2), 8.0f);
+        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ui::col(hovered ? pal.bg3 : pal.bg2), 6.0f);
         // Ortamın küçük resmi solda.
         std::string envKey;
         for (const auto& e : m_s.environments)
             if (e.id == s.environment || ui::fileName(e.path) == s.environment) envKey = "env:" + e.id;
         const unsigned int tex = envKey.empty() ? 0 : m_s.thumbs.texture(envKey);
-        const float iw = 96.0f;
+        const float iw = 72.0f;
         if (tex)
-            dl->AddImageRounded(static_cast<ImTextureID>(static_cast<intptr_t>(tex)), ImVec2(p.x + 6, p.y + 6),
-                                ImVec2(p.x + 6 + iw, p.y + h - 6), ImVec2(0.25f, 0.1f), ImVec2(0.75f, 0.9f),
-                                IM_COL32_WHITE, 6.0f);
+            dl->AddImageRounded(static_cast<ImTextureID>(static_cast<intptr_t>(tex)), ImVec2(p.x + 5, p.y + 5),
+                                ImVec2(p.x + 5 + iw, p.y + h - 5), ImVec2(0.25f, 0.1f), ImVec2(0.75f, 0.9f),
+                                IM_COL32_WHITE, 5.0f);
         else
-            dl->AddRectFilled(ImVec2(p.x + 6, p.y + 6), ImVec2(p.x + 6 + iw, p.y + h - 6), ui::col(pal.bg3), 6.0f);
+            dl->AddRectFilled(ImVec2(p.x + 5, p.y + 5), ImVec2(p.x + 5 + iw, p.y + h - 5), ui::col(pal.bg3), 5.0f);
         ImGui::PushFont(ui::fonts().semibold, 0.0f);
-        dl->AddText(ImVec2(p.x + iw + 18, p.y + 10), ui::col(pal.text), s.name.c_str());
+        dl->AddText(ImVec2(p.x + iw + 14, p.y + 7), ui::col(pal.text), s.name.c_str());
         ImGui::PopFont();
         char info[96];
         std::snprintf(info, sizeof(info), "%d ışık", static_cast<int>(s.lights.size()));
-        dl->AddText(ImVec2(p.x + iw + 18, p.y + 32), ui::col(pal.textDim), s.description.empty() ? info : s.description.c_str());
+        dl->AddText(ImVec2(p.x + iw + 14, p.y + 26), ui::col(pal.textDim), s.description.empty() ? info : s.description.c_str());
         if (clicked) applyStudio(s);
         if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
             ImGui::SetDragDropPayload(kPayloadStudio, s.id.c_str(), s.id.size() + 1);
@@ -221,16 +218,48 @@ void Application::drawLibraryStudios() {
             ImGui::EndDragDropSource();
         }
         ImGui::PopID();
-        ImGui::Spacing();
     }
 }
 
 void Application::drawLibraryModels() {
     const ui::Palette& pal = ui::palette();
     if (ui::PrimaryButton(ICON_UPLOAD "  Model içe aktar…", ImVec2(-FLT_MIN, 0))) openModelDialog();
-    ImGui::Spacing();
-    ui::Hint("OBJ, glTF ve GLB desteklenir. Dosyayı pencereye sürükleyip bırakmak da yeterli.");
-    ImGui::Spacing();
+    ui::Tooltip("OBJ, glTF, GLB. Dosyayı pencereye sürükleyip bırakmak da yeterli.");
+
+    // Temel şekiller: tıkla → sahnenin yanına; viewport'a sürükle → imlecin altındaki yüzeye.
+    ImGui::SeparatorText("Temel şekiller");
+    static const char* kShapeIcons[kPrimitiveCount] = {ICON_BOX, ICON_CIRCLE, ICON_CYLINDER, ICON_CONE, ICON_SQUARE, ICON_TORUS};
+    const float spacing = 6.0f;
+    Grid grid;
+    grid.begin(64.0f, spacing);
+    for (int k = 0; k < kPrimitiveCount; ++k) {
+        const auto kind = static_cast<PrimitiveKind>(k);
+        if (!matches(primitiveName(kind), m_s.librarySearch)) continue;
+        ImGui::PushID(k);
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const ImVec2 sz(grid.cell, grid.cell * 0.82f);
+        const bool clicked = ImGui::InvisibleButton("shape", sz);
+        const bool hovered = ImGui::IsItemHovered();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), ui::col(hovered ? pal.bg3 : pal.bg2), 6.0f);
+        ImGui::PushFont(ui::fonts().regular, ui::fonts().baseSize * 1.7f);
+        const ImVec2 is = ImGui::CalcTextSize(kShapeIcons[k]);
+        dl->AddText(ImVec2(p.x + (sz.x - is.x) * 0.5f, p.y + sz.y * 0.16f), ui::col(hovered ? pal.accent : pal.text), kShapeIcons[k]);
+        ImGui::PopFont();
+        const ImVec2 ts = ImGui::CalcTextSize(primitiveName(kind));
+        dl->AddText(ImVec2(p.x + (sz.x - ts.x) * 0.5f, p.y + sz.y - ts.y - 5.0f), ui::col(pal.textDim), primitiveName(kind));
+        if (clicked) addPrimitive(kind);
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+            ImGui::SetDragDropPayload(kPayloadPrimitive, &k, sizeof(k));
+            ImGui::Text("%s  %s", kShapeIcons[k], primitiveName(kind));
+            ImGui::EndDragDropSource();
+        } else {
+            ui::Tooltip("Tıkla: sahneye ekle  •  Sürükle: istediğin yere bırak");
+        }
+        ImGui::PopID();
+        grid.next(spacing);
+    }
+    ImGui::NewLine();
     ImGui::SeparatorText("Örnek modeller");
     for (const auto& m : m_s.models) {
         const std::string name = ui::fileName(m);
@@ -249,7 +278,6 @@ void Application::drawLibraryModels() {
         }
         ImGui::PopID();
     }
-    ImGui::Spacing();
     ImGui::SeparatorText("Örnek sahneler");
     if (ImGui::Selectable(ICON_SPARKLES "  Ürün vitrini")) loadSampleScene();
     if (ImGui::Selectable(ICON_BOXES "  Cornell kutusu")) loadCornellScene();

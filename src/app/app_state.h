@@ -7,6 +7,7 @@
 #pragma once
 
 #include "app/render_controller.h"
+#include "app/raster_view.h"
 #include "app/thumbnails.h"
 #include "scene/scene_graph.h"
 #include "scene/material_library.h"
@@ -89,6 +90,8 @@ struct AppState {
     int previewSpp = 0;            ///< 0 = sınırsız
     bool denoise = true;
     bool showGrid = false;
+    ViewMode viewMode = ViewMode::Render; ///< Render/Kil: ışın izleme; Katı/Tel kafes/Normaller: GPU
+    bool wireOverlay = false;             ///< Render ve Kil'in üstüne tel kafes bindir
 
     // ── Kayıtlı kameralar (projeyle saklanır) ──
     struct SavedCamera {

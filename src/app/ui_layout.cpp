@@ -50,7 +50,7 @@ void Application::drawDockspace() {
 
 void Application::drawMenuBar() {
     const ui::Palette& pal = ui::palette();
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 8));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8, 6));
     ImGui::PushStyleColor(ImGuiCol_MenuBarBg, pal.bg0);
     if (!ImGui::BeginMainMenuBar()) {
         ImGui::PopStyleColor();
@@ -109,11 +109,28 @@ void Application::drawMenuBar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Ekle")) {
+        if (ImGui::MenuItem(ICON_BOX "  Model…", "Ctrl+O")) openModelDialog();
+        ImGui::Separator();
+        static const char* kShapeIcons[kPrimitiveCount] = {ICON_BOX, ICON_CIRCLE, ICON_CYLINDER, ICON_CONE, ICON_SQUARE, ICON_TORUS};
+        for (int k = 0; k < kPrimitiveCount; ++k) {
+            char label[64];
+            std::snprintf(label, sizeof(label), "%s  %s", kShapeIcons[k], primitiveName(static_cast<PrimitiveKind>(k)));
+            if (ImGui::MenuItem(label)) addPrimitive(static_cast<PrimitiveKind>(k));
+        }
+        ImGui::Separator();
         if (ImGui::MenuItem(ICON_LAMP_CEILING "  Alan ışığı (softbox)")) addLight(LightDesc::Type::Area);
         if (ImGui::MenuItem(ICON_SUN "  Güneş (yönlü)")) addLight(LightDesc::Type::Directional);
         if (ImGui::MenuItem(ICON_LIGHTBULB "  Nokta ışık")) addLight(LightDesc::Type::Point);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Görünüm")) {
+        for (int i = 0; i < kViewModeCount; ++i) {
+            const ViewMode m = static_cast<ViewMode>(i);
+            if (ImGui::MenuItem(viewModeName(m), i == 0 ? "Z" : nullptr, m_s.viewMode == m, !isRasterMode(m) || m_rasterOk))
+                setViewMode(m);
+        }
         ImGui::Separator();
-        if (ImGui::MenuItem(ICON_BOX "  Model…", "Ctrl+O")) openModelDialog();
+        ImGui::MenuItem("Tel kafes bindir", nullptr, &m_s.wireOverlay, m_rasterOk && !isRasterMode(m_s.viewMode));
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Kamera")) {
@@ -165,10 +182,10 @@ void Application::drawMenuBar() {
 void Application::drawStatusBar() {
     const ui::Palette& pal = ui::palette();
     ImGuiViewport* vp = ImGui::GetMainViewport();
-    const float h = ImGui::GetFrameHeight() + 4.0f;
+    const float h = ImGui::GetFrameHeight() + 2.0f;
     ImGui::PushStyleColor(ImGuiCol_WindowBg, pal.bg0);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 3));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(14, 4));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 2));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(12, 4));
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
                                    ImGuiWindowFlags_MenuBar;
     if (ImGui::BeginViewportSideBar("##statusbar", vp, ImGuiDir_Down, h, flags)) {
@@ -197,14 +214,22 @@ void Application::drawStatusBar() {
             const ViewportStats st = m_s.viewport.stats();
             char buf[256];
             const unsigned threads = std::max(1u, std::thread::hardware_concurrency());
-            std::snprintf(buf, sizeof(buf), "%d × %d    %d%s örnek    %s    %u iş parçacığı    %.0f fps",
-                          st.width, st.height, st.spp,
-                          st.targetSpp > 0 ? (" / " + std::to_string(st.targetSpp)).c_str() : "",
-                          ui::formatDuration(st.seconds).c_str(), threads, m_s.fps);
+            char sel[32] = "";
+            if (m_s.selKind == SelectionKind::Node && m_s.selNodes.size() > 1)
+                std::snprintf(sel, sizeof(sel), "%zu seçili    ", m_s.selNodes.size());
+            if (isRasterMode(m_s.viewMode))
+                std::snprintf(buf, sizeof(buf), "%s%s (GPU)    %s üçgen    %.0f fps", sel, viewModeName(m_s.viewMode),
+                              ui::formatCount(m_rasterTris).c_str(), m_s.fps);
+            else
+                std::snprintf(buf, sizeof(buf), "%s%d × %d    %d%s örnek    %s    %u iş parçacığı    %.0f fps", sel,
+                              st.width, st.height, st.spp,
+                              st.targetSpp > 0 ? (" / " + std::to_string(st.targetSpp)).c_str() : "",
+                              ui::formatDuration(st.seconds).c_str(), threads, m_s.fps);
             const float tw = ImGui::CalcTextSize(buf).x;
-            const float badgeW = denoiseAvailable() ? 64.0f : 0.0f;
+            const bool badge = denoiseAvailable() && !isRasterMode(m_s.viewMode);
+            const float badgeW = badge ? 64.0f : 0.0f;
             ImGui::SetCursorPosX(ImGui::GetWindowWidth() - tw - badgeW - 24.0f);
-            if (denoiseAvailable()) {
+            if (badge) {
                 ui::Badge(m_s.denoise ? "OIDN" : "OIDN kapalı", m_s.denoise ? pal.success : pal.textFaint);
                 ImGui::SameLine();
             }
@@ -233,6 +258,7 @@ void Application::drawAboutWindows() {
                 {"Q / W / E / R", "Seç / taşı / döndür / ölçekle"}, {"Ctrl (sürüklerken)", "Adımlı taşı / döndür"},
                 {"G", "Seçimi zemine oturt"}, {"Ctrl+G / Ctrl+Shift+G", "Grupla / grubu çöz"},
                 {"H / Alt+H", "Gizle / hepsini göster"}, {"I", "Yalnız seçimi göster"}, {"F2", "Yeniden adlandır"},
+                {"Z / Shift+Z", "Görüntü modu: Render, Kil, Katı, Tel kafes, Normaller"},
                 {"T", "Turntable önizleme"}, {"Del", "Sil"}, {"Ctrl+D", "Çoğalt"},
                 {"Ctrl+C / Ctrl+V", "Malzemeyi kopyala / yapıştır"}, {"Ctrl + tekerlek", "Odak uzaklığı (zoom lens)"},
                 {"Ctrl+Z / Ctrl+Y", "Geri al / yinele"}, {"Ctrl+O", "Model içe aktar"},

@@ -10,6 +10,7 @@
 #pragma once
 
 #include "app/app_state.h"
+#include "scene/primitives.h"
 
 #include <imgui.h>
 
@@ -58,6 +59,13 @@ private:
     Mat4f m_gizmoPivot = Mat4f::identity();
     bool m_gizmoUndoPushed = false;
     uint64_t m_treePendingUid = 0;    ///< Seçili satıra basıldı: bırakınca tek seçime in (sürüklenmediyse)
+    RasterView m_raster;               ///< GPU görüntü modları (Katı, Tel kafes, Normaller, bindirme)
+    bool m_rasterOk = false;           ///< Sürücü gerekli GL işlevlerini verdi mi
+    unsigned int m_rasterTex = 0;      ///< Son GPU çiziminin dokusu (kimlik sabit kalır)
+    size_t m_rasterTris = 0;           ///< Son GPU çizimindeki üçgen sayısı (rozet)
+    /// ImGui::Render() sonrası, çizim listesi GPU'ya gitmeden hemen önce: GPU modunun
+    /// dokusunu bu karenin kamerasıyla günceller (bir kare gecikme olmaz).
+    void renderRasterView();
 
     // ── application.cpp ──
     void initWindow();
@@ -119,6 +127,11 @@ public:
     /// Sürükle-bırak: düğümleri @p newParent altına @p index sırasına taşır.
     void moveNodes(const std::vector<uint64_t>& uids, uint64_t newParentUid, size_t index);
     void beginRename();
+    /// Temel şekil ekler. @p at doluysa tabanı o noktaya (sürükle-bırak), değilse
+    /// sahnenin yanına; boyutu sahneye göre. Seçilir ve taşıma tutamacı açılır.
+    void addPrimitive(PrimitiveKind kind, const Vec3f* at = nullptr);
+    /// Görüntü modunu değiştirir (Render ↔ Kil sahneyi yeniden derler).
+    void setViewMode(ViewMode mode);
     void newScene();
     void loadSampleScene();
     void loadCornellScene();

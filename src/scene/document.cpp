@@ -198,9 +198,17 @@ std::vector<LightDesc> placeStudioLights(const StudioPreset& preset, const AABB&
 namespace photon {
 
 std::shared_ptr<Scene> buildRenderScene(const SceneGraph& graph, const std::vector<LightDesc>& lights,
-                                        const EnvironmentDesc& env, EnvironmentCache& cache, bool isolate) {
+                                        const EnvironmentDesc& env, EnvironmentCache& cache, bool isolate,
+                                        bool clay) {
     auto scene = std::make_shared<Scene>();
-    graph.compileInto(*scene, isolate);
+    // Kil: %60 yansıtan mat açık gri — gölgeler ve yüzey eğrilikleri okunur,
+    // renkler/yansımalar dikkati dağıtmaz (stüdyo "clay render" alışkanlığı).
+    std::shared_ptr<Material> clayMat;
+    if (clay) {
+        clayMat = std::make_shared<DisneyMaterial>(Color3f(0.6f), 0.0f, 0.6f, 0.5f);
+        scene->retainMaterial(clayMat);
+    }
+    graph.compileInto(*scene, isolate, clayMat);
     // Otomatik zemin: modellerin altına, sahne boyutunun çok katı genişlikte bir dörtgen.
     if (env.groundEnabled && !graph.empty()) {
         const AABB box = graph.worldBounds();

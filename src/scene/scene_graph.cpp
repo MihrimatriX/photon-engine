@@ -153,14 +153,14 @@ GroundQuad placeGroundUnder(const AABB& box) {
 }
 
 void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Transform& parentXform,
-                             bool isolateMaterials) const {
+                             bool isolateMaterials, const std::shared_ptr<Material>& overrideMaterial) const {
     if (!node.visible) return;
     Transform world = parentXform * node.localTransform;
 
     // İzole derlemede (son render) malzeme kopyalanır: render sürerken kullanıcı
     // asıl malzemeyi düzenlese bile render'ın gördüğü değerler değişmez.
-    std::shared_ptr<Material> mat = node.material;
-    if (isolateMaterials && mat) {
+    std::shared_ptr<Material> mat = overrideMaterial ? overrideMaterial : node.material;
+    if (isolateMaterials && mat && !overrideMaterial) {
         if (auto copy = cloneMaterial(*mat)) mat = copy;
     }
 
@@ -183,7 +183,7 @@ void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Trans
     }
 
     for (const auto& child : node.children) {
-        compileNode(*child, outScene, world, isolateMaterials);
+        compileNode(*child, outScene, world, isolateMaterials, overrideMaterial);
     }
 }
 
@@ -227,8 +227,9 @@ AABB SceneGraph::worldBounds() const {
 
 namespace photon {
 
-void SceneGraph::compileInto(Scene& outScene, bool isolateMaterials) const {
-    compileNode(*m_root, outScene, Transform{}, isolateMaterials);
+void SceneGraph::compileInto(Scene& outScene, bool isolateMaterials,
+                             const std::shared_ptr<Material>& overrideMaterial) const {
+    compileNode(*m_root, outScene, Transform{}, isolateMaterials, overrideMaterial);
 }
 
 // ── Hiyerarşi düzenleme ──────────────────────────────────────────────────

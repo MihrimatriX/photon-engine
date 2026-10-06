@@ -65,13 +65,27 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
   - Ctrl+D ile çoğaltılan kopyalar malzemeyi paylaşır; ayırmak için Malzeme
     sekmesinde "Bağımsız yap".
 
-6) KISAYOLLAR (uygulamada F1)
+  - Temel şekiller: Kütüphane > Model sekmesinden tıklayın (sahnenin yanına gelir) ya da
+    viewport'ta istediğiniz yüzeye sürükleyin. Ekle menüsünde de var.
+
+6) GÖRÜNTÜ MODLARI (Z ya da araç çubuğundaki mod düğmesi)
+-------------------------------------------------------
+  Render     : ışın izleme, son görüntü (malzemeler, ışık, yansıma)
+  Kil        : ışın izleme, tüm yüzeyler mat gri — ışığı ve formu değerlendirmek için
+  Katı       : ekran kartında anında çizim; büyük modelde yerleştirme için
+  Tel kafes  : üçgen ağı (arkadaki çizgiler gizli)
+  Normaller  : yüzey yönleri renkli — ters dönmüş yüzleri bulmak için
+  "Tel kafes bindir": Render ya da Kil görüntüsünün üstüne üçgen ağını çizer.
+  Son render (Ctrl+P) her zaman gerçek malzemelerle alınır.
+
+7) KISAYOLLAR (uygulamada F1)
 -----------------------------
   Sol fare: döndür   Orta/sağ fare: kaydır   Tekerlek: yakınlaş   Çift tık: döndürme merkezi
   F: seçime odaklan   Shift+A: tümünü kadrajla   1/2/3/4: ön/yan/üst/dörtte üç
   Q/W/E/R: seç/taşı/döndür/ölçekle   G: zemine oturt   T: turntable   Del: sil   Ctrl+D: çoğalt
   Ctrl+tık: seçime ekle   Ctrl+A: tümünü seç   Ctrl+G / Ctrl+Shift+G: grupla / çöz   F2: ad
   H: gizle   I: yalnız seçim   Alt+H: hepsini göster   Ctrl (sürüklerken): adımlı
+  Z / Shift+Z: görüntü modu ileri / geri
   Ctrl+C / Ctrl+V: malzeme kopyala/yapıştır   Ctrl+Z / Ctrl+Y: geri al/yinele
   Ctrl+O: model   Ctrl+S: kaydet   Ctrl+P: render   Ctrl+E: viewport görüntüsü   F5: yeniden başlat
 

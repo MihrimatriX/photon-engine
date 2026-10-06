@@ -48,8 +48,60 @@ void Application::rebuildScene(bool interactive) {
 
 // Belgeden yeni, değişmez bir render sahnesi kurar ve viewport'a verir. Eski
 // sahne render thread'i işini bitirene kadar shared_ptr ile yaşamaya devam eder.
+// Kil yalnız viewport içindir: son render (isolate) her zaman gerçek malzemelerle.
 std::shared_ptr<Scene> Application::buildScene(bool isolate) {
-    return buildRenderScene(m_s.graph, m_s.lights, m_s.environment, m_s.envCache, isolate);
+    return buildRenderScene(m_s.graph, m_s.lights, m_s.environment, m_s.envCache, isolate,
+                            !isolate && m_s.viewMode == ViewMode::Clay);
+}
+
+void Application::setViewMode(ViewMode mode) {
+    if (isRasterMode(mode) && !m_rasterOk) {
+        setStatus("GPU görüntü modları bu ekran kartında kullanılamıyor", true);
+        return;
+    }
+    const bool clayChanged = (mode == ViewMode::Clay) != (m_s.viewMode == ViewMode::Clay);
+    m_s.viewMode = mode;
+    if (clayChanged) rebuildScene();
+    setStatus(std::string("Görüntü: ") + viewModeName(mode));
+}
+
+void Application::addPrimitive(PrimitiveKind kind, const Vec3f* at) {
+    pushUndo();
+    auto node = std::make_unique<SceneNode>(primitiveName(kind), SceneNodeType::Mesh);
+    node->mesh = makePrimitiveMesh(kind);
+    if (const MaterialPreset* p = m_s.materials.findById("matte_white_plastic"))
+        node->material = MaterialLibrary::createMaterial(*p);
+    else
+        node->material = std::make_shared<DisneyMaterial>(Color3f(0.8f), 0.0f, 0.5f, 0.5f);
+    // Boyut: sahnedeki nesnelerin TİPİK boyu (en üst seviye nesnelerin en büyük
+    // kenarlarının ortancası). Sahnenin toplam boyuna bağlansaydı her yeni şekil
+    // sahneyi büyütür, bir sonraki daha büyük gelirdi. Boş sahnede 1 birim.
+    // Konum: bırakılan nokta ya da sahnenin sağında, zemin hizasında.
+    const AABB box = m_s.graph.worldBounds();
+    const bool empty = box.pMin.x > box.pMax.x;
+    std::vector<float> sizes;
+    for (const auto& c : m_s.graph.root()->children) {
+        const AABB b = SceneGraph::nodeWorldBounds(*c);
+        if (b.pMin.x <= b.pMax.x) sizes.push_back(std::max({b.pMax.x - b.pMin.x, b.pMax.y - b.pMin.y, b.pMax.z - b.pMin.z}));
+    }
+    float size = 1.0f;
+    if (!sizes.empty()) {
+        std::nth_element(sizes.begin(), sizes.begin() + static_cast<std::ptrdiff_t>(sizes.size() / 2), sizes.end());
+        size = std::max(1e-3f, sizes[sizes.size() / 2]);
+    }
+    Vec3f pos;
+    if (at) pos = *at;
+    else if (empty) pos = Vec3f(0.0f);
+    else pos = Vec3f(box.pMax.x + size * 0.75f, box.pMin.y, (box.pMin.z + box.pMax.z) * 0.5f);
+    node->localTransform = Transform::translate(pos) * Transform::scale(Vec3f(size));
+    const uint64_t uid = node->uid;
+    const std::string name = node->name;
+    m_s.graph.root()->addChild(std::move(node));
+    selectNode(uid);
+    m_s.rightTab = 0;
+    m_s.gizmoOp = 1; // hemen yerleştirilebilsin
+    markDocumentChanged();
+    setStatus("Eklendi: " + name + " (W ile taşıyın)");
 }
 
 void Application::compileIfDirty() {

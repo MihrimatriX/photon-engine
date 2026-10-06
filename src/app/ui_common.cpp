@@ -25,14 +25,14 @@ bool ThumbCard(const char* id, unsigned int texture, const char* label, const Im
                bool active, const ImVec4& fallbackColor) {
     const Palette& pal = palette();
     ImGui::PushID(id);
-    const float textH = label ? ImGui::GetTextLineHeight() + 6.0f : 0.0f;
+    const float textH = label ? ImGui::GetTextLineHeight() + 4.0f : 0.0f;
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const ImVec2 size(imageSize.x, imageSize.y + textH);
     const bool clicked = ImGui::InvisibleButton("card", size);
     const bool hovered = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 imgMax(p.x + imageSize.x, p.y + imageSize.y);
-    const float r = 8.0f;
+    const float r = 6.0f;
     dl->AddRectFilled(p, imgMax, col(pal.bg2), r);
     if (texture) {
         dl->AddImageRounded(static_cast<ImTextureID>(static_cast<intptr_t>(texture)), p, imgMax, ImVec2(0, 0),
@@ -57,7 +57,7 @@ bool ThumbCard(const char* id, unsigned int texture, const char* label, const Im
             text += "…";
         }
         const ImVec2 ts = ImGui::CalcTextSize(text.c_str());
-        dl->AddText(ImVec2(p.x + (imageSize.x - ts.x) * 0.5f, imgMax.y + 4.0f),
+        dl->AddText(ImVec2(p.x + (imageSize.x - ts.x) * 0.5f, imgMax.y + 2.0f),
                     col(active ? pal.text : (hovered ? pal.text : pal.textDim)), text.c_str());
     }
     ImGui::PopID();

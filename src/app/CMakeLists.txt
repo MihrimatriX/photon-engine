@@ -3,6 +3,7 @@ add_executable(photon_app WIN32
     main_app.cpp
     application.cpp
     render_controller.cpp
+    raster_view.cpp
     thumbnails.cpp
     scene_ops.cpp
     final_render.cpp

@@ -49,6 +49,36 @@ main_app.cpp — photon_app giriş noktası: komut satırı seçenekleri ve hata
 --screenshot: arayüzü çizer, viewport en az --spp örneğe ulaşınca pencerenin
 ekran görüntüsünü alır ve çıkar (otomatik görsel kontrol için).
 
+### `src/app/raster_view.cpp`
+
+raster_view.cpp — GPU görüntü modlarının OpenGL 3.3 çizimi.
+
+Windows'un opengl32.dll'i yalnız OpenGL 1.1 işlevlerini dışa verir; VAO, shader,
+FBO gibi 3.x işlevleri sürücüden adresleriyle istenir (glfwGetProcAddress). Gereken
+~40 işlev aşağıdaki listeden işaretçi olarak yüklenir; biri eksikse modlar kapanır
+ve viewport ışın izlenmiş görüntüyle çalışmaya devam eder.
+
+Çizim sırası (tam modlar):
+  1. Arka plan rengiyle temizle.
+  2. Yüzeyler: Katı → aydınlatılmış renk, Normaller → normal rengi, Tel kafes →
+     zemine yakın koyu renk (yalnız arkadaki çizgileri gizlemek için). Yüzeyler
+     derinlikte biraz geri itilir (polygon offset) ki aynı üçgenin kenar çizgisi
+     kendi yüzeyiyle "z-fighting" yapmadan önde kalsın.
+  3. Tel kafes modunda kenarlar (glPolygonMode GL_LINE).
+  4. Zemin ızgarası: derinlik testli (nesneler önünü kapatır), yazmasız, uzakta söner.
+Bindirme (overlay): şeffaf zemin, yüzeyler yalnız derinliğe yazılır (renk maskesi
+kapalı), sonra görünür kenarlar. Çıktı ışın izlenmiş görüntünün üstüne konur.
+
+### `src/app/raster_view.h`
+
+raster_view.h — Viewport'un GPU (OpenGL 3.3) görüntü modları: Katı, Tel kafes,
+Normaller ve ışın izlenmiş görüntünün üstüne bindirilen tel kafes.
+
+Işın izleyici ürünün "son" görüntüsünü verir ama büyük modelde yavaştır; bu modlar
+geometriyi her karede rasterleştirerek modelleme/yerleştirme sırasında anında
+geri bildirim verir (KeyShot'ın "geometri görünümü", Blender'ın "solid" modu).
+Çıktı ekran dışı bir dokuya (FBO, 4× MSAA) çizilir; viewport onu resim olarak koyar.
+
 ### `src/app/render_controller.cpp`
 
 render_controller.cpp — Viewport render thread'inin döngüsü ve yayınlama mantığı.
@@ -763,6 +793,23 @@ ağacına bağlar.
 ### `src/scene/model_import.h`
 
 model_import.h — OBJ/glTF dosyasını sahne ağacına bir grup düğümü olarak yükleme.
+
+### `src/scene/primitives.cpp`
+
+primitives.cpp — Temel şekillerin üçgen ağlarının üretimi.
+
+Yuvarlak yüzeyler (küre, silindir yanı, koni yanı, simit) yumuşak normalli tek
+bir köşe ızgarasıdır: u halkada, v boyda dolaşır; dikiş (u = 1) köşesi ayrı tutulur
+ki UV 1'e kadar gitsin. Düz yüzler (küpün yüzleri, kapaklar) kendi köşelerini alır:
+köşede iki yüz farklı normale ihtiyaç duyar, paylaşılırsa kenar yumuşak görünürdü.
+
+### `src/scene/primitives.h`
+
+primitives.h — Sahneye eklenebilen temel şekiller (küp, küre, silindir, koni,
+düzlem, simit). Hepsi 1 birimlik kutuya sığar: x ve z'de [-0.5, 0.5], y'de
+[0, yükseklik] — tabanı y = 0'da durur, böylece zemine "konulmuş" olarak gelir.
+Üçgenler dışarıdan bakınca saat yönünün tersine (CCW) örülür: geometrik normal
+dışa bakar; cam gibi kırılan malzemeler içeri/dışarıyı buna göre ayırt eder.
 
 ### `src/scene/project_io.cpp`
 

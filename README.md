@@ -107,6 +107,8 @@ arayüzü çizip ekran görüntüsü alır ve çıkar (görsel regresyon için).
 4. Parçayı tıklayıp **W / E / R** ile taşıyın, döndürün, ölçekleyin (Ctrl+tık ile birden çok nesne;
    Ctrl basılıyken adımlı). Sahne panelinde sürükleyerek gruplara taşıyın, **Ctrl+G** ile gruplayın,
    **H / I / Alt+H** ile gizleyin, yalnız seçimi gösterin, hepsini gösterin.
+   Temel şekilleri Kütüphane → Model'den sürükleyin. **Z** görüntü modunu değiştirir: Render, Kil,
+   Katı / Tel kafes / Normaller (GPU, anında) ve Render üstüne tel kafes bindirme.
 5. **Render** (Ctrl+P) → çözünürlük ve kaliteyi seçip başlatın. Çıktı varsayılan olarak `Resimler/PhotonEngine`.
 
 Tüm kısayollar: **F1**.

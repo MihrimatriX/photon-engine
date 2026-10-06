@@ -106,6 +106,7 @@ Application::~Application() {
     if (m_window) {
         if (m_viewTex) glDeleteTextures(1, &m_viewTex);
         if (m_checkerTex) glDeleteTextures(1, &m_checkerTex);
+        m_raster.release(); // GL bağlamı hâlâ geçerliyken
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
         ImGui::DestroyContext();
@@ -150,6 +151,8 @@ void Application::initImGui() {
     ImGui_ImplGlfw_InitForOpenGL(m_window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
     m_checkerTex = makeCheckerTexture();
+    m_rasterOk = m_raster.init();
+    if (!m_rasterOk) m_s.viewMode = ViewMode::Render;
 }
 
 void Application::setStatus(const std::string& msg, bool error) {
@@ -295,6 +298,11 @@ void Application::handleShortcuts() {
     if (pressed(ImGuiKey_H)) { io.KeyAlt ? showAllNodes() : toggleSelectionVisibility(); }
     if (io.KeyAlt) return; // Alt+F4 vb. tek tuş kısayollarını tetiklemesin
     if (pressed(ImGuiKey_I)) isolateSelection();
+    if (pressed(ImGuiKey_Z)) {
+        // Z: görüntü modları arasında döngü (GPU yoksa yalnız Render ↔ Kil).
+        const int count = m_rasterOk ? kViewModeCount : 2;
+        setViewMode(static_cast<ViewMode>((static_cast<int>(m_s.viewMode) + (shift ? count - 1 : 1)) % count));
+    }
     if (pressed(ImGuiKey_F2)) beginRename();
     // Tek tuşlu kısayollar yalnız viewport ya da sahne paneli üzerindeyken değil,
     // metin girişi yokken her yerde çalışır (KeyShot gibi).
@@ -372,7 +380,8 @@ void Application::frame(float dt) {
     m_s.viewport.setDenoise(m_s.denoise);
     m_s.viewport.setTargetSpp(m_s.previewSpp);
     m_s.viewport.setTransparentPreview(m_s.environment.background.mode == Background::Mode::Transparent);
-    m_s.viewport.setPaused(m_s.finalJob.active.load());
+    // GPU modlarında ışın izleyici durur (CPU boşa yanmasın); sahne yine derlenir (seçim ışınları için).
+    m_s.viewport.setPaused(m_s.finalJob.active.load() || isRasterMode(m_s.viewMode));
     uploadViewportFrame();
 
     ImGui_ImplOpenGL3_NewFrame();
@@ -388,6 +397,7 @@ void Application::frame(float dt) {
     drawRenderDialog();
     drawAboutWindows();
     ImGui::Render();
+    renderRasterView();
 
     int dw = 0, dh = 0;
     glfwGetFramebufferSize(m_window, &dw, &dh);
@@ -435,6 +445,16 @@ int Application::run() {
         m_s.gizmoOp = 1;
     }
     else if (ui == "filter") m_s.sceneFilter = "küre";
+    else if (ui == "solid") setViewMode(ViewMode::Solid);
+    else if (ui == "wire") { setViewMode(ViewMode::Wire); selectFirst(); }
+    else if (ui == "normals") setViewMode(ViewMode::Normals);
+    else if (ui == "clay") setViewMode(ViewMode::Clay);
+    else if (ui == "overlay") m_s.wireOverlay = true;
+    else if (ui == "shapes") {
+        for (int k = 0; k < kPrimitiveCount; ++k) addPrimitive(static_cast<PrimitiveKind>(k));
+        m_s.leftTab = 3;
+        frameAll();
+    }
     else if (ui == "lightgizmo") {
         selectLight(0);
         m_s.gizmoOp = 1;
@@ -470,8 +490,9 @@ int Application::run() {
         if (!m_opts.screenshotPath.empty()) {
             const float elapsed = std::chrono::duration<float>(now - started).count();
             const ViewportStats st = m_s.viewport.stats();
-            const bool ready = frames > 30 && !st.interactive && st.spp >= m_opts.screenshotSpp && m_jobs.empty() &&
-                               !m_s.thumbs.busy();
+            const bool gpuView = isRasterMode(m_s.viewMode);
+            const bool ready = frames > 30 && !st.interactive && (gpuView || st.spp >= m_opts.screenshotSpp) &&
+                               m_jobs.empty() && !m_s.thumbs.busy();
             if (ready || elapsed > m_opts.screenshotTimeout) {
                 takeScreenshot(m_opts.screenshotPath);
                 glfwSwapBuffers(m_window);

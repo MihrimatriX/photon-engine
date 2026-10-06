@@ -38,7 +38,7 @@ struct Fonts {
     ImFont* regular = nullptr;
     ImFont* medium = nullptr;
     ImFont* semibold = nullptr;
-    float baseSize = 15.0f;   ///< DPI ölçeksiz gövde metni boyutu
+    float baseSize = 14.0f;   ///< DPI ölçeksiz gövde metni boyutu
 };
 
 Fonts& fonts();
