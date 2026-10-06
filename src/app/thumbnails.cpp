@@ -101,7 +101,9 @@ void ThumbnailBaker::requestMaterial(const std::string& key, const MaterialPrese
         auto it = std::find_if(m_jobs.begin(), m_jobs.end(), [&](const Job& q) { return q.key == key; });
         if (it != m_jobs.end()) *it = j;
         else {
-            m_jobs.push_back(j);
+            // Zorla istenen (seçili malzemenin önizlemesi) kuyruğun başına: kullanıcı bekliyor.
+            if (force) m_jobs.push_front(j);
+            else m_jobs.push_back(j);
             ++m_pending;
         }
     }

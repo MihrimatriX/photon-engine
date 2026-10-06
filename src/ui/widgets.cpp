@@ -273,12 +273,13 @@ bool filledSlider(float fraction, Fn&& draw) {
     dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), col(pal.bg2), r);
     const float fx = p.x + w * std::clamp(fraction, 0.0f, 1.0f);
     if (fx > p.x + 1.0f) {
-        dl->AddRectFilled(p, ImVec2(fx, p.y + h), col(active ? pal.accent : pal.bg3, active ? 0.45f : 1.0f), r,
+        dl->AddRectFilled(p, ImVec2(fx, p.y + h), active ? col(pal.accent, 0.45f) : IM_COL32(60, 64, 73, 255), r,
                           fx >= p.x + w - r ? ImDrawFlags_RoundCornersAll : ImDrawFlags_RoundCornersLeft);
     }
-    // İnce işaretçi çizgisi: değerin tam yerini gösterir.
-    dl->AddRectFilled(ImVec2(std::max(p.x, fx - 1.5f), p.y + 4.0f), ImVec2(std::min(p.x + w, fx + 1.5f), p.y + h - 4.0f),
-                      col(active || hovered ? pal.accent : pal.textDim), 1.5f);
+    // İnce işaretçi: yalnız üzerine gelince/sürüklerken ve alt kenarda (sayının üstüne binmesin).
+    if (active || hovered)
+        dl->AddRectFilled(ImVec2(std::max(p.x, fx - 1.5f), p.y + h - 3.0f), ImVec2(std::min(p.x + w, fx + 1.5f), p.y + h),
+                          col(pal.accent), 1.0f);
     dl->ChannelsMerge();
     return changed;
 }

@@ -34,7 +34,7 @@
    "enabled": true,
    "roughness": 0.550000011920929
   },
-  "hdr": "../../build/release/src/app/assets/environments/studio_small_09_1k.hdr",
+  "hdr": "../../assets/environments/studio_small_09_1k.hdr",
   "horizon": [
    0.550000011920929,
    0.550000011920929,
@@ -252,7 +252,7 @@
     }
    ],
    "name": "Kaide",
-   "source": "../../build/release/src/app/assets/models/product_stand.obj",
+   "source": "../../assets/models/product_stand.obj",
    "type": "group",
    "visible": true,
    "xf": [
@@ -303,7 +303,7 @@
     }
    ],
    "name": "Krom Küre",
-   "source": "../../build/release/src/app/assets/models/sphere.obj",
+   "source": "../../assets/models/sphere.obj",
    "type": "group",
    "visible": true,
    "xf": [
@@ -354,7 +354,7 @@
     }
    ],
    "name": "Cam Küre",
-   "source": "../../build/release/src/app/assets/models/sphere.obj",
+   "source": "../../assets/models/sphere.obj",
    "type": "group",
    "visible": true,
    "xf": [
@@ -405,7 +405,7 @@
     }
    ],
    "name": "Küp",
-   "source": "../../build/release/src/app/assets/models/cube.obj",
+   "source": "../../assets/models/cube.obj",
    "type": "group",
    "visible": true,
    "xf": [
@@ -456,7 +456,7 @@
     }
    ],
    "name": "Altın Küre",
-   "source": "../../build/release/src/app/assets/models/sphere.obj",
+   "source": "../../assets/models/sphere.obj",
    "type": "group",
    "visible": true,
    "xf": [
