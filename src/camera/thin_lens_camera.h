@@ -1,3 +1,6 @@
+// thin_lens_camera.h — İnce mercek yaklaşımıyla alan derinliği (DoF) olan perspektif kamera.
+// apertureRadius = mercek açıklığının yarıçapı (büyüdükçe bulanıklık artar),
+// focusDistance = keskin görünen düzlemin kameraya uzaklığı.
 #pragma once
 
 /// @file thin_lens_camera.h

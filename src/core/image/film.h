@@ -1,3 +1,6 @@
+// film.h — Film: örnek biriktirici (fiziksel kameradaki film/sensörün karşılığı).
+// Her piksel için radyans toplamı ve örnek sayısı tutulur; piksel değeri = toplam / sayı,
+// yani Monte Carlo tahmincisinin ortalaması. resolve() bu ortalamayı Image'a çevirir.
 #pragma once
 
 /// @file film.h

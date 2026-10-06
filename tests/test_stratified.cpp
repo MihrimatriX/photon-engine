@@ -1,3 +1,6 @@
+// test_stratified.cpp — Tabakalı örnekleyici testleri: bir pikselin 16 örneği 4×4 ızgarada her
+// hücreye tam bir kez düşmeli, aynı tohumla tekrar üretilebilmeli; üretim render'ında Sobol
+// örnekleyicinin seçildiği de doğrulanır.
 #include <gtest/gtest.h>
 #include "samplers/stratified_sampler.h"
 #include "samplers/independent_sampler.h"

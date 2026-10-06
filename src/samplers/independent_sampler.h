@@ -1,3 +1,4 @@
+// independent_sampler.h — Bağımsız (beyaz gürültü) örnekleyici; referans/test için temel çizgi.
 #pragma once
 
 /// @file independent_sampler.h

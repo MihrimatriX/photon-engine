@@ -1,3 +1,6 @@
+// test_bvh.cpp — BVH testleri: doğru nesneye çarpma / ıskalama ve mesh, tek tek üçgenler ile BVH
+// sonuçlarının (t, normal) birebir aynı olması. Hızlandırma yapısı sonucu değiştirmemeli,
+// yalnız hızlandırmalı.
 #include "gtest/gtest.h"
 #include "geometry/bvh.h"
 #include "geometry/sphere.h"

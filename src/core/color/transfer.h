@@ -1,3 +1,6 @@
+// transfer.h — sRGB aktarım fonksiyonları (encode/decode) ve 8-bit nicemleme + TPDF dither.
+// Renderer doğrusal ışıkla çalışır; 8-bit dosyalar ve ekran ise algısal olarak düzgün
+// (gamma benzeri) kodlama bekler. Bu iki dünya arasındaki köprü burasıdır.
 #pragma once
 
 /// @file transfer.h

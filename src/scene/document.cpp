@@ -6,6 +6,8 @@
 #include "core/image/image_io.h"
 #include "core/math/constants.h"
 #include "core/platform/path.h"
+#include "geometry/mesh.h"
+#include "materials/disney.h"
 
 #include <nlohmann/json.hpp>
 
@@ -166,7 +168,8 @@ std::vector<StudioPreset> loadStudioPresets(const std::string& dir) {
 // Işıklar sahnenin sınır küresine göre yerleşir: konum = merkez + R·mesafe·yön,
 // boyut = R·size. Mesafe ve boyut birlikte ölçeklendiği için ışığın konudan
 // görünen katı açısı (dolayısıyla aydınlatma) sahne ölçeğinden bağımsızdır.
-std::vector<LightDesc> placeStudioLights(const StudioPreset& preset, const AABB& sceneBounds) {
+std::vector<LightDesc> placeStudioLights(const StudioPreset& preset, const AABB& sceneBounds,
+                                         float azimuthOffsetDeg) {
     Vec3f center(0.0f, 0.5f, 0.0f);
     float radius = 1.0f;
     if (sceneBounds.pMin.x <= sceneBounds.pMax.x) {
@@ -180,14 +183,44 @@ std::vector<LightDesc> placeStudioLights(const StudioPreset& preset, const AABB&
         d.name = r.name;
         d.color = r.color;
         d.intensity = r.intensity;
-        d.azimuthDeg = r.azimuthDeg;
+        d.azimuthDeg = r.azimuthDeg + azimuthOffsetDeg;
         d.elevationDeg = r.elevationDeg;
-        d.position = center + sphericalDir(r.azimuthDeg, r.elevationDeg) * (radius * r.distance);
+        d.position = center + sphericalDir(d.azimuthDeg, r.elevationDeg) * (radius * r.distance);
         d.target = center;
         d.width = d.height = radius * r.size;
         out.push_back(d);
     }
     return out;
+}
+
+} // namespace photon
+
+namespace photon {
+
+std::shared_ptr<Scene> buildRenderScene(const SceneGraph& graph, const std::vector<LightDesc>& lights,
+                                        const EnvironmentDesc& env, EnvironmentCache& cache, bool isolate) {
+    auto scene = std::make_shared<Scene>();
+    graph.compileInto(*scene, isolate);
+    // Otomatik zemin: modellerin altına, sahne boyutunun çok katı genişlikte bir dörtgen.
+    if (env.groundEnabled && !graph.empty()) {
+        const AABB box = graph.worldBounds();
+        if (box.pMin.x <= box.pMax.x) {
+            const GroundQuad g = placeGroundUnder(box);
+            auto mat = std::make_shared<DisneyMaterial>(env.groundColor, 0.0f, env.groundRoughness, 0.5f);
+            const Vec3f p0 = g.corner, p1 = g.corner + g.edgeU, p2 = p1 + g.edgeV, p3 = g.corner + g.edgeV;
+            auto mesh = std::make_shared<TriangleMesh>(
+                std::vector<Vec3f>{p0, p1, p2, p3}, std::vector<Vec3f>{}, std::vector<Vec2f>{},
+                std::vector<uint32_t>{0, 2, 1, 0, 3, 2}, mat.get());
+            scene->retainMaterial(mat);
+            scene->tagShape(mesh.get(), kGroundNodeUid);
+            scene->addShape(mesh);
+        }
+    }
+    for (const auto& l : buildLights(lights)) scene->addLight(l);
+    scene->setEnvironment(buildEnvironment(env, cache));
+    scene->setBackground(env.background);
+    scene->buildAccelerator();
+    return scene;
 }
 
 } // namespace photon

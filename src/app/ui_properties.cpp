@@ -354,9 +354,9 @@ void Application::drawMaterialProps() {
             ui::Prop("Renk (geçirgenlik)");
             if (colorEdit("##tint", tint)) { undoPoint(*this, ImGui::GetID("tint")); changed = true; }
             ui::Prop("Kırılma indisi", "Işığın camda ne kadar büküleceği. Su 1.33, cam 1.5, elmas 2.42");
-            if (ImGui::SliderFloat("##ior", &ior, 1.0f, 2.6f, "%.3f")) { undoPoint(*this, ImGui::GetID("ior")); changed = true; }
+            if (ui::SliderF("##ior", &ior, 1.0f, 2.6f, "%.3f")) { undoPoint(*this, ImGui::GetID("ior")); changed = true; }
             ui::Prop("Pürüzlülük", "0 = berrak cam, yükseldikçe buzlu cam");
-            if (ImGui::SliderFloat("##gr", &rough, 0.0f, 1.0f, "%.3f")) { undoPoint(*this, ImGui::GetID("gr")); changed = true; }
+            if (ui::SliderF("##gr", &rough, 0.0f, 1.0f, "%.3f")) { undoPoint(*this, ImGui::GetID("gr")); changed = true; }
             ui::EndProps();
         }
         ImGui::Spacing();
@@ -389,7 +389,7 @@ void Application::drawMaterialProps() {
     auto slider = [&](const char* label, const char* id, float value, float lo, float hi,
                       const std::function<void(float)>& set, const char* tip = nullptr, const char* fmt = "%.2f") {
         ui::Prop(label, tip);
-        if (ImGui::SliderFloat(id, &value, lo, hi, fmt)) {
+        if (ui::SliderF(id, &value, lo, hi, fmt)) {
             undoPoint(*this, ImGui::GetID(id));
             editLive([&] { set(value); });
         }
@@ -444,7 +444,7 @@ void Application::drawMaterialProps() {
                 ui::Prop("Renk");
                 if (colorEdit("##ec", ec)) { undoPoint(*this, ImGui::GetID("ec")); changed = true; }
                 ui::Prop("Güç", "0 = kapalı. Sahnede ışık kaynağı olarak da örneklenir.");
-                if (ImGui::SliderFloat("##es", &s, 0.0f, 50.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) {
+                if (ui::SliderF("##es", &s, 0.0f, 50.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) {
                     undoPoint(*this, ImGui::GetID("es"));
                     changed = true;
                 }
@@ -464,6 +464,22 @@ void Application::drawMaterialProps() {
             if (textureSlot("Normal", nm)) { pushUndo(); editLive([&] { d->setNormalMap(nm); }); }
             if (textureSlot("Pürüzlülük", r)) { pushUndo(); editLive([&] { d->setRoughnessMap(r); }); }
             if (textureSlot("Metalik", m)) { pushUndo(); editLive([&] { d->setMetalnessMap(m); }); }
+            ui::EndProps();
+        }
+        int mapping = d->textureMapping() == DisneyMaterial::TextureMapping::Box ? 1 : 0;
+        const char* maps[] = {"UV", "Kutu (UV'siz modeller)"};
+        if (ui::Segmented("mapping", &mapping, maps, 2)) {
+            pushUndo();
+            editLive([&] { d->setTextureMapping(mapping == 1 ? DisneyMaterial::TextureMapping::Box : DisneyMaterial::TextureMapping::UV); });
+        }
+        ImGui::Spacing();
+        if (ui::BeginProps("texscale", 0.34f)) {
+            ui::Prop("Tekrar", "UV: doku kaç kez tekrarlansın. Kutu: 1 birimde kaç tekrar.");
+            float s = d->textureScale();
+            if (ui::SliderF("##ts", &s, 0.01f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) {
+                undoPoint(*this, ImGui::GetID("ts"));
+                editLive([&] { d->setTextureScale(s); });
+            }
             ui::EndProps();
         }
         ui::Hint("Dokular modelin UV koordinatlarıyla eşlenir. Normal/pürüzlülük haritaları doğrusal okunur.");
@@ -498,14 +514,14 @@ void Application::drawEnvironmentProps() {
         if (ui::BeginProps("env")) {
             ui::Prop("Parlaklık", "HDRI'ın ışık katkısı (çarpan)");
             float inten = e.intensity;
-            if (ImGui::SliderFloat("##ei", &inten, 0.0f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) {
+            if (ui::SliderF("##ei", &inten, 0.0f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) {
                 undoPoint(*this, ImGui::GetID("ei"));
                 e.intensity = inten;
                 changed = interactive = true;
             }
             ui::Prop("Döndürme", "Işığın geldiği yönü değiştirir (yansımaları da kaydırır)");
             float rot = e.rotationDeg;
-            if (ImGui::SliderFloat("##er", &rot, -180.0f, 180.0f, "%.0f°")) {
+            if (ui::SliderF("##er", &rot, -180.0f, 180.0f, "%.0f°")) {
                 undoPoint(*this, ImGui::GetID("er"));
                 e.rotationDeg = rot;
                 changed = interactive = true;
@@ -555,7 +571,7 @@ void Application::drawEnvironmentProps() {
                 if (colorEdit("##gc", e.groundColor)) { undoPoint(*this, ImGui::GetID("gc")); changed = interactive = true; }
                 ui::Prop("Pürüzlülük", "Düşük değer zemine yansıma verir (parlak stüdyo zemini)");
                 float r = e.groundRoughness;
-                if (ImGui::SliderFloat("##gr", &r, 0.02f, 1.0f, "%.2f")) {
+                if (ui::SliderF("##gr", &r, 0.02f, 1.0f, "%.2f")) {
                     undoPoint(*this, ImGui::GetID("gr"));
                     e.groundRoughness = r;
                     changed = interactive = true;
@@ -621,7 +637,7 @@ void Application::drawLightProps() {
         ui::Prop("Güç");
         float inten = l.intensity;
         const float maxI = l.type == LightDesc::Type::Point ? 1e5f : 200.0f;
-        if (ImGui::SliderFloat("##li", &inten, 0.0f, maxI, "%.2f", ImGuiSliderFlags_Logarithmic)) {
+        if (ui::SliderF("##li", &inten, 0.0f, maxI, "%.2f", ImGuiSliderFlags_Logarithmic)) {
             undoPoint(*this, ImGui::GetID("li"));
             l.intensity = inten;
             changed = true;
@@ -629,9 +645,9 @@ void Application::drawLightProps() {
         // Konum: hedef etrafında küresel koordinatlar (yatay açı, yükseklik, mesafe).
         if (l.type == LightDesc::Type::Directional) {
             ui::Prop("Yatay açı");
-            if (ImGui::SliderFloat("##az", &l.azimuthDeg, -180.0f, 180.0f, "%.0f°")) { undoPoint(*this, ImGui::GetID("az")); changed = true; }
+            if (ui::SliderF("##az", &l.azimuthDeg, -180.0f, 180.0f, "%.0f°")) { undoPoint(*this, ImGui::GetID("az")); changed = true; }
             ui::Prop("Yükseklik");
-            if (ImGui::SliderFloat("##el", &l.elevationDeg, 1.0f, 90.0f, "%.0f°")) { undoPoint(*this, ImGui::GetID("el")); changed = true; }
+            if (ui::SliderF("##el", &l.elevationDeg, 1.0f, 90.0f, "%.0f°")) { undoPoint(*this, ImGui::GetID("el")); changed = true; }
         } else {
             Vec3f rel = l.position - l.target;
             float dist = std::max(1e-4f, rel.length());
@@ -639,9 +655,9 @@ void Application::drawLightProps() {
             float el = std::asin(std::clamp(rel.y / dist, -1.0f, 1.0f)) * RAD_TO_DEG;
             bool moved = false;
             ui::Prop("Yatay açı", "Konunun etrafında döndür");
-            if (ImGui::SliderFloat("##az", &az, -180.0f, 180.0f, "%.0f°")) { undoPoint(*this, ImGui::GetID("az")); moved = true; }
+            if (ui::SliderF("##az", &az, -180.0f, 180.0f, "%.0f°")) { undoPoint(*this, ImGui::GetID("az")); moved = true; }
             ui::Prop("Yükseklik");
-            if (ImGui::SliderFloat("##el", &el, -89.0f, 89.0f, "%.0f°")) { undoPoint(*this, ImGui::GetID("el")); moved = true; }
+            if (ui::SliderF("##el", &el, -89.0f, 89.0f, "%.0f°")) { undoPoint(*this, ImGui::GetID("el")); moved = true; }
             ui::Prop("Mesafe");
             if (ImGui::DragFloat("##dist", &dist, dist * 0.01f, 1e-3f, 1e6f, "%.3f")) { undoPoint(*this, ImGui::GetID("dist")); moved = true; }
             if (moved) {
@@ -693,10 +709,10 @@ void Application::drawCameraProps() {
         ImGui::Spacing();
         if (ui::BeginProps("lens")) {
             ui::Prop("Odak uzaklığı", "Tam kare (36×24 mm) eşdeğeri. Küçük = geniş açı, büyük = tele");
-            if (ImGui::SliderFloat("##fl", &c.focalLengthMm, 10.0f, 300.0f, "%.0f mm", ImGuiSliderFlags_Logarithmic))
+            if (ui::SliderF("##fl", &c.focalLengthMm, 10.0f, 300.0f, "%.0f mm", ImGuiSliderFlags_Logarithmic))
                 c.fov = fovDegreesFromFocalMm(c.focalLengthMm);
             ui::Prop("Görüş açısı");
-            if (ImGui::SliderFloat("##fov", &c.fov, 5.0f, 120.0f, "%.1f°")) c.focalLengthMm = focalMmFromFovDegrees(c.fov);
+            if (ui::SliderF("##fov", &c.fov, 5.0f, 120.0f, "%.1f°")) c.focalLengthMm = focalMmFromFovDegrees(c.fov);
             ui::EndProps();
         }
         const float lens[] = {24, 35, 50, 85, 135};
@@ -720,7 +736,7 @@ void Application::drawCameraProps() {
             if (ui::Toggle("dofen", &dof)) c.aperture = dof ? apertureFromFStop(c.focalLengthMm, c.fStop) : 0.0f;
             if (dof) {
                 ui::Prop("f-durağı", "Küçük sayı = büyük açıklık = daha çok bulanıklık");
-                if (ImGui::SliderFloat("##fs", &c.fStop, 0.7f, 32.0f, "f/%.1f", ImGuiSliderFlags_Logarithmic))
+                if (ui::SliderF("##fs", &c.fStop, 0.7f, 32.0f, "f/%.1f", ImGuiSliderFlags_Logarithmic))
                     c.aperture = apertureFromFStop(c.focalLengthMm, c.fStop);
                 ui::Prop("Odak mesafesi");
                 float fd = effectiveFocusDistance(c);
@@ -736,6 +752,29 @@ void Application::drawCameraProps() {
             ui::Hint("Ölçek: sahne birimi metre kabul edilir.");
         }
     }
+    if (ui::Section(ICON_FILM, "Kayıtlı kameralar")) {
+        int removeIdx = -1;
+        for (int i = 0; i < static_cast<int>(m_s.savedCameras.size()); ++i) {
+            ImGui::PushID(i);
+            const auto& sc = m_s.savedCameras[static_cast<size_t>(i)];
+            if (ImGui::Selectable((std::string(ICON_CAMERA "  ") + sc.name).c_str(), false, ImGuiSelectableFlags_AllowOverlap,
+                                  ImVec2(ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - 6, 0)))
+                m_s.camera = sc.cam;
+            ui::Tooltip("Bu görünüme geç");
+            ImGui::SameLine();
+            if (ui::IconButton(ICON_X, "Sil")) removeIdx = i;
+            ImGui::PopID();
+        }
+        if (removeIdx >= 0) {
+            m_s.savedCameras.erase(m_s.savedCameras.begin() + removeIdx);
+            m_s.documentDirty = true;
+        }
+        if (ui::GhostButton(ICON_PLUS "  Mevcut görünümü kaydet", ImVec2(-FLT_MIN, 0))) {
+            m_s.savedCameras.push_back({"Kamera " + std::to_string(m_s.savedCameras.size() + 1), c});
+            m_s.documentDirty = true;
+        }
+        if (m_s.savedCameras.empty()) ui::Hint("Beğendiğiniz bakış açılarını kaydedip tek tıkla geri dönebilirsiniz.");
+    }
     if (ui::Section(ICON_VIDEO, "Açılar ve hareket")) {
         const float bw = (ImGui::GetContentRegionAvail().x - 12.0f) / 4.0f;
         if (ui::GhostButton("Ön", ImVec2(bw, 0))) applyCameraPreset("front");
@@ -750,7 +789,7 @@ void Application::drawCameraProps() {
             ui::Prop("Turntable");
             ui::Toggle("tt", &c.turntable);
             ui::Prop("Dönüş hızı");
-            ImGui::SliderFloat("##tts", &c.turntableSpeed, 0.05f, 2.0f, "%.2f rad/sn");
+            ui::SliderF("##tts", &c.turntableSpeed, 0.05f, 2.0f, "%.2f rad/sn");
             ui::EndProps();
         }
         if (ui::PrimaryButton(ICON_MAXIMIZE "  Tümünü kadrajla", ImVec2(-FLT_MIN, 0))) frameAll();
@@ -769,7 +808,7 @@ void Application::drawImageProps() {
                 ImGui::EndCombo();
             }
             ui::Prop("Pozlama (EV)", "+1 EV = iki kat parlak. Birikimi sıfırlamaz.");
-            ImGui::SliderFloat("##ev", &m_s.settings.exposure, -5.0f, 5.0f, "%+.2f EV");
+            ui::SliderF("##ev", &m_s.settings.exposure, -5.0f, 5.0f, "%+.2f EV");
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) m_s.settings.exposure = 0.0f;
             ui::EndProps();
         }
@@ -798,7 +837,7 @@ void Application::drawImageProps() {
     if (ui::Section(ICON_GAUGE, "Işık taşıma", false)) {
         if (ui::BeginProps("lt")) {
             ui::Prop("Sekme sayısı", "Işının en çok kaç kez yansıyacağı. Cam ve iç mekân için yüksek tutun.");
-            ImGui::SliderInt("##mb", &m_s.settings.maxBounces, 1, 32);
+            ui::SliderI("##mb", &m_s.settings.maxBounces, 1, 32);
             ui::Prop("Uyarlamalı örnekleme", "Düz bölgelerde örnek atlar (deneysel)");
             ui::Toggle("ad", &m_s.settings.adaptiveSampling);
             ui::EndProps();

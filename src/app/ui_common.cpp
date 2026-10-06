@@ -92,6 +92,9 @@ TRS decompose(const Transform& xf) {
         rz = 0.0f;
     }
     out.rDeg = Vec3f(rx, ry, rz) * RAD_TO_DEG;
+    // -0.0 yerine 0.0 gösterilsin.
+    for (float* c : {&out.rDeg.x, &out.rDeg.y, &out.rDeg.z})
+        if (std::abs(*c) < 1e-4f) *c = 0.0f;
     return out;
 }
 

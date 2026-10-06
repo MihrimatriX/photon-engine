@@ -233,3 +233,67 @@ std::string formatDuration(double seconds) {
 }
 
 } // namespace photon::ui
+
+namespace photon::ui {
+
+namespace {
+
+// Değerin çubuktaki oranı [0,1]. Logaritmik kaydırıcıda log ölçeğinde hesaplanır.
+float sliderFraction(float v, float lo, float hi, bool logarithmic) {
+    if (hi <= lo) return 0.0f;
+    v = std::clamp(v, lo, hi);
+    if (logarithmic) {
+        if (lo > 0.0f) return std::log(v / lo) / std::log(hi / lo);
+        return std::log1p(v - lo) / std::log1p(hi - lo);
+    }
+    return (v - lo) / (hi - lo);
+}
+
+template <typename Fn>
+bool filledSlider(float fraction, Fn&& draw) {
+    const Palette& pal = palette();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::CalcItemWidth();
+    const float h = ImGui::GetFrameHeight();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    // Kanal 0: dolgu (arkada), kanal 1: ImGui kaydırıcısı (çerçeve + metin).
+    dl->ChannelsSplit(2);
+    dl->ChannelsSetCurrent(1);
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(1, 1, 1, 0.04f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(1, 1, 1, 0.06f));
+    ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4(0, 0, 0, 0));
+    const bool changed = draw();
+    const bool active = ImGui::IsItemActive();
+    const bool hovered = ImGui::IsItemHovered();
+    ImGui::PopStyleColor(5);
+    dl->ChannelsSetCurrent(0);
+    const float r = ImGui::GetStyle().FrameRounding;
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), col(pal.bg2), r);
+    const float fx = p.x + w * std::clamp(fraction, 0.0f, 1.0f);
+    if (fx > p.x + 1.0f) {
+        dl->AddRectFilled(p, ImVec2(fx, p.y + h), col(active ? pal.accent : pal.bg3, active ? 0.45f : 1.0f), r,
+                          fx >= p.x + w - r ? ImDrawFlags_RoundCornersAll : ImDrawFlags_RoundCornersLeft);
+    }
+    // İnce işaretçi çizgisi: değerin tam yerini gösterir.
+    dl->AddRectFilled(ImVec2(std::max(p.x, fx - 1.5f), p.y + 4.0f), ImVec2(std::min(p.x + w, fx + 1.5f), p.y + h - 4.0f),
+                      col(active || hovered ? pal.accent : pal.textDim), 1.5f);
+    dl->ChannelsMerge();
+    return changed;
+}
+
+} // namespace
+
+bool SliderF(const char* id, float* v, float vMin, float vMax, const char* fmt, ImGuiSliderFlags flags) {
+    const float f = sliderFraction(*v, vMin, vMax, (flags & ImGuiSliderFlags_Logarithmic) != 0);
+    return filledSlider(f, [&] { return ImGui::SliderFloat(id, v, vMin, vMax, fmt, flags); });
+}
+
+bool SliderI(const char* id, int* v, int vMin, int vMax, const char* fmt, ImGuiSliderFlags flags) {
+    const float f = sliderFraction(static_cast<float>(*v), static_cast<float>(vMin), static_cast<float>(vMax),
+                                   (flags & ImGuiSliderFlags_Logarithmic) != 0);
+    return filledSlider(f, [&] { return ImGui::SliderInt(id, v, vMin, vMax, fmt, flags); });
+}
+
+} // namespace photon::ui

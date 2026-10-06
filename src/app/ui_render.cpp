@@ -135,16 +135,16 @@ void Application::drawRenderDialog() {
     if (ui::Section(ICON_GAUGE, "Kalite")) {
         if (ui::BeginProps("q")) {
             ui::Prop("Örnek sayısı", "Piksel başına ışın sayısı. Daha çok = daha az gürültü, daha uzun süre");
-            ImGui::SliderInt("##spp", &out.spp, 8, 8192, "%d", ImGuiSliderFlags_Logarithmic);
+            ui::SliderI("##spp", &out.spp, 8, 8192, "%d", ImGuiSliderFlags_Logarithmic);
             ui::Prop("Süre sınırı", "0 = yok. Dolunca o ana dek olan örneklerle bitirir");
-            ImGui::SliderFloat("##tl", &out.maxSeconds, 0.0f, 3600.0f, out.maxSeconds > 0 ? "%.0f sn" : "yok",
+            ui::SliderF("##tl", &out.maxSeconds, 0.0f, 3600.0f, out.maxSeconds > 0 ? "%.0f sn" : "yok",
                                ImGuiSliderFlags_Logarithmic);
             ui::Prop("Gürültü giderme");
             ImGui::BeginDisabled(!denoiseAvailable());
             ui::Toggle("odn", &out.denoise);
             ImGui::EndDisabled();
             ui::Prop("Sekme sayısı");
-            ImGui::SliderInt("##mb", &m_s.settings.maxBounces, 1, 32);
+            ui::SliderI("##mb", &m_s.settings.maxBounces, 1, 32);
             ui::EndProps();
         }
         const double mp = static_cast<double>(out.width) * out.height / 1e6;
@@ -196,9 +196,9 @@ void Application::drawRenderDialog() {
     if (ui::Section(ICON_ORBIT, "Turntable", false)) {
         if (ui::BeginProps("tt")) {
             ui::Prop("Kare sayısı");
-            ImGui::SliderInt("##ttf", &out.turntableFrames, 8, 360);
+            ui::SliderI("##ttf", &out.turntableFrames, 8, 360);
             ui::Prop("Örnek / kare");
-            ImGui::SliderInt("##tts", &out.turntableSpp, 4, 512, "%d", ImGuiSliderFlags_Logarithmic);
+            ui::SliderI("##tts", &out.turntableSpp, 4, 512, "%d", ImGuiSliderFlags_Logarithmic);
             ui::EndProps();
         }
         if (ui::GhostButton(ICON_FILM "  Turntable kareleri üret", ImVec2(-FLT_MIN, 0))) startTurntable();

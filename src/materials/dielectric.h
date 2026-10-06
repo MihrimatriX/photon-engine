@@ -30,6 +30,7 @@ public:
     float ior() const { return m_ior; }
     const Color3f& tint() const { return m_tint; }
     float roughness() const { return m_roughness; }
+    bool isDelta() const override { return m_roughness <= 1e-3f; } // dielectric.cpp: sharp()
 
 private:
     float m_ior;

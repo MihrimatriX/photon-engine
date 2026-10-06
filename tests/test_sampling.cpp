@@ -1,3 +1,6 @@
+// test_sampling.cpp — Örnekleme fonksiyonlarının temel kontrolleri: yarıküre örnekleri birim
+// uzunlukta ve üst yarıda, disk örnekleri birim diskin içinde. Örnek tanım kümesinden taşarsa
+// pdf ile tutarsız olur ve tahmin yanlı (biased) çıkar.
 #include "gtest/gtest.h"
 #include "core/sampling/sampling.h"
 

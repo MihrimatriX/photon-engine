@@ -1,3 +1,6 @@
+// path.h — UTF-8 string ↔ std::filesystem::path dönüşümü.
+// Windows'ta std::string'den path kurmak ANSI kod sayfasıyla çözer ve Türkçe karakterli
+// yolları ("Masaüstü/şişe.obj") bozar; u8string üzerinden geçmek bunu engeller.
 #pragma once
 
 /// @file path.h

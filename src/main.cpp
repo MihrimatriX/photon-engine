@@ -1,152 +1,172 @@
-#include "engine/scene.h"
+// main.cpp — photon_render: arayüzsüz (komut satırı) renderer ve ölçüm aracı.
+//
+//   photon_render sahne.photon  [--out render.png] [--spp 256] [--res 1920x1080]
+//   photon_render model.obj     [...]               (stüdyo ışığı + otomatik kadraj)
+//   photon_render --cornell     [...]
+// Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json
+// stats.json: süre, örnek sayısı, Mray/s (milyon birincil ışın / saniye).
+#include "scene/project_io.h"
+#include "scene/model_import.h"
+#include "scene/cornell_box.h"
+#include "scene/document.h"
 #include "engine/renderer.h"
 #include "camera/perspective_camera.h"
-#include "materials/lambertian.h"
-#include "materials/mirror.h"
-#include "materials/dielectric.h"
-#include "materials/disney.h"
-#include "lights/area_light.h"
-#include "geometry/sphere.h"
-#include "geometry/triangle.h"
+#include "camera/thin_lens_camera.h"
+#include "camera/orthographic_camera.h"
 #include "core/image/image_io.h"
-#include <iostream>
-#include <memory>
+#include "core/math/constants.h"
+#include "core/platform/path.h"
+
+#include <nlohmann/json.hpp>
+
 #include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <thread>
 
 using namespace photon;
 
-// Helper to add a quad (2 triangles) to the scene
-void addQuad(Scene& scene, 
-             const Vec3f& v0, const Vec3f& v1, const Vec3f& v2, const Vec3f& v3,
-             const Vec3f& n, const Material* mat) {
-    Vec2f uv0(0.0f, 0.0f);
-    Vec2f uv1(1.0f, 0.0f);
-    Vec2f uv2(1.0f, 1.0f);
-    Vec2f uv3(0.0f, 1.0f);
+namespace {
 
-    scene.addShape(std::make_shared<Triangle>(v0, v1, v2, n, n, n, uv0, uv1, uv2, mat));
-    scene.addShape(std::make_shared<Triangle>(v0, v2, v3, n, n, n, uv0, uv2, uv3, mat));
+struct Options {
+    std::string input;
+    bool cornell = false;
+    std::string out = "render.png";
+    std::string stats;
+    int spp = 64;
+    int width = 1280;
+    int height = 720;
+    int threads = 0;
+    int bounces = -1;
+    bool denoise = true;
+};
+
+void usage() {
+    std::cout << "photon_render <sahne.photon | model.obj | --cornell> [--out dosya.png|.jpg|.exr] [--spp N]\n"
+                 "              [--res GxY] [--threads N] [--bounces N] [--no-denoise] [--stats stats.json]\n";
 }
 
-// Helper to add a box to the scene
-void addBox(Scene& scene, const Vec3f& minP, const Vec3f& maxP, const Material* mat) {
-    // 8 vertices
-    Vec3f v0(minP.x, minP.y, minP.z);
-    Vec3f v1(maxP.x, minP.y, minP.z);
-    Vec3f v2(maxP.x, maxP.y, minP.z);
-    Vec3f v3(minP.x, maxP.y, minP.z);
-    Vec3f v4(minP.x, minP.y, maxP.z);
-    Vec3f v5(maxP.x, minP.y, maxP.z);
-    Vec3f v6(maxP.x, maxP.y, maxP.z);
-    Vec3f v7(minP.x, maxP.y, maxP.z);
-
-    // 6 faces
-    addQuad(scene, v0, v3, v2, v1, Vec3f(0, 0, -1), mat); // Front
-    addQuad(scene, v1, v2, v6, v5, Vec3f(1, 0, 0), mat);  // Right
-    addQuad(scene, v5, v6, v7, v4, Vec3f(0, 0, 1), mat);  // Back
-    addQuad(scene, v4, v7, v3, v0, Vec3f(-1, 0, 0), mat); // Left
-    addQuad(scene, v3, v7, v6, v2, Vec3f(0, 1, 0), mat);  // Top
-    addQuad(scene, v4, v0, v1, v5, Vec3f(0, -1, 0), mat); // Bottom
+// Proje dosyasındaki orbit kamera alanlarından (hedef, yarıçap, θ, φ) kamera.
+std::unique_ptr<Camera> cameraFromJson(const nlohmann::json& c, float aspect) {
+    Vec3f target(0, 0.5f, 0);
+    if (auto t = c.find("target"); t != c.end() && t->is_array() && t->size() == 3)
+        target = Vec3f((*t)[0].get<float>(), (*t)[1].get<float>(), (*t)[2].get<float>());
+    const float r = c.value("radius", 5.0f), th = c.value("theta", 1.15f), ph = c.value("phi", 0.45f);
+    const float fov = c.value("fov", 35.0f);
+    const Vec3f eye = target + Vec3f(std::sin(th) * std::cos(ph), std::cos(th), std::sin(th) * std::sin(ph)) * r;
+    if (c.value("orthographic", false)) {
+        const float h = 2.0f * std::tan(fov * DEG_TO_RAD * 0.5f) * r;
+        return std::make_unique<OrthographicCamera>(eye, target, Vec3f(0, 1, 0), h, aspect);
+    }
+    const float aperture = c.value("aperture", 0.0f);
+    if (aperture > 0.0f) {
+        const float focus = c.value("focusExplicit", false) ? c.value("focusDistance", r) : r;
+        return std::make_unique<ThinLensCamera>(eye, target, Vec3f(0, 1, 0), fov, aspect, aperture, focus);
+    }
+    return std::make_unique<PerspectiveCamera>(eye, target, Vec3f(0, 1, 0), fov, aspect);
 }
 
-int main() {
-    auto totalStart = std::chrono::high_resolution_clock::now();
+} // namespace
 
-    Scene scene;
+int main(int argc, char** argv) {
+    Options o;
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
+        if (a == "--out") o.out = next();
+        else if (a == "--spp") o.spp = std::max(1, std::atoi(next().c_str()));
+        else if (a == "--res") std::sscanf(next().c_str(), "%dx%d", &o.width, &o.height);
+        else if (a == "--threads") o.threads = std::atoi(next().c_str());
+        else if (a == "--bounces") o.bounces = std::atoi(next().c_str());
+        else if (a == "--no-denoise") o.denoise = false;
+        else if (a == "--stats") o.stats = next();
+        else if (a == "--cornell") o.cornell = true;
+        else if (a == "-h" || a == "--help") { usage(); return 0; }
+        else if (!a.empty() && a[0] != '-') o.input = a;
+        else { usage(); return 2; }
+    }
+    if (o.input.empty() && !o.cornell) { usage(); return 2; }
 
-    // ─── 1. Materials ────────────────────────────────────────────────────────
-    auto red = std::make_shared<Lambertian>(Color3f(0.65f, 0.05f, 0.05f));
-    auto green = std::make_shared<Lambertian>(Color3f(0.12f, 0.45f, 0.15f));
-    auto white = std::make_shared<Lambertian>(Color3f(0.73f, 0.73f, 0.73f));
-    
-    // Specular / Glass materials
-    auto mirror = std::make_shared<Mirror>(Color3f(0.95f));
-    auto glass = std::make_shared<Dielectric>(1.5f, Color3f(1.0f));
-
-    // Disney Material for a metallic-rough ball
-    auto goldDisney = std::make_shared<DisneyMaterial>(
-        Color3f(1.0f, 0.782f, 0.344f), // Gold F0 color
-        0.9f,                          // metallic
-        0.2f,                          // roughness
-        0.5f                           // specular
-    );
-
-    // ─── 2. Cornell Box Geometry ─────────────────────────────────────────────
-    // Coordinates are standard Cornell Box dimensions [0, 555]
-    
-    // Floor (white)
-    addQuad(scene, Vec3f(0, 0, 0), Vec3f(0, 0, 555), Vec3f(555, 0, 555), Vec3f(555, 0, 0), Vec3f(0, 1, 0), white.get());
-    
-    // Ceiling (white)
-    addQuad(scene, Vec3f(0, 555, 0), Vec3f(555, 555, 0), Vec3f(555, 555, 555), Vec3f(0, 555, 555), Vec3f(0, -1, 0), white.get());
-    
-    // Back wall (white)
-    addQuad(scene, Vec3f(0, 0, 555), Vec3f(555, 0, 555), Vec3f(555, 555, 555), Vec3f(0, 555, 555), Vec3f(0, 0, -1), white.get());
-    
-    // Left wall (red)
-    addQuad(scene, Vec3f(0, 0, 0), Vec3f(0, 555, 0), Vec3f(0, 555, 555), Vec3f(0, 0, 555), Vec3f(1, 0, 0), red.get());
-    
-    // Right wall (green)
-    addQuad(scene, Vec3f(555, 0, 0), Vec3f(555, 0, 555), Vec3f(555, 555, 555), Vec3f(555, 555, 0), Vec3f(-1, 0, 0), green.get());
-
-    // ─── 3. Objects inside Box ───────────────────────────────────────────────
-    // Glass sphere on the left floor
-    scene.addShape(std::make_shared<Sphere>(Vec3f(150, 100, 150), 100.0f, glass.get()));
-
-    // Gold Disney sphere in the middle
-    scene.addShape(std::make_shared<Sphere>(Vec3f(278, 90, 278), 90.0f, goldDisney.get()));
-
-    // Mirror block on the right floor
-    addBox(scene, Vec3f(360, 0, 320), Vec3f(490, 200, 450), mirror.get());
-
-    // ─── 4. Light Sources ────────────────────────────────────────────────────
-    // Ceiling area light
-    Vec3f lightPos(343, 548.0f, 227);
-    Vec3f lightU(-130, 0, 0);
-    Vec3f lightV(0, 0, 105);
-    Color3f lightRadiance(15.0f);
-    
-    auto areaLight = std::make_shared<AreaLight>(lightPos, lightU, lightV, lightRadiance);
-    scene.addLight(areaLight);
-
-    // ─── 5. Acceleration Structure ───────────────────────────────────────────
-    std::cout << "Building BVH..." << std::endl;
-    scene.buildAccelerator();
-
-    // ─── 6. Camera Setup ─────────────────────────────────────────────────────
-    Vec3f camPos(278, 273, -800);
-    Vec3f camTarget(278, 273, 0);
-    Vec3f camUp(0, 1, 0);
-    float fov = 40.0f;
-    float aspect = 1.0f; // Square render
-
-    PerspectiveCamera camera(camPos, camTarget, camUp, fov, aspect);
-
-    // ─── 7. Render ───────────────────────────────────────────────────────────
-    RenderSettings settings;
-    settings.width = 512;
-    settings.height = 512;
-    settings.samplesPerPixel = 64; // Set 64 SPP for a quick, clean render
-    settings.maxBounces = 8;
-    settings.tileSize = 32;
-    settings.tmo = ToneMapOperator::ACES;
-    settings.exposure = 0.0f;
-
-    Renderer renderer;
-    Image outputImg = renderer.render(scene, camera, settings);
-
-    // ─── 8. Save Output ──────────────────────────────────────────────────────
-    std::string outputPath = "output.png";
-    std::cout << "Saving image to " << outputPath << "..." << std::endl;
-    if (saveImagePNG(outputImg, outputPath, settings.tmo, settings.exposure)) {
-        std::cout << "Success!" << std::endl;
-    } else {
-        std::cerr << "Failed to save image." << std::endl;
+    const auto t0 = std::chrono::steady_clock::now();
+    SceneGraph graph;
+    ProjectData data;
+    std::string err;
+    if (o.cornell) {
+        buildCornellBox(graph);
+        data.environment.groundEnabled = false;
+        data.environment.zenith = data.environment.horizon = Color3f(0.0f);
+        LightDesc l;
+        l.position = Vec3f(278, 548, 279.5f);
+        l.target = Vec3f(278, 0, 279.5f);
+        l.width = 130;
+        l.height = 105;
+        l.intensity = 17;
+        data.lights.push_back(l);
+        data.camera = {{"target", {278, 273, 277.5}}, {"radius", 1050}, {"theta", PI * 0.5f}, {"phi", -PI * 0.5f}, {"fov", 40}};
+    } else if (isSupportedModelFile(o.input)) {
+        auto node = importModelFile(o.input, &err);
+        if (!node) { std::cerr << err << std::endl; return 1; }
+        graph.root()->addChild(std::move(node));
+        // Varsayılan stüdyo: ortam yok, iki alan ışığı; kamera sınırlara göre.
+        StudioPreset studio;
+        StudioPreset::Rig key; key.azimuthDeg = 50; key.elevationDeg = 40; key.intensity = 6; key.size = 1.3f;
+        StudioPreset::Rig fill; fill.azimuthDeg = -60; fill.elevationDeg = 20; fill.intensity = 1.6f; fill.size = 1.8f; fill.distance = 3;
+        studio.lights = {key, fill};
+        const AABB b = graph.worldBounds();
+        data.lights = placeStudioLights(studio, b, 45.0f);
+        const Vec3f c = b.centroid();
+        const float r = (b.pMax - b.pMin).length() * 0.5f / std::sin(17.5f * DEG_TO_RAD) * 1.1f;
+        data.camera = {{"target", {c.x, c.y, c.z}}, {"radius", r}, {"theta", 1.15}, {"phi", 0.785}, {"fov", 35}};
+    } else if (!loadProject(o.input, graph, data, &err)) {
+        std::cerr << err << std::endl;
+        return 1;
     }
 
-    auto totalEnd = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> totalElapsed = totalEnd - totalStart;
-    std::cout << "Total execution time: " << totalElapsed.count() << " seconds." << std::endl;
+    EnvironmentCache cache;
+    auto scene = buildRenderScene(graph, data.lights, data.environment, cache, false);
+    const auto tLoad = std::chrono::steady_clock::now();
 
+    RenderSettings rs;
+    rs.width = o.width;
+    rs.height = o.height;
+    rs.samplesPerPixel = o.spp;
+    rs.numThreads = o.threads;
+    rs.maxBounces = o.bounces > 0 ? o.bounces : data.render.value("maxBounces", 8);
+    rs.denoiseEnabled = o.denoise;
+    rs.tmo = static_cast<ToneMapOperator>(data.render.value("toneMap", static_cast<int>(ToneMapOperator::PBRNeutral)));
+    rs.exposure = data.render.value("exposure", 0.0f);
+    auto camera = cameraFromJson(data.camera, static_cast<float>(o.width) / static_cast<float>(o.height));
+
+    Renderer renderer;
+    const auto tRender = std::chrono::steady_clock::now();
+    Image img = renderer.render(*scene, *camera, rs);
+    const auto tDone = std::chrono::steady_clock::now();
+
+    std::string ext = pathToUtf8(pathFromUtf8(o.out).extension());
+    bool ok;
+    if (ext == ".exr") ok = saveImageEXR(img, o.out);
+    else if (ext == ".jpg" || ext == ".jpeg") ok = saveImageJPG(img, o.out, rs.tmo, rs.exposure);
+    else ok = saveImagePNG(img, o.out, rs.tmo, rs.exposure);
+
+    const double loadS = std::chrono::duration<double>(tLoad - t0).count();
+    const double renderS = std::chrono::duration<double>(tDone - tRender).count();
+    const double mrays = static_cast<double>(o.width) * o.height * o.spp / renderS / 1e6;
+    std::cout << "Sahne: " << loadS << " sn, render: " << renderS << " sn, " << mrays << " M örnek/sn ("
+              << o.width << "x" << o.height << " @ " << o.spp << " spp, " << rs.maxBounces << " sekme)\n";
+    if (!o.stats.empty()) {
+        nlohmann::json s = {{"loadSeconds", loadS}, {"renderSeconds", renderS}, {"width", o.width},
+                            {"height", o.height}, {"spp", o.spp}, {"bounces", rs.maxBounces},
+                            {"msamplesPerSecond", mrays}, {"threads", o.threads > 0 ? o.threads : static_cast<int>(std::thread::hardware_concurrency())},
+                            {"denoise", o.denoise}, {"output", o.out}};
+        std::ofstream(pathFromUtf8(o.stats)) << s.dump(2) << "\n";
+    }
+    if (!ok) {
+        std::cerr << "Çıktı yazılamadı: " << o.out << std::endl;
+        return 1;
+    }
     return 0;
 }

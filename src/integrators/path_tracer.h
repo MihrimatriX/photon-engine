@@ -6,6 +6,7 @@
 /// @brief Multi-bounce Path Tracer integrator in PhotonEngine.
 
 #include "integrators/integrator.h"
+#include "geometry/surface_interaction.h"
 
 namespace photon {
 
@@ -20,7 +21,20 @@ public:
         , m_aoStrength(aoStrength)
         , m_shadowQuality(shadowQuality < 1 ? 1 : shadowQuality) {}
 
-    Color3f Li(const Ray& ray, const Scene& scene, Sampler& sampler) const override;
+    /// Kamera ışınının ilk kesişimi (gürültü giderici AOV'leri ve seçim için).
+    struct PrimaryHit {
+        bool hit = false;
+        SurfaceInteraction isect;
+    };
+
+    Color3f Li(const Ray& ray, const Scene& scene, Sampler& sampler) const override {
+        return Li(ray, scene, sampler, nullptr);
+    }
+
+    /// @p ray bir KAMERA ışınıysa ve @p primary verilmişse ilk kesişim oraya yazılır,
+    /// sahnenin arka plan modu (düz renk / şeffaf) ıskalayan kamera ışınına uygulanır.
+    /// Böylece AOV için ayrı bir birincil ışın atmaya gerek kalmaz.
+    Color3f Li(const Ray& ray, const Scene& scene, Sampler& sampler, PrimaryHit* primary) const;
 
 private:
     int m_maxDepth;

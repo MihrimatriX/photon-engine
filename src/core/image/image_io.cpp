@@ -1,3 +1,7 @@
+// image_io.cpp — Görüntü dosyası G/Ç uygulaması: stb_image (PNG/JPG/HDR okuma),
+// stb_image_write (PNG/JPG yazma) ve tinyexr (EXR okuma/yazma). Bu dosya her üç tek-başlık
+// kütüphanenin uygulamasını (IMPLEMENTATION makroları) derleyen tek yerdir.
+// Akış (yazma): doğrusal radyans → pozlama (EV) → ton eşleme → sRGB → dither → 8-bit.
 // Narrow paths are UTF-8 on every platform; on Windows stb converts them to UTF-16.
 #define STBI_WINDOWS_UTF8
 #define STB_IMAGE_IMPLEMENTATION
@@ -42,6 +46,9 @@ bool imageDimsOk(int w, int h) {
 } // namespace
 
 
+// Her piksel: toneMap() pozlama + ton eşleme + sRGB kodlamayı yapar (sonuç [0,1] ekran
+// değeri); ardından kanal başına deterministik TPDF dither ile 8-bit'e yuvarlanır.
+// Dither piksel konumunun saf fonksiyonu olduğu için aynı render aynı dosyayı üretir.
 bool saveImagePNG(const Image& img, const std::string& path, ToneMapOperator tmo, float exposureEV,
                   bool dither) {
     const int w = img.width();
@@ -122,6 +129,9 @@ bool saveImageEXR(const Image& img, const std::string& path) {
     const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
 
     // EXR stores planar channels; readers expect them sorted by name: B, G, R.
+    // EXR ton eşleme/sRGB uygulanmamış sahne-doğrusal (scene-linear) radyansı saklar;
+    // 1'in üstündeki değerler kırpılmaz, sonradan kompozisyon/renk düzeltmede kullanılabilir.
+    // Image iç içe RGB tutar → burada kanal başına ayrı düzlemlere (planar) ayrılır.
     std::vector<float> r(n), g(n), b(n);
     const float* px = img.data();
     for (size_t i = 0; i < n; ++i) {
@@ -150,6 +160,8 @@ bool saveImageEXR(const Image& img, const std::string& path) {
     header.channels = channels;
 
     // Input is float; stored as half (ample for radiance, half the size).
+    // half = 16-bit float: ~3 ondalık basamak hassasiyet, ~6·10⁻⁸ … 65504 aralığı; HDR
+    // radyans için yeterli. ZIP kayıpsız sıkıştırmadır.
     int pixelTypes[3] = {TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT, TINYEXR_PIXELTYPE_FLOAT};
     int storedTypes[3] = {TINYEXR_PIXELTYPE_HALF, TINYEXR_PIXELTYPE_HALF, TINYEXR_PIXELTYPE_HALF};
     header.pixel_types = pixelTypes;
@@ -266,6 +278,8 @@ std::optional<Image> loadImageEXR(const std::string& path) {
 
 namespace {
 
+// 8-bit değer yalnızca 256 farklı olabildiği için sRGB çözme (pow içerir) bir kez
+// 256 elemanlı arama tablosuna (LUT) hesaplanır; piksel başına pow çağrısı yapılmaz.
 std::optional<Image> imageFromRgb8(const uint8_t* data, int w, int h, TextureEncoding encoding) {
     if (!data || !imageDimsOk(w, h)) return std::nullopt;
     float lut[256];

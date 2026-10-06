@@ -1,3 +1,5 @@
+// drag_drop.h — Sürükle-bırak yük (payload) türleri ve dosya uzantısı yardımcıları.
+// Kütüphaneden viewport'a sürüklenen öğe, türünü bu adlarla taşır (ImGui drag & drop).
 #pragma once
 
 #include <algorithm>

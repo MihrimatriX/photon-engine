@@ -1,3 +1,7 @@
+// test_product.cpp — Ürün görselleştirme yardımcılarının testleri: yörünge kamerasının odak
+// mesafesi, ötelemeyi değiştirirken dönmenin korunması, gürültü gidericinin AOV'lara
+// dokunmaması, zeminin nesnenin altına yerleşmesi ve malzeme hazır ayarlarının (preset)
+// doğru BSDF'ye dönüşmesi.
 #include <gtest/gtest.h>
 #include "ui/orbit_camera.h"
 #include "engine/denoiser.h"

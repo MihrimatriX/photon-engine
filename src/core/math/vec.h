@@ -1,3 +1,6 @@
+// vec.h — 2B/3B/4B float vektörler (Vec2f, Vec3f, Vec4f). Renderer'ın temel taşı:
+// Vec3f hem konum/yön/normal hem de RGB renk (bileşen bazlı çarpım = renk filtresi)
+// olarak kullanılır. Vec4f homojen koordinatlar (w=1 nokta, w=0 yön) içindir.
 #pragma once
 
 /// @file vec.h
@@ -134,6 +137,8 @@ struct Vec3f {
     constexpr float dot(const Vec3f& v) const { return x * v.x + y * v.y + z * v.z; }
 
     /// Cross product (right-hand rule).
+    // a×b her iki vektöre dik, uzunluğu |a||b|sinθ = iki vektörün gerdiği paralelkenarın
+    // alanı. Üçgen normali ve alanı (½|e1×e2|) bununla bulunur.
     constexpr Vec3f cross(const Vec3f& v) const {
         return {
             y * v.z - z * v.y,
@@ -144,6 +149,7 @@ struct Vec3f {
 
     constexpr float lengthSquared() const { return dot(*this); }
     inline    float length()        const { return std::sqrt(lengthSquared()); }
+    // Sıfıra çok yakın vektörde 1/len sonsuz olur ve NaN yayılır; bu yüzden sıfır döner.
     inline    Vec3f normalized()    const {
         float len = length();
         if (len <= 1e-20f) return Vec3f(0.0f);

@@ -1,4 +1,4 @@
-// Owen-karıştırmalı Sobol örnekleyici (Burley 2020, "Practical Hash-based Owen
+// sobol_sampler.h — Owen-karıştırmalı Sobol örnekleyici (Burley 2020, "Practical Hash-based Owen
 // Scrambling", JCGT 9(4)). Her piksel ve her boyut için bağımsız karıştırılmış,
 // ilerlemeli (progressive) render'da her ön-ek (1, 2, 4, ... örnek) iyi tabakalanmış
 // düşük-tutarsızlıklı (low-discrepancy) noktalar üretir. Durum yalnızca

@@ -1,3 +1,6 @@
+// spectrum.h — Color3f: renderer'ın "spektrumu" olarak kullanılan doğrusal RGB üçlüsü.
+// Gerçek spektral (dalga boyu) render yerine 3 kanallı RGB ile çalışılır; radyans,
+// albedo ve yol "throughput"u bu türdedir. Çarpım kanal bazlıdır (renk filtresi gibi).
 #pragma once
 
 /// @file spectrum.h
@@ -60,6 +63,8 @@ struct Color3f {
     }
 
     /// Calculate perceived luminance using ITU-R BT.709 coefficients
+    // Doğrusal RGB → CIE Y (parlaklık). Rengi tek bir skalere indirmek gerektiğinde
+    // kullanılır: örn. ortam haritasının önem örneklemesi dağılımı, Disney "tint" rengi.
     constexpr float luminance() const {
         return 0.212671f * r + 0.715160f * g + 0.072169f * b;
     }
@@ -78,6 +83,7 @@ struct Color3f {
         return isFinite() && r >= 0.0f && g >= 0.0f && b >= 0.0f;
     }
 
+    // Kanal bazlı exp: örn. Beer–Lambert soğurması T = exp(−σ·d) (renkli cam) için uygun.
     inline Color3f cwiseExp() const {
         return {std::exp(r), std::exp(g), std::exp(b)};
     }

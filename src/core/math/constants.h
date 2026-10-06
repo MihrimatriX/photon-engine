@@ -1,3 +1,6 @@
+// constants.h — Derleme zamanı matematik sabitleri (π, 1/π, epsilon, derece↔radyan).
+// 1/π ve 1/(2π) özellikle pdf'lerde sık geçer: örn. Lambert BRDF = albedo/π,
+// küre üzerinde düzgün pdf = 1/(4π).
 #pragma once
 
 /// @file constants.h

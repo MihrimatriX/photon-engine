@@ -1,3 +1,5 @@
+# src/integrators/CMakeLists.txt — photon_integrators: ışık taşıma çözücüleri (şimdilik PathTracer).
+# Malzeme, ışık, kamera ve örnekleyici kütüphanelerini birleştiren katmandır.
 add_library(photon_integrators STATIC
     path_tracer.cpp
 )

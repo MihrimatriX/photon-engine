@@ -65,6 +65,19 @@ bool MaterialLibrary::loadFile(const std::string& path) {
     p.diffuseTransmission = j.value("diffuseTransmission", 0.0f);
     p.emissive = j.value("emissive", 0.0f);
     p.ior = j.value("ior", 1.5f);
+    // Doku yolları preset klasörünün yanındaki textures/ klasörüne göredir.
+    const std::filesystem::path texDir = pathFromUtf8(path).parent_path().parent_path() / "textures";
+    auto mapPath = [&](const char* key) -> std::string {
+        auto it = j.find("maps");
+        if (it == j.end() || !it->is_object() || !it->contains(key)) return {};
+        std::filesystem::path p = pathFromUtf8((*it)[key].get<std::string>());
+        return pathToUtf8(p.is_absolute() ? p : texDir / p);
+    };
+    p.albedoMap = mapPath("albedo");
+    p.normalMap = mapPath("normal");
+    p.roughnessMap = mapPath("roughness");
+    p.boxMapping = j.value("mapping", std::string("uv")) == "box";
+    p.texScale = j.value("texScale", 1.0f);
     m_presets.push_back(std::move(p));
     return true;
 }
@@ -121,6 +134,11 @@ std::shared_ptr<Material> MaterialLibrary::createMaterial(const MaterialPreset& 
     m->setSheen(p.sheen);
     m->setDiffuseTransmission(p.diffuseTransmission);
     if (p.emissive > 0.0f) m->setEmission(p.baseColor * p.emissive);
+    if (!p.albedoMap.empty()) m->setAlbedoMap(p.albedoMap);
+    if (!p.normalMap.empty()) m->setNormalMap(p.normalMap);
+    if (!p.roughnessMap.empty()) m->setRoughnessMap(p.roughnessMap);
+    m->setTextureMapping(p.boxMapping ? DisneyMaterial::TextureMapping::Box : DisneyMaterial::TextureMapping::UV);
+    m->setTextureScale(p.texScale);
     return m;
 }
 

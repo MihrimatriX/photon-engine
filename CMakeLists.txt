@@ -17,7 +17,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Build Options
 # ──────────────────────────────────────────────
 option(PHOTON_BUILD_TESTS  "Build unit tests"                    ON)
-option(PHOTON_BUILD_CLI    "Build photon_render CLI (dev only)"  OFF)
+option(PHOTON_BUILD_CLI    "Build photon_render command-line renderer" ON)
 option(PHOTON_ENABLE_SIMD  "Enable AVX2/FMA SIMD instructions"  ON)
 option(PHOTON_ENABLE_ASAN "AddressSanitizer on photon_* targets" OFF)
 # ponytail: MSVC /WX stays off until a clean /W4 build is seen on the owner's
@@ -47,8 +47,27 @@ if(PHOTON_ENABLE_OIDN)
     endif()
 endif()
 
-# Copies the OIDN runtime DLLs next to an executable (Windows has no rpath).
+# Intel Embree 4 (Apache-2.0): resmi derlenmiş paket third_party/embree'de
+# (scripts/fetch_deps.ps1). Bulunursa üretim ışın kesişimi onunla yapılır.
+option(PHOTON_ENABLE_EMBREE "Use Intel Embree when found" ON)
+set(PHOTON_EMBREE_DLL_DIR "")
+if(PHOTON_ENABLE_EMBREE)
+    list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/third_party/embree")
+    find_package(embree 4 CONFIG QUIET)
+    if(embree_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/embree/bin")
+        set(PHOTON_EMBREE_DLL_DIR "${CMAKE_SOURCE_DIR}/third_party/embree/bin")
+    endif()
+endif()
+
+# Çalışma zamanı DLL'lerini exe'nin yanına kopyalar (Windows'ta rpath yok).
+# Önce Embree, sonra OIDN: ikisi de tbb12.dll ister, OIDN'ninki daha yeni (2023.1)
+# ve oneTBB ikili arayüzü geriye uyumlu olduğu için onunki kalır.
 function(photon_copy_oidn_dlls target)
+    if(PHOTON_EMBREE_DLL_DIR)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${PHOTON_EMBREE_DLL_DIR}" $<TARGET_FILE_DIR:${target}>
+            COMMENT "Copying Embree DLLs for ${target}")
+    endif()
     if(PHOTON_OIDN_DLL_DIR)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_directory "${PHOTON_OIDN_DLL_DIR}" $<TARGET_FILE_DIR:${target}>
@@ -249,7 +268,7 @@ endif()
 # ──────────────────────────────────────────────
 if(PHOTON_BUILD_CLI)
     add_executable(photon_render src/main.cpp)
-    target_link_libraries(photon_render PRIVATE photon_engine photon_build_flags)
+    target_link_libraries(photon_render PRIVATE photon_scene photon_engine photon_build_flags)
     photon_copy_oidn_dlls(photon_render)
 endif()
 

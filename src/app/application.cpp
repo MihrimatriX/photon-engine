@@ -310,6 +310,8 @@ void Application::handleShortcuts() {
     if (ctrl && pressed(ImGuiKey_P)) m_s.showRenderDialog = true;
     if (ctrl && pressed(ImGuiKey_E)) exportViewport();
     if (ctrl && pressed(ImGuiKey_D)) duplicateSelection();
+    if (ctrl && pressed(ImGuiKey_C)) copyMaterial();
+    if (ctrl && pressed(ImGuiKey_V)) pasteMaterial();
     if (ctrl) return;
     // Tek tuşlu kısayollar yalnız viewport ya da sahne paneli üzerindeyken değil,
     // metin girişi yokken her yerde çalışır (KeyShot gibi).
@@ -377,6 +379,7 @@ void Application::frame(float dt) {
 
     m_s.thumbs.uploadReady();
     processDrops();
+    pollAsync();
     compileIfDirty();
 
     // Kamera ve ekran ayarlarını render thread'ine ilet (değişmediyse etkisiz).
@@ -428,8 +431,27 @@ int Application::run() {
     } else {
         loadSampleScene();
     }
-    if (m_opts.uiState == "render") m_s.showRenderDialog = true;
-    if (m_opts.uiState == "shortcuts") m_s.showShortcuts = true;
+    // Ekran görüntüsü / tanıtım için hazır arayüz durumları (--ui ...).
+    const std::string& ui = m_opts.uiState;
+    auto selectFirst = [&] {
+        for (auto& c : m_s.graph.root()->children)
+            if (c->name == "Krom Küre" || c.get() == m_s.graph.root()->children.back().get()) {
+                selectNode(c->uid);
+                break;
+            }
+    };
+    if (ui == "render") m_s.showRenderDialog = true;
+    else if (ui == "shortcuts") m_s.showShortcuts = true;
+    else if (ui == "material") { selectFirst(); m_s.rightTab = 1; }
+    else if (ui == "object") { selectFirst(); m_s.rightTab = 0; m_s.gizmoOp = 1; }
+    else if (ui == "env") { m_s.rightTab = 2; m_s.leftTab = 1; }
+    else if (ui == "light") { selectLight(0); m_s.leftTab = 2; }
+    else if (ui == "camera") { m_s.rightTab = 4; m_s.leftTab = 3; }
+    else if (ui == "image") m_s.rightTab = 5;
+    if (!m_opts.saveProjectPath.empty()) {
+        m_s.projectPath = m_opts.saveProjectPath;
+        saveProject();
+    }
 
     auto last = std::chrono::steady_clock::now();
     const auto started = last;
@@ -450,7 +472,7 @@ int Application::run() {
         if (!m_opts.screenshotPath.empty()) {
             const float elapsed = std::chrono::duration<float>(now - started).count();
             const ViewportStats st = m_s.viewport.stats();
-            const bool ready = frames > 30 && !st.interactive && st.spp >= m_opts.screenshotSpp &&
+            const bool ready = frames > 30 && !st.interactive && st.spp >= m_opts.screenshotSpp && m_jobs.empty() &&
                                !m_s.thumbs.busy();
             if (ready || elapsed > m_opts.screenshotTimeout) {
                 takeScreenshot(m_opts.screenshotPath);
@@ -469,6 +491,34 @@ int Application::run() {
         }
     }
     return 0;
+}
+
+} // namespace photon
+
+namespace photon {
+
+void Application::runAsync(std::string label, std::function<std::function<void()>()> work) {
+    AsyncJob job;
+    job.label = std::move(label);
+    job.result = std::async(std::launch::async, [work = std::move(work)]() -> std::function<void()> {
+        try {
+            return work();
+        } catch (const std::exception& e) {
+            std::string msg = e.what();
+            return [msg] { std::fprintf(stderr, "Arka plan işi hatası: %s\n", msg.c_str()); };
+        }
+    });
+    m_jobs.push_back(std::move(job));
+}
+
+// Biten işlerin tamamlama fonksiyonlarını UI thread'inde, başlatılma sırasıyla çalıştır.
+void Application::pollAsync() {
+    while (!m_jobs.empty() &&
+           m_jobs.front().result.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        std::function<void()> done = m_jobs.front().result.get();
+        m_jobs.erase(m_jobs.begin());
+        if (done) done();
+    }
 }
 
 } // namespace photon

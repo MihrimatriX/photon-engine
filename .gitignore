@@ -65,5 +65,6 @@ build-*.log
 # Agent worktrees and downloaded archives
 .claude/
 third_party_dl/
-# OIDN prebuilt package (scripts/fetch_deps.ps1)
+# OIDN / Embree prebuilt packages (scripts/fetch_deps.ps1)
 third_party/oidn/
+third_party/embree/

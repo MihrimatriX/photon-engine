@@ -27,7 +27,8 @@ std::string materialHash(const MaterialPreset& p, const std::string& studio) {
     ss << "v3|" << studio << '|' << static_cast<int>(p.kind) << '|' << p.baseColor.r << ',' << p.baseColor.g << ','
        << p.baseColor.b << '|' << p.metallic << '|' << p.roughness << '|' << p.specular << '|' << p.clearCoat << '|'
        << p.clearCoatRoughness << '|' << p.anisotropy << '|' << p.sheen << '|' << p.diffuseTransmission << '|'
-       << p.emissive << '|' << p.ior;
+       << p.emissive << '|' << p.ior << '|' << p.albedoMap << '|' << p.normalMap << '|' << p.roughnessMap
+       << '|' << p.boxMapping << '|' << p.texScale;
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%016llx",
                   static_cast<unsigned long long>(std::hash<std::string>{}(ss.str())));

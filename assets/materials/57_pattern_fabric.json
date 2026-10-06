@@ -1,0 +1,13 @@
+{
+  "id": "pattern_fabric",
+  "name": "Desenli Kumaş",
+  "category": "Dokulu",
+  "type": "generic",
+  "baseColor": [1.0, 1.0, 1.0],
+  "roughness": 0.8,
+  "metallic": 0,
+  "specular": 0.5,
+  "maps": { "albedo": "fabric_pattern_07_diff_1k.jpg", "normal": "fabric_pattern_07_nor_gl_1k.jpg", "roughness": "fabric_pattern_07_rough_1k.jpg" },
+  "mapping": "box",
+  "texScale": 2
+}

@@ -90,10 +90,19 @@ struct AppState {
     bool denoise = true;
     bool showGrid = false;
 
+    // ── Kayıtlı kameralar (projeyle saklanır) ──
+    struct SavedCamera {
+        std::string name;
+        OrbitCamera cam;
+    };
+    std::vector<SavedCamera> savedCameras;
+
     // ── Seçim ──
     SelectionKind selKind = SelectionKind::None;
     uint64_t selUid = 0;
     int selLight = -1;
+    uint64_t hoverUid = 0;                 ///< İmlecin altındaki parça (vurgulama)
+    std::shared_ptr<Material> clipboardMaterial; ///< Malzeme kopyala / yapıştır
 
     // ── Kütüphaneler ──
     std::string assetsRoot;

@@ -25,7 +25,7 @@ using json = nlohmann::json;
 
 namespace {
 
-constexpr uint64_t kGroundUid = ~0ull; // zemin sahne ağacında değil; seçimde özel kimlik
+constexpr uint64_t kGroundUid = kGroundNodeUid;
 
 void reassignUids(SceneNode& n) {
     n.uid = allocateNodeUid();
@@ -46,35 +46,10 @@ void Application::rebuildScene(bool interactive) {
     m_s.sceneDirtyInteractive = m_s.sceneDirtyInteractive || interactive;
 }
 
-std::shared_ptr<Material> Application::groundMaterial() const {
-    const auto& e = m_s.environment;
-    return std::make_shared<DisneyMaterial>(e.groundColor, 0.0f, e.groundRoughness, 0.5f);
-}
-
 // Belgeden yeni, değişmez bir render sahnesi kurar ve viewport'a verir. Eski
 // sahne render thread'i işini bitirene kadar shared_ptr ile yaşamaya devam eder.
 std::shared_ptr<Scene> Application::buildScene(bool isolate) {
-    auto scene = std::make_shared<Scene>();
-    m_s.graph.compileInto(*scene, isolate);
-    if (m_s.environment.groundEnabled && !m_s.graph.empty()) {
-        const AABB box = m_s.graph.worldBounds();
-        if (box.pMin.x <= box.pMax.x) {
-            const GroundQuad g = placeGroundUnder(box);
-            auto mat = groundMaterial();
-            const Vec3f p0 = g.corner, p1 = g.corner + g.edgeU, p2 = p1 + g.edgeV, p3 = g.corner + g.edgeV;
-            auto mesh = std::make_shared<TriangleMesh>(
-                std::vector<Vec3f>{p0, p1, p2, p3}, std::vector<Vec3f>{}, std::vector<Vec2f>{},
-                std::vector<uint32_t>{0, 2, 1, 0, 3, 2}, mat.get());
-            scene->retainMaterial(mat);
-            scene->tagShape(mesh.get(), kGroundUid);
-            scene->addShape(mesh);
-        }
-    }
-    for (const auto& l : buildLights(m_s.lights)) scene->addLight(l);
-    scene->setEnvironment(buildEnvironment(m_s.environment, m_s.envCache));
-    scene->setBackground(m_s.environment.background);
-    scene->buildAccelerator();
-    return scene;
+    return buildRenderScene(m_s.graph, m_s.lights, m_s.environment, m_s.envCache, isolate);
 }
 
 void Application::compileIfDirty() {
@@ -186,6 +161,7 @@ void Application::newScene() {
         if (e.id == "studio_small_09") m_s.environment.hdrPath = e.path;
     m_s.undo.clear();
     m_s.projectPath.clear();
+    m_s.savedCameras.clear();
     m_s.documentDirty = false;
     clearSelection();
     m_s.camera = OrbitCamera{};
@@ -223,12 +199,12 @@ void Application::loadSampleScene() {
         setStatus("Örnek modeller bulunamadı (assets/models)", true);
         return;
     }
-    for (const auto& s : m_s.studios)
-        if (s.id == "product_softbox") applyStudio(s);
-    m_s.undo.clear();
     m_s.camera.theta = 1.2f;
     m_s.camera.phi = 1.15f;
     frameAll();
+    for (const auto& s : m_s.studios)
+        if (s.id == "product_softbox") applyStudio(s);
+    m_s.undo.clear();
     m_s.camera.radius *= 0.92f;
     m_s.documentDirty = false;
     setStatus("Örnek ürün sahnesi yüklendi");
@@ -263,13 +239,24 @@ void Application::loadCornellScene() {
     setStatus("Cornell kutusu yüklendi");
 }
 
+// Model dosyası arka planda okunur (büyük OBJ'ler saniyeler sürebilir); sahneye
+// ekleme, zemine oturtma ve kadrajlama UI thread'inde tamamlamada yapılır.
 bool Application::importModel(const std::string& path, bool undoable) {
-    std::string err;
-    auto node = importModelFile(path, &err);
-    if (!node) {
-        setStatus(err.empty() ? "Model yüklenemedi" : err, true);
-        return false;
-    }
+    runAsync("İçe aktarılıyor: " + ui::fileName(path), [this, path, undoable]() -> std::function<void()> {
+        auto err = std::make_shared<std::string>();
+        auto holder = std::make_shared<std::unique_ptr<SceneNode>>(importModelFile(path, err.get()));
+        return [this, path, undoable, holder, err] {
+            if (!*holder) {
+                setStatus(err->empty() ? "Model yüklenemedi" : *err, true);
+                return;
+            }
+            attachImported(path, std::move(*holder), undoable);
+        };
+    });
+    return true;
+}
+
+void Application::attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable) {
     if (undoable) pushUndo();
     const bool wasEmpty = m_s.graph.empty();
     // Zemine oturt: modelin en alt noktası y = 0 olsun; boş sahnede merkeze al.
@@ -296,7 +283,6 @@ bool Application::importModel(const std::string& path, bool undoable) {
     }
     markDocumentChanged();
     setStatus("İçe aktarıldı: " + ui::fileName(path) + " (" + std::to_string(parts) + " parça)");
-    return true;
 }
 
 // ── Malzeme / ortam / stüdyo ─────────────────────────────────────────────
@@ -320,7 +306,20 @@ void Application::applyMaterialPreset(uint64_t nodeUid, const MaterialPreset& pr
     setStatus(preset.name + " → " + node->name + (count > 1 ? " (" + std::to_string(count) + " parça)" : ""));
 }
 
+// HDRI dosyası önce arka planda önbelleğe yüklenir; sahne ancak sonra derlenir
+// (aksi hâlde büyük bir HDR'nin okunması UI'yi bir saniye dondururdu).
 void Application::applyEnvironment(const EnvAsset& env) {
+    if (!env.path.empty()) {
+        runAsync("Ortam yükleniyor: " + env.name, [this, env]() -> std::function<void()> {
+            m_s.envCache.get(env.path);
+            return [this, env] { applyEnvironmentNow(env); };
+        });
+        return;
+    }
+    applyEnvironmentNow(env);
+}
+
+void Application::applyEnvironmentNow(const EnvAsset& env) {
     pushUndo();
     m_s.environment.hdrPath = env.path;
     m_s.environment.zenith = env.zenith;
@@ -345,7 +344,7 @@ void Application::applyStudio(const StudioPreset& studio) {
     m_s.environment.rotationDeg = studio.rotationDeg;
     m_s.environment.intensity = studio.intensity;
     if (studio.hasExposure) m_s.settings.exposure = studio.exposure;
-    m_s.lights = placeStudioLights(studio, m_s.graph.worldBounds());
+    m_s.lights = placeStudioLights(studio, m_s.graph.worldBounds(), m_s.camera.phi * RAD_TO_DEG);
     clearSelection();
     markDocumentChanged();
     setStatus("Stüdyo: " + studio.name);
@@ -357,14 +356,14 @@ void Application::addLight(LightDesc::Type type) {
     StudioPreset tmp;
     StudioPreset::Rig rig;
     rig.type = type;
-    rig.azimuthDeg = m_s.camera.phi * RAD_TO_DEG + 40.0f;  // kameranın biraz sağından
+    rig.azimuthDeg = 40.0f; // kameranın 40° yanından
     rig.elevationDeg = 45.0f;
     rig.distance = 2.2f;
     rig.size = 0.8f;
     rig.intensity = type == LightDesc::Type::Area ? 8.0f : type == LightDesc::Type::Directional ? 3.0f : 20.0f;
     rig.name = type == LightDesc::Type::Area ? "Alan ışığı" : type == LightDesc::Type::Directional ? "Güneş" : "Nokta ışık";
     tmp.lights.push_back(rig);
-    LightDesc d = placeStudioLights(tmp, box).front();
+    LightDesc d = placeStudioLights(tmp, box, m_s.camera.phi * RAD_TO_DEG).front();
     if (type == LightDesc::Type::Point) {
         // Nokta ışık yoğunluğu mesafenin karesiyle düşer; sahne ölçeğine göre ayarla.
         const float r = std::max(1e-3f, (box.pMax - box.pMin).length() * 0.5f);
@@ -520,6 +519,11 @@ void Application::saveProject() {
                 {"maxBounces", m_s.settings.maxBounces}, {"denoise", m_s.denoise},
                 {"output", {{"width", m_s.output.width}, {"height", m_s.output.height},
                             {"spp", m_s.output.spp}, {"format", m_s.output.format}}}};
+    {
+        json cams = json::array();
+        for (const auto& sc : m_s.savedCameras) cams.push_back({{"name", sc.name}, {"camera", cameraJson(sc.cam)}});
+        d.render["cameras"] = cams;
+    }
     d.environment = m_s.environment;
     d.lights = m_s.lights;
     std::string err;
@@ -566,6 +570,14 @@ bool Application::openProject(const std::string& path) {
         m_s.output.height = o->value("height", m_s.output.height);
         m_s.output.spp = o->value("spp", m_s.output.spp);
         m_s.output.format = o->value("format", m_s.output.format);
+    }
+    m_s.savedCameras.clear();
+    for (const auto& cj : d.render.value("cameras", json::array())) {
+        AppState::SavedCamera sc;
+        sc.name = cj.value("name", std::string("Kamera"));
+        sc.cam = m_s.camera;
+        readCamera(cj.value("camera", json::object()), sc.cam);
+        m_s.savedCameras.push_back(sc);
     }
     m_s.projectPath = path;
     m_s.undo.clear();
@@ -621,6 +633,43 @@ void Application::saveMaterialToLibrary(const std::string& name) {
     } else {
         setStatus("Malzeme kaydedilemedi", true);
     }
+}
+
+} // namespace photon
+
+namespace photon {
+
+// Malzeme panosu: kopyalanan malzemenin bir KOPYASI saklanır (sonradan asıl malzeme
+// düzenlense bile pano değişmez); yapıştırırken de yeni bir kopya atanır.
+void Application::copyMaterial() {
+    SceneNode* n = selectedNode();
+    std::shared_ptr<Material> src;
+    if (n) {
+        std::function<void(SceneNode&)> find = [&](SceneNode& s) {
+            if (!src && s.material) src = s.material;
+            for (auto& c : s.children) find(*c);
+        };
+        find(*n);
+    }
+    if (!src) {
+        setStatus("Kopyalanacak malzeme yok: önce bir parça seçin", true);
+        return;
+    }
+    m_s.clipboardMaterial = cloneMaterial(*src);
+    setStatus("Malzeme kopyalandı");
+}
+
+void Application::pasteMaterial() {
+    SceneNode* n = selectedNode();
+    if (!n || !m_s.clipboardMaterial) {
+        setStatus(m_s.clipboardMaterial ? "Yapıştırmak için bir parça seçin" : "Panoda malzeme yok", true);
+        return;
+    }
+    pushUndo();
+    auto mat = cloneMaterial(*m_s.clipboardMaterial);
+    forEachMesh(*n, [&](SceneNode& s) { s.material = mat; });
+    markDocumentChanged();
+    setStatus("Malzeme yapıştırıldı → " + n->name);
 }
 
 } // namespace photon

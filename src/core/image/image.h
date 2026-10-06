@@ -1,3 +1,6 @@
+// image.h — Düz float RGB görüntü: dokular, ortam (HDR) haritaları, çözülmüş render ve AOV'ler.
+// Bellek düzeni satır-öncelikli ve iç içe (interleaved) RGB: indeks = (y·w + x)·3.
+// Örnek birikimi burada değil, Film'de yapılır; Image yalnızca son/ham piksel değerlerini tutar.
 #pragma once
 
 #include "core/color/spectrum.h"

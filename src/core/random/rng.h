@@ -1,5 +1,5 @@
-// PCG32 sözde-rastgele sayı üreteci (O'Neill 2014, XSH-RR çıkışı). Hızlı, küçük durumlu
-// ve tohumlanabilir; örnekleyiciler ve testler bunu kullanır.
+// rng.h — PCG32 sözde-rastgele sayı üreteci (O'Neill 2014, XSH-RR çıkışı). Hızlı, küçük
+// durumlu ve tohumlanabilir; örnekleyiciler ve testler bunu kullanır.
 #pragma once
 
 #include <cstdint>
@@ -9,6 +9,9 @@ namespace photon {
 
 class RNG {
 public:
+    // Tohumlama: artış (inc) tek sayı olmalı ki LCG tam 2^64 periyoda ulaşsın → (seed<<1)|1.
+    // Farklı inc değerleri birbirinden bağımsız "akışlar" (stream) seçer; böylece her
+    // piksel/iş parçacığı kendi tohumuyla ilişkisiz bir dizi alır.
     explicit RNG(uint64_t seed = 0x853c49e6748fea9bULL) {
         m_state = 0;
         m_inc = (seed << 1u) | 1u;
@@ -17,6 +20,11 @@ public:
         uniformUint32();
     }
 
+    // İki aşama: (1) 64-bit LCG durumu ilerletir: s' = s·a + inc (mod 2^64). LCG'nin alt
+    // bitleri zayıftır, bu yüzden (2) çıkış permütasyonu XSH-RR uygulanır: üst bitleri
+    // xorshift ile karıştırıp 32 bite indirir, sonra en üst 5 bitle (oldState >> 59)
+    // belirlenen miktarda rastgele döndürür (rotate). Çıkış eski durumdan üretilir
+    // (paralel komut yürütmeye izin verir). (0u − rot) & 31 = 32 − rot, rot=0'da taşmasız.
     uint32_t uniformUint32() {
         uint64_t oldState = m_state;
         m_state = oldState * 6364136223846793005ULL + m_inc;

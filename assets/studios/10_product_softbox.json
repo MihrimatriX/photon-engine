@@ -1,0 +1,14 @@
+{
+  "id": "product_softbox",
+  "name": "Ürün Stüdyosu",
+  "description": "Üç softbox: ana, dolgu, kontur",
+  "environment": "studio_small_09",
+  "rotation": 0,
+  "intensity": 0.8,
+  "exposure": 0,
+  "lights": [
+    { "type": "area", "name": "Ana ışık", "azimuth": 50, "elevation": 40, "distance": 2.6, "size": 1.3, "intensity": 6.0, "color": [1.0, 0.97, 0.92] },
+    { "type": "area", "name": "Dolgu", "azimuth": -60, "elevation": 20, "distance": 3.0, "size": 1.8, "intensity": 1.6, "color": [0.95, 0.97, 1.0] },
+    { "type": "area", "name": "Kontur", "azimuth": 165, "elevation": 35, "distance": 2.4, "size": 0.9, "intensity": 8.0, "color": [0.92, 0.95, 1.0] }
+  ]
+}

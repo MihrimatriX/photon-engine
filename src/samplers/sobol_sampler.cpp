@@ -1,4 +1,4 @@
-// Burley 2020 hash tabanlı Owen karıştırmalı Sobol örnekleyicisinin uygulaması.
+// sobol_sampler.cpp — Burley 2020 hash tabanlı Owen karıştırmalı Sobol örnekleyicisinin uygulaması.
 // Yalnızca Sobol'ün ilk iki boyutu kullanılır (bit ters çevirme + Pascal üçgeni
 // üreteci); daha yüksek boyutlar her çağrıda bağımsız karıştırma ile "dolgu" yapılır.
 
@@ -63,6 +63,8 @@ uint32_t mix32(uint32_t x) {
     return x;
 }
 
+/// Mevcut karmaya yeni bir değer katar (boost::hash_combine kalıbı; 0x9e3779b9 = 2^32/φ,
+/// altın oran sabiti). Sonuç mix32'den geçirilir ki benzer girdiler ilişkisiz tohum versin.
 uint32_t hashCombine(uint32_t h, uint32_t v) {
     return mix32(h ^ (v + 0x9e3779b9u + (h << 6) + (h >> 2)));
 }
@@ -101,6 +103,8 @@ std::unique_ptr<Sampler> SobolSampler::clone(uint64_t seed) const {
     return std::make_unique<SobolSampler>(seed);
 }
 
+// Piksel karması = karma(tohum, x, y): her piksel kendi karıştırmasını alır. Komşu piksellerin
+// hataları ilişkisiz olur ve yapısal desen (moiré) yerine ince gürültü görünür.
 void SobolSampler::startPixel(int x, int y) {
     uint32_t h = mix32(static_cast<uint32_t>(m_seed) ^ mix32(static_cast<uint32_t>(m_seed >> 32)));
     h = hashCombine(h, static_cast<uint32_t>(x));

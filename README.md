@@ -1,108 +1,125 @@
 # PhotonEngine
 
-**A physically based CPU path tracer with a desktop editor for product visualization.**
+**Ürün görselleştirme için fiziksel tabanlı render motoru ve masaüstü stüdyo.**
 
-PhotonEngine is a C++20 renderer and a learning project: the goal is a fast, physically correct, easy-to-use engine, built while learning the whole computer-graphics pipeline. The work plan is in [`plan.md`](plan.md); the task list and the audit it is based on are in [`memory-bank/`](memory-bank/).
+PhotonEngine, KeyShot tarzı bir iş akışı sunan C++20 bir yol izleyicidir (path tracer):
+modeli sürükle-bırak ile içe aktar, kütüphaneden malzemeleri parçaların üzerine bırak,
+bir stüdyo/HDRI seç, viewport'ta birkaç saniyede gürültüsüz önizlemeyi gör ve tek tıkla
+yüksek çözünürlüklü render al. Aynı zamanda bir öğrenme projesidir: kod, bilgisayar
+grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazılmıştır.
 
----
-
-## What exists today
-
-- **Path tracer** with next-event estimation and MIS (power heuristic), Russian roulette, environment and area-light importance sampling.
-- **Materials:** Lambertian, mirror, smooth and rough glass (GGX), and a simplified Disney principled BRDF (Burley diffuse, GGX specular, clearcoat, anisotropy, sheen, thin diffuse transmission).
-- **Lights:** rectangular area lights, emissive meshes, point, directional, and an equirectangular HDR environment with a luminance CDF.
-- **Geometry:** triangle meshes and spheres in a single-level binned-SAH BVH.
-- **Cameras:** pinhole, thin lens (depth of field), orthographic.
-- **Sampling:** stratified (default) and independent samplers.
-- **Import:** OBJ (tinyobjloader) and glTF 2.0 (cgltf), with base-color, normal, roughness and metalness maps.
-- **Image I/O:** PNG, JPG, HDR, EXR in; PNG and EXR out.
-- **Denoising:** Intel Open Image Denoise when it is found at configure time. Without it, the "denoise" switch is only a 3×3 blur.
-- **Desktop editor:** GLFW + ImGui with docking, drag and drop, a material library, an OpenGL raster preview and progressive path-traced viewport.
-
-Known gaps and bugs are listed with file and line in [`memory-bank/02-bulgular.md`](memory-bank/02-bulgular.md). Nothing has been benchmarked yet.
+![Arayüz](docs/screenshots/arayuz-v2.png)
 
 ---
 
-## Build
+## Öne çıkanlar
 
-Requirements: CMake ≥ 3.21, Ninja, and a C++20 compiler (MSVC 19.4x+, GCC 12+, Clang 15+).
+**Render**
+- Çok sekmeli yol izleme: ışık örneklemesi (NEE) + BSDF örneklemesi, MIS (güç sezgiseli), Rus ruleti.
+- Owen karıştırmalı Sobol örnekleme (Burley 2020): ilerlemeli render'da hızlı yakınsama.
+- Intel Embree 4 ile ışın kesişimi (yoksa motorun kendi SAH BVH'si).
+- Intel Open Image Denoise (OIDN 2.5): viewport'ta etkileşim sırasında ve hedef örnekte yapay zekâ ile gürültü giderme; albedo + normal AOV'leri.
+- Ton eşleme: **Khronos PBR Nötr** (ürün renkleri için), AgX, ACES, Hable; EV pozlama; sRGB + titreşimli 8-bit.
 
-### Windows (MSVC + vcpkg)
+**Malzemeler**
+- Disney Principled: metal, plastik, araç boyası (vernik/clear coat), anizotropi (fırçalanmış metal), kumaş parlaklığı (sheen), ince yüzey geçirgenliği, ışık yayma.
+- Cam: kusursuz ve buzlu (GGX, VNDF örnekleme), kırılma indisi hazırları (su, cam, kristal, elmas).
+- 37 hazır malzeme (Plastik, Metal, Cam, Boya, Kumaş, Kauçuk, Seramik, Işık); motorla render edilmiş küçük resimler.
+- Dokular: taban rengi (sRGB), normal / pürüzlülük / metalik (doğrusal).
 
-`VCPKG_ROOT` must point at a vcpkg checkout. glfw3 and imgui come from vcpkg (`vcpkg.json`).
+**Aydınlatma**
+- HDRI ortamlar (Poly Haven, CC0) + prosedürel gökyüzleri; döndürme ve parlaklık.
+- Arka plan: ortam, düz renk ya da **şeffaf** (alfa kanallı PNG).
+- Otomatik sonsuz zemin (gölge ve yansıma taşır).
+- Alan (softbox), güneş ve nokta ışıklar; 6 stüdyo preset'i (ışıklar sahne boyutuna ve kameraya göre yerleşir).
+
+**Arayüz**
+- Kütüphane (malzeme / ortam / stüdyo / model / doku), sahne ağacı, özellikler (nesne, malzeme, ortam, ışıklar, kamera, görüntü).
+- Viewport: orbit/pan/zoom, tıkla-seç, çift tıkla pivot, ImGuizmo ile taşı/döndür/ölçekle, yön küpü, seçim çerçevesi.
+- UI'ı asla bekletmeyen render thread'i; sürüklerken düşük çözünürlük + anlık OIDN (çözünürlük merdiveni).
+- Geri al / yinele (tam belge anlık görüntüsü), proje dosyası (.photon, JSON), Türkçe yolları destekler.
+- Son render penceresi: çözünürlük hazırları (HD → 4K, kare, dikey, A4), örnek sayısı / süre sınırı, PNG / JPEG / EXR, canlı önizleme, kalan süre, turntable kare dizisi.
+
+---
+
+## Derleme (Windows, MSVC)
+
+Gerekenler: Visual Studio 2022/2026 (C++ masaüstü), CMake ≥ 3.21, Ninja (VS ile gelir).
 
 ```powershell
-. .\scripts\devshell.ps1          # VS developer shell at the repo root
+# 1) Bir kez: OIDN'yi indir (vcpkg'de yok) — third_party/oidn
+powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
+
+# 2) VS geliştirici kabuğu (VCPKG_ROOT, VS'in kendi vcpkg'sini gösterebilir)
+$env:VCPKG_ROOT = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\vcpkg"
+. .\scripts\devshell.ps1
+
+# 3) Yapılandır, derle, test et
 cmake --preset release
 cmake --build --preset release
 ctest --preset release
 ```
 
-`dev` (Debug) and `asan` (AddressSanitizer) presets work the same way.
+glfw, Dear ImGui (docking), ImGuizmo, nlohmann-json ve Embree vcpkg ile gelir (`vcpkg.json`).
+İlk yapılandırma Embree'yi derlediği için birkaç dakika sürer.
 
-### Without vcpkg (Linux or Windows)
+### Çalıştırma
 
-Every dependency has a pinned FetchContent fallback, so no package manager is needed:
-
-```bash
-cmake --preset fetch-release
-cmake --build --preset fetch-release
-ctest --preset fetch-release
+```powershell
+build\release\src\app\photon_app.exe                 # masaüstü uygulaması (örnek sahneyle açılır)
+build\release\src\app\photon_app.exe model.obj       # bir modelle aç
+build\release\photon_render.exe sahne.photon --res 1920x1080 --spp 256 --out render.png
 ```
 
-`fetch-asan` builds the same tree with AddressSanitizer and UBSan (GCC/Clang). On Linux, GLFW needs the X11 and Wayland development packages (`libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl-dev libwayland-dev libxkbcommon-dev`).
+`photon_render` arayüzsüz render ve ölçüm aracıdır: `--threads N`, `--bounces N`,
+`--no-denoise`, `--stats stats.json` (süre, Mörnek/sn).
 
-### CMake options
+`photon_app --screenshot cikti.png [--ui material|render|env|light|camera] [--spp 16]`
+arayüzü çizip ekran görüntüsü alır ve çıkar (görsel regresyon için).
 
-| Option | Default | Description |
+### CMake seçenekleri
+
+| Seçenek | Varsayılan | Açıklama |
 |---|---|---|
-| `PHOTON_BUILD_APP` | `ON` | Build the `photon_app` desktop editor |
-| `PHOTON_BUILD_CLI` | `OFF` (`ON` in `fetch-*`) | Build the `photon_render` command-line renderer |
-| `PHOTON_BUILD_TESTS` | `ON` | Build the GoogleTest suite |
-| `PHOTON_ENABLE_SIMD` | `ON` | Compile with AVX2/FMA |
-| `PHOTON_ENABLE_ASAN` | `OFF` | Instrument `photon_*` targets with AddressSanitizer |
-| `PHOTON_WARNINGS_AS_ERRORS` | `ON` (GCC/Clang), `OFF` (MSVC) | Warnings in `photon_*` targets fail the build |
-| `PHOTON_ENABLE_OIDN` | `OFF` | OIDN is linked automatically when `find_package(OpenImageDenoise)` succeeds; `ON` only adds a warning when it does not |
-
-OIDN is not in vcpkg. The plan (Phase 3) is to take the official prebuilt package into `third_party/oidn/`.
-
-Every third-party dependency and its license is listed in [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).
+| `PHOTON_BUILD_APP` | `ON` | `photon_app` masaüstü uygulaması |
+| `PHOTON_BUILD_CLI` | `ON` | `photon_render` komut satırı renderer'ı |
+| `PHOTON_BUILD_TESTS` | `ON` | GoogleTest birim testleri |
+| `PHOTON_ENABLE_OIDN` | `ON` | `third_party/oidn` bulunursa gürültü giderme |
+| `PHOTON_ENABLE_SIMD` | `ON` | AVX2/FMA |
+| `PHOTON_ENABLE_ASAN` | `OFF` | AddressSanitizer |
 
 ---
 
-## Usage
+## Kullanım
 
-```bash
-./build/fetch-release/src/app/photon_app      # or build\release\src\app\photon_app.exe
-```
+1. Modeli (OBJ / glTF / GLB) pencereye sürükleyin. Zemine oturtulur, kamera kadrajlanır, varsayılan stüdyo ışıkları kurulur.
+2. **Kütüphane → Malzeme**'den bir küreyi viewport'taki parçanın üzerine bırakın (ya da parçayı seçip çift tıklayın).
+3. **Kütüphane → Ortam / Stüdyo** ile aydınlatmayı değiştirin. Ortamı **Özellikler → Ortam**'dan döndürün.
+4. Parçayı tıklayıp **W / E / R** ile taşıyın, döndürün, ölçekleyin.
+5. **Render** (Ctrl+P) → çözünürlük ve kaliteyi seçip başlatın. Çıktı varsayılan olarak `Resimler/PhotonEngine`.
 
-1. Drag an OBJ or glTF model into the viewport, or use **Dosya → Ornek Sahne**.
-2. Drag materials from the library (left) onto parts.
-3. Pick an environment or a studio preset.
-4. **Render → Tam Cozunurluk** renders at full resolution; **Dosya → Disa Aktar** saves PNG or EXR.
-
-`photon_render` currently renders a fixed Cornell box; command-line arguments come in Phase 2.
+Tüm kısayollar: **F1**.
 
 ---
 
-## Layout
+## Kaynak düzeni
 
 ```
 src/
-├── core/          math, color, image + I/O, tone mapping, RNG, sampling warps, thread pool
-├── geometry/      sphere, triangle, mesh, BVH
-├── materials/     Lambertian, mirror, dielectric, Disney
-├── lights/        point, directional, area, mesh, environment
-├── camera/        perspective, thin lens, orthographic
-├── samplers/      independent, stratified
-├── integrators/   path tracer
-├── io/            OBJ and glTF loaders
-├── engine/        render Scene, Renderer, denoiser
-├── scene/         editable SceneGraph, material library, project files, undo
-├── preview/       OpenGL raster preview, picking, viewport texture
-├── ui/            theme, orbit camera, file dialog
-├── app/           photon_app
+├── core/          matematik, renk, görüntü + G/Ç, ton eşleme, RNG, örnekleme, iş parçacıkları
+├── geometry/      küre, üçgen, mesh, kendi BVH'miz
+├── materials/     Lambert, ayna, cam (dielectric), Disney Principled, mikro-yüzey yardımcıları
+├── lights/        nokta, yönlü, alan, mesh ışığı, HDRI ortam ışığı
+├── camera/        perspektif, ince mercek (alan derinliği), ortografik
+├── samplers/      bağımsız, tabakalı, Owen-Sobol
+├── integrators/   yol izleyici
+├── io/            OBJ ve glTF yükleyiciler
+├── engine/        render Scene, Renderer, Embree hızlandırıcısı, OIDN
+├── scene/         sahne ağacı, malzeme kütüphanesi, ışık/ortam belgesi, stüdyolar, proje dosyası, geri al
+├── ui/            tema + fontlar, ortak widget'lar, orbit kamera, dosya diyaloğu
+├── app/           photon_app: render denetleyicisi, küçük resimler, paneller
 └── main.cpp       photon_render
 ```
 
-See [`docs/architecture.md`](docs/architecture.md) for the module graph.
+Ayrıntılı mimari: [`docs/architecture.md`](docs/architecture.md). Çalışma planı ve tarama bulguları:
+[`memory-bank/`](memory-bank/). Üçüncü taraf lisansları: [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md).

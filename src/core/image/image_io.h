@@ -1,3 +1,7 @@
+// image_io.h — Görüntü okuma/yazma: PNG/JPG (8-bit, ton eşlenmiş), EXR (half float, doğrusal),
+// HDR/EXR/LDR yükleme. 8-bit dokular sRGB ya da doğrusal (veri) olarak çözülür.
+// Kural: renk dokuları sRGB kodludur ve doğrusala çevrilir; normal/pürüzlülük haritaları
+// "veri"dir, eğri uygulanmaz.
 #pragma once
 
 /// @file image_io.h

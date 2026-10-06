@@ -132,6 +132,9 @@ void Application::drawSceneTree() {
             }
             if (ImGui::MenuItem(ICON_COPY "  Çoğalt", "Ctrl+D")) duplicateSelection();
             if (ImGui::MenuItem("      Zemine oturt", "G")) placeSelectionOnGround();
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_PALETTE "  Malzemeyi kopyala", "Ctrl+C")) copyMaterial();
+            if (ImGui::MenuItem("      Malzemeyi yapıştır", "Ctrl+V", false, m_s.clipboardMaterial != nullptr)) pasteMaterial();
             if (ImGui::MenuItem(n.visible ? ICON_EYE_OFF "  Gizle" : ICON_EYE "  Göster")) {
                 pushUndo();
                 n.visible = !n.visible;

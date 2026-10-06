@@ -37,6 +37,11 @@ struct MaterialPreset {
     float diffuseTransmission = 0.0f;
     float emissive = 0.0f;  ///< Işık yayma gücü (baseColor ile çarpılır)
     float ior = 1.5f;       ///< Yalnız cam: kırılma indisi
+    std::string albedoMap;  ///< Mutlak yol (JSON'da assets/textures'a göreli)
+    std::string normalMap;
+    std::string roughnessMap;
+    bool boxMapping = false; ///< UV yerine kutu (triplanar) eşleme
+    float texScale = 1.0f;
 };
 
 class MaterialLibrary {

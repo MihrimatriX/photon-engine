@@ -49,6 +49,19 @@ public:
     /// @brief Evaluate the probability density function for sampling wi.
     virtual float pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const = 0;
 
+    /// Yalnız delta (Dirac) lobları varsa true: kusursuz ayna, pürüzsüz cam. Bu yüzeylerde
+    /// ışık örneklemesi (NEE) anlamsızdır (BSDF tek bir yön dışında 0) ve bir sonraki
+    /// isabetteki ışık yayımı MIS ağırlığı olmadan eklenir. Eskiden integratör bunu
+    /// eval() sonucunun siyah olmasından çıkarıyordu: köşe başına iki gereksiz eval.
+    virtual bool isDelta() const { return false; }
+
+    /// eval + pdf tek çağrıda. Doku okuma gibi parametre çözümleme işi olan malzemeler
+    /// (Disney) bunu bir kez yapmak için üzerine yazar.
+    virtual Color3f evalPdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si, float& pdfOut) const {
+        pdfOut = pdf(wo, wi, si);
+        return eval(wo, wi, si);
+    }
+
     /// @brief Returns emitted radiance from the surface (for light sources).
     virtual Color3f emitted(const SurfaceInteraction&) const {
         return Color3f::black();

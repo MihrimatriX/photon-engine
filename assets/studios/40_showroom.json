@@ -1,0 +1,12 @@
+{
+  "id": "showroom",
+  "name": "Showroom",
+  "description": "Sıcak tonlu fotoğraf stüdyosu + tek ana ışık",
+  "environment": "brown_photostudio_02",
+  "rotation": 90,
+  "intensity": 1.0,
+  "exposure": 0,
+  "lights": [
+    { "type": "area", "name": "Ana ışık", "azimuth": 35, "elevation": 45, "distance": 2.8, "size": 1.5, "intensity": 4.0, "color": [1.0, 0.95, 0.88] }
+  ]
+}

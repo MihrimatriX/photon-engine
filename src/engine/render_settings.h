@@ -1,3 +1,5 @@
+// render_settings.h — Render kalite ve çıktı ayarları: çözünürlük, örnek sayısı, sekme
+// sayısı, ton eşleme, pozlama, gürültü giderme. Viewport ve son render aynı yapıyı kullanır.
 #pragma once
 
 /// @file render_settings.h

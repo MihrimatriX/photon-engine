@@ -1,3 +1,5 @@
+// point_light.h — Nokta ışık: tek bir noktadan her yöne eşit ışıyan delta ışık.
+// İdeal bir kavramdır (sonsuz küçük kaynak): keskin gölge verir, kameraya görünmez.
 #pragma once
 
 /// @file point_light.h

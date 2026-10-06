@@ -13,6 +13,8 @@
 
 #include <imgui.h>
 
+#include <functional>
+#include <future>
 #include <string>
 
 struct GLFWwindow;
@@ -28,6 +30,7 @@ struct LaunchOptions {
     std::string openPath;        ///< Açılışta yüklenecek proje ya da model
     std::string scene = "sample";///< Boş belge yerine: "sample" | "cornell" | "empty"
     std::string uiState;         ///< Ekran görüntüsü için: "render", "material", ...
+    std::string saveProjectPath; ///< Açılış sahnesini bu .photon dosyasına kaydet (test/ölçüm)
 };
 
 class Application {
@@ -61,6 +64,16 @@ private:
     void uploadViewportFrame();
     bool takeScreenshot(const std::string& path);
     void setStatus(const std::string& msg, bool error = false);
+
+    /// Arka plan işi: @p work başka bir thread'de çalışır ve UI thread'inde çalıştırılacak
+    /// bir "tamamlama" fonksiyonu döndürür (belge yalnız UI thread'inde değişir).
+    void runAsync(std::string label, std::function<std::function<void()>()> work);
+    void pollAsync();
+    struct AsyncJob {
+        std::string label;
+        std::future<std::function<void()>> result;
+    };
+    std::vector<AsyncJob> m_jobs;
     void scanEnvironments();
     void scanFolderAssets();
 
@@ -83,8 +96,10 @@ public:
     void loadSampleScene();
     void loadCornellScene();
     bool importModel(const std::string& path, bool undoable = true);
+    void attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable);
     void applyMaterialPreset(uint64_t nodeUid, const MaterialPreset& preset);
     void applyEnvironment(const EnvAsset& env);
+    void applyEnvironmentNow(const EnvAsset& env);
     void applyStudio(const StudioPreset& studio);
     void addLight(LightDesc::Type type);
     void deleteSelection();
@@ -102,8 +117,9 @@ public:
     void openModelDialog();
     void openHdrDialog();
     void exportViewport();
-    std::shared_ptr<Material> groundMaterial() const;
     void saveMaterialToLibrary(const std::string& name);
+    void copyMaterial();
+    void pasteMaterial();
     template <typename F>
     void editLive(F&& fn) {
         m_s.viewport.edit(std::forward<F>(fn), true);

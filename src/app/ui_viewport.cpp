@@ -120,9 +120,29 @@ void Application::drawViewport() {
                 m_s.camera.focalLengthMm = std::clamp(m_s.camera.focalLengthMm * std::exp(io.MouseWheel * 0.08f), 10.0f, 600.0f);
                 m_s.camera.fov = fovDegreesFromFocalMm(m_s.camera.focalLengthMm);
             } else {
+                // İmlece doğru zoom: yarıçap s oranında küçülürken hedef de imlecin
+                // altındaki P noktasına doğru aynı oranda kayar: t' = P + (t − P)·s.
+                // Böylece P ekranda yaklaşık aynı yerde kalır (kamera P'ye doğru yürür).
+                Vec3f hit;
+                const float u = (io.MousePos.x - origin.x) / size.x;
+                const float v = (io.MousePos.y - origin.y) / size.y;
+                const float before = m_s.camera.radius;
                 m_s.camera.zoom(io.MouseWheel);
+                const float s = m_s.camera.radius / before;
+                if (!m_s.camera.orthographic && pickAt(u, v, &hit)) {
+                    for (int k = 0; k < 3; ++k) {
+                        const float p = k == 0 ? hit.x : k == 1 ? hit.y : hit.z;
+                        m_s.camera.target[k] = p + (m_s.camera.target[k] - p) * s;
+                    }
+                }
             }
         }
+    }
+    // Üzerine gelme vurgusu: imlecin altındaki parça (sürüklemiyorsak).
+    m_s.hoverUid = 0;
+    if (hovered && !gizmoBusy && !ImGui::IsAnyMouseDown()) {
+        const uint64_t h = pickAt((io.MousePos.x - origin.x) / size.x, (io.MousePos.y - origin.y) / size.y);
+        m_s.hoverUid = h == kGroundNodeUid ? 0 : h;
     }
     // Tıklama (sürüklemeden bırakma) → seçim; çift tık → pivot.
     if (hovered && !gizmoBusy) {
@@ -226,12 +246,12 @@ void Application::drawViewport() {
 }
 
 // Seçili parçanın dünya uzayı sınır kutusu, 12 kenarı ekrana izdüşürülerek çizilir.
-void Application::drawSelectionOutline(const ImVec2& origin, const ImVec2& size) {
-    SceneNode* n = selectedNode();
-    if (!n) return;
-    const AABB b = SceneGraph::nodeWorldBounds(*n);
+namespace {
+
+// Dünya uzayı kutusunun 12 kenarını ekrana izdüşürerek çizer; isteğe bağlı ad etiketi.
+void drawBox(const ViewProj& vp, const AABB& b, const ImVec2& origin, const ImVec2& size, ImU32 col,
+             float thickness, const char* label) {
     if (b.pMin.x > b.pMax.x) return;
-    const ViewProj vp = viewProj(m_s.camera, size.x / size.y);
     Vec3f c[8];
     for (int i = 0; i < 8; ++i)
         c[i] = Vec3f(i & 1 ? b.pMax.x : b.pMin.x, i & 2 ? b.pMax.y : b.pMin.y, i & 4 ? b.pMax.z : b.pMin.z);
@@ -241,11 +261,10 @@ void Application::drawSelectionOutline(const ImVec2& origin, const ImVec2& size)
     static const int edges[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3},
                                      {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
-    const ImU32 col = ui::col(ui::palette().accent, 0.75f);
     for (const auto& e : edges)
-        if (ok[e[0]] && ok[e[1]]) dl->AddLine(s[e[0]], s[e[1]], col, 1.25f);
-    // Ad etiketi: kutunun ekrandaki en üst noktasının üstünde.
+        if (ok[e[0]] && ok[e[1]]) dl->AddLine(s[e[0]], s[e[1]], col, thickness);
+    if (!label) return;
+    // Ad etiketi: kutunun ekrandaki en üst-sol noktasının üstünde.
     float top = 1e9f, left = 1e9f;
     for (int i = 0; i < 8; ++i)
         if (ok[i]) {
@@ -253,10 +272,70 @@ void Application::drawSelectionOutline(const ImVec2& origin, const ImVec2& size)
             left = std::min(left, s[i].x);
         }
     if (top < 1e8f) {
-        const ImVec2 ts = ImGui::CalcTextSize(n->name.c_str());
+        const ImVec2 ts = ImGui::CalcTextSize(label);
         const ImVec2 p(left, top - ts.y - 10.0f);
         dl->AddRectFilled(ImVec2(p.x - 6, p.y - 3), ImVec2(p.x + ts.x + 6, p.y + ts.y + 3), ui::col(ui::palette().accent), 5.0f);
-        dl->AddText(p, IM_COL32(20, 16, 12, 255), n->name.c_str());
+        dl->AddText(p, IM_COL32(20, 16, 12, 255), label);
+    }
+}
+
+} // namespace
+
+// Seçim ve üzerine gelme vurguları + seçili ışığın şekli (alan ışığı dörtgeni,
+// güneş yönü oku, nokta ışık dairesi). Hepsi yalnız ekrana çizilir; render'a girmez.
+void Application::drawSelectionOutline(const ImVec2& origin, const ImVec2& size) {
+    const ui::Palette& pal = ui::palette();
+    const ViewProj vp = viewProj(m_s.camera, size.x / size.y);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
+
+    if (m_s.hoverUid && m_s.hoverUid != m_s.selUid && m_s.gizmoOp == 0) {
+        if (SceneNode* h = m_s.graph.findByUid(m_s.hoverUid))
+            drawBox(vp, SceneGraph::nodeWorldBounds(*h), origin, size, ui::col(pal.text, 0.25f), 1.0f, nullptr);
+    }
+    if (SceneNode* n = selectedNode())
+        drawBox(vp, SceneGraph::nodeWorldBounds(*n), origin, size, ui::col(pal.accent, 0.75f), 1.25f, n->name.c_str());
+
+    if (m_s.selKind == SelectionKind::Light && m_s.selLight >= 0 && m_s.selLight < static_cast<int>(m_s.lights.size())) {
+        const LightDesc& l = m_s.lights[static_cast<size_t>(m_s.selLight)];
+        const ImU32 col = ui::col(pal.warning, 0.9f);
+        ImVec2 a, b;
+        if (l.type == LightDesc::Type::Area) {
+            // buildLights ile aynı taban: n hedefe bakar, u ve v dörtgenin kenarları.
+            Vec3f n = (l.target - l.position);
+            n = n.lengthSquared() > 0.0f ? n.normalized() : Vec3f(0, -1, 0);
+            const Vec3f up = std::abs(n.y) > 0.95f ? Vec3f(1, 0, 0) : Vec3f(0, 1, 0);
+            const Vec3f u = up.cross(n).normalized() * (l.width * 0.5f);
+            const Vec3f v = n.cross(up.cross(n).normalized()).normalized() * (l.height * 0.5f);
+            const Vec3f q[4] = {l.position - u - v, l.position + u - v, l.position + u + v, l.position - u + v};
+            ImVec2 s[4];
+            bool ok = true;
+            for (int i = 0; i < 4; ++i) ok = project(vp, q[i], origin, size, s[i]) && ok;
+            if (ok) {
+                dl->AddQuadFilled(s[0], s[1], s[2], s[3], ui::col(pal.warning, 0.12f));
+                dl->AddQuad(s[0], s[1], s[2], s[3], col, 1.5f);
+            }
+            if (project(vp, l.position, origin, size, a) && project(vp, l.target, origin, size, b)) {
+                dl->AddLine(a, b, ui::col(pal.warning, 0.45f), 1.0f);
+                dl->AddCircleFilled(b, 3.0f, col);
+            }
+        } else if (l.type == LightDesc::Type::Point) {
+            if (project(vp, l.position, origin, size, a)) {
+                dl->AddCircle(a, 9.0f, col, 24, 1.5f);
+                dl->AddCircleFilled(a, 3.0f, col);
+            }
+        } else {
+            // Güneş: sahne merkezinden ışığın geldiği yöne doğru bir ok.
+            const AABB box = m_s.graph.worldBounds();
+            const Vec3f c = box.pMin.x <= box.pMax.x ? box.centroid() : m_s.camera.targetVec();
+            const float r = box.pMin.x <= box.pMax.x ? (box.pMax - box.pMin).length() * 0.6f : 1.0f;
+            const Vec3f from = c - directionalTravelDir(l) * r;
+            if (project(vp, from, origin, size, a) && project(vp, c, origin, size, b)) {
+                dl->AddLine(a, b, col, 2.0f);
+                dl->AddCircleFilled(b, 4.0f, col);
+                dl->AddText(ImVec2(a.x + 6, a.y - 18), col, ICON_SUN);
+            }
+        }
     }
     dl->PopClipRect();
 }
@@ -265,6 +344,7 @@ void Application::drawSelectionOutline(const ImVec2& origin, const ImVec2& size)
 // çarpılarak yerel dönüşüme çevrilir: yerel = ebeveyn⁻¹ · dünya.
 void Application::drawGizmo(const ImVec2& origin, const ImVec2& size) {
     ImGuizmo::SetOrthographic(m_s.camera.orthographic);
+    ImGuizmo::SetGizmoSizeClipSpace(0.16f);
     ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
     ImGuizmo::SetRect(origin.x, origin.y, size.x, size.y);
     const ViewProj vp = viewProj(m_s.camera, size.x / size.y);
@@ -432,7 +512,7 @@ void Application::drawWelcome(const ImVec2& origin, const ImVec2& size) {
     ImGui::SameLine(0, 8);
     if (ui::GhostButton(ICON_FOLDER_OPEN "  Proje aç", ImVec2(bw, 38))) openProjectDialog();
     ImGui::SetCursorScreenPos(ImVec2(p.x + 24, p.y + 232));
-    ImGui::PushTextWrapPos(p.x + w - 24);
+    ImGui::PushTextWrapPos(p.x + w - 24.0f - ImGui::GetWindowPos().x); // pencereye göreli
     ImGui::TextColored(pal.textFaint, "İpucu: Kütüphaneden bir malzemeyi parçanın üzerine sürükleyin, "
                                       "ortamı değiştirmek için bir HDRI'a tıklayın, Ctrl+P ile render alın.");
     ImGui::PopTextWrapPos();

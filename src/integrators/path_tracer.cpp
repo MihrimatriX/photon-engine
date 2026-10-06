@@ -70,7 +70,7 @@ float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sam
 /// Son saçılmada NEE yapılır ve BSDF yönü de izlenir; o yöndeki ışık yayımı bir sonraki
 /// turda MIS ağırlığıyla eklenip döngü biter. Eskiden son noktada NEE yapılıyor ama
 /// tamamlayıcı BSDF ışını hiç izlenmiyordu, enerji kayboluyordu (bulgu lighting-m1).
-Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) const {
+Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, PrimaryHit* primary) const {
     Color3f L = Color3f::black();
     Color3f throughput = Color3f::white();
     Ray currentRay = ray;
@@ -97,8 +97,18 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
     for (int depth = 0;; ++depth) {
         SurfaceInteraction isect;
         bool hit = scene.intersect(currentRay, isect);
+        if (depth == 0 && primary) {
+            primary->hit = hit;
+            if (hit) primary->isect = isect;
+        }
 
         if (!hit) {
+            // Kameradan doğrudan görülen arka plan (yalnız birincil ışın; yansımalar ve
+            // cam arkası her zaman ortamı görür). Şeffafta katkı 0, alfa da 0 olur.
+            if (depth == 0 && primary && scene.background().mode != Background::Mode::Environment) {
+                if (scene.background().mode == Background::Mode::Color) L = scene.background().color;
+                break;
+            }
             if (env) {
                 Color3f Le = env->eval(currentRay.direction);
                 float weight = 1.0f;
@@ -139,7 +149,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
         }
 
         const Vec3f wo = -currentRay.direction;
-        bool isSpecular = isect.material->eval(wo, isect.normal, isect).isBlack();
+        const bool isSpecular = isect.material->isDelta();
 
         if (lightCount > 0 && !isSpecular) {
             for (int s = 0; s < shadowSamples; ++s) {
@@ -177,7 +187,8 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
                 Ray shadowRay(shadowOrigin, shadowDir, 1e-4f, shadowEnd);
 
                 if (!scene.intersectAny(shadowRay)) {
-                    Color3f f = isect.material->eval(wo, ls.wi, isect);
+                    float bsdfPdf = 0.0f;
+                    Color3f f = isect.material->evalPdf(wo, ls.wi, isect, bsdfPdf);
                     // |cos|: ışık yüzeyin arkasında olabilir; BSDF geçirgense (kaba cam,
                     // difüz geçirgenlik) f ≠ 0 döner ve bu ışık da sayılmalıdır. Saf yansıtıcı
                     // malzemede arka yarıküre için f = 0 olduğundan |cos| zararsızdır.
@@ -190,7 +201,6 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
                         float weight = 1.0f;
                         bool delta = !fromEnv && lights[lightIndex]->isDelta();
                         if (!delta) {
-                            float bsdfPdf = isect.material->pdf(wo, ls.wi, isect);
                             weight = powerHeuristic(shadowSamples, lightPdf, 1, bsdfPdf);
                         }
                         // Tahminci: f·Li·|cos| / (n_l · pdf_l), MIS ağırlığıyla.
@@ -221,7 +231,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler) con
         lastBsdfPdf = pdf;
         lastNormal = isect.normal;
         lastPoint = isect.point;
-        specularBounce = isect.material->eval(wo, wi, isect).isBlack();
+        specularBounce = isect.material->isDelta();
 
         Vec3f nextRayOrigin = offsetRayOrigin(isect.point, isect.normal, wi);
         currentRay = Ray(nextRayOrigin, wi);

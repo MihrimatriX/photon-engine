@@ -1,3 +1,6 @@
+// lambertian.h — Lambert (ideal mat/dağınık) malzeme: ışığı her yöne eşit saçar.
+// BRDF sabittir: f = albedo / π. İsteğe bağlı 'emission' ile yüzey ışık da yayabilir
+// (sahne yayıcı mesh'leri MeshLight olarak ışık listesine ekler).
 #pragma once
 
 /// @file lambertian.h

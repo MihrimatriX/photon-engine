@@ -1,3 +1,7 @@
+// test_environment.cpp — HDRI ortam ışığı testleri: önem örnekleme dağılımının integrali 1,
+// düz beyaz haritada pdf = 1/4π, parlak bölgenin sık seçilmesi, döndürmede sample/pdf
+// tutarlılığı ve kutuplarda yatay sarma (wrap) olmaması. pdf tutarsızsa ortam ışığı yanlış
+// parlaklıkta katkı verir.
 #include <gtest/gtest.h>
 #include "lights/environment_light.h"
 #include "core/sampling/sampling.h"

@@ -1,81 +1,109 @@
-# PhotonEngine – Architecture
+# PhotonEngine — Mimari
 
-Each subsystem is a static library under `src/<module>/`. Every target exports `src/` as its include root, so includes read `#include "core/math/vec.h"`.
+Her alt sistem `src/<modül>/` altında statik bir kütüphanedir. Her hedef `src/`'yi include kökü
+olarak verir: `#include "core/math/vec.h"`.
 
-This page describes the tree as it is. Planned changes (a two-level BVH, a `Film` type, a `RenderDevice` interface, CUDA) are in [`plan.md`](../plan.md) and [`memory-bank/01-gorevler.md`](../memory-bank/01-gorevler.md).
-
----
-
-## Link graph (from the CMake files)
-
-```
-photon_app ──► photon_ui ──► photon_preview ──► photon_scene ──► photon_engine
-     │                                                │                │
-     └──────────────► photon_scene, photon_engine     └─► photon_io    ├─► photon_integrators ─┐
-                                                                       ├─► photon_io           │
-photon_render (CLI) ──► photon_engine                                  ├─► photon_camera       │
-photon_tests ──► photon_engine, photon_scene, gtest_main               ├─► photon_samplers     │
-                                                                       ├─► photon_lights       │
-                                                                       ├─► photon_materials    │
-                                                                       ├─► photon_geometry     │
-                                                                       └─► photon_core         │
-                                                                                               │
-photon_integrators ──► materials, lights, camera, samplers, geometry, core ◄───────────────────┘
-photon_io          ──► materials, geometry, core
-photon_materials   ──► geometry, core
-photon_lights      ──► geometry, core
-photon_camera, photon_samplers, photon_geometry ──► photon_core
-```
-
-Known wart: `integrators/path_tracer.cpp` includes `engine/scene.h` but `photon_integrators` does not link `photon_engine`. It only links because both are static and the final executable pulls in both. Fixing this (moving the render `Scene` below the integrator) is task F2.3.
-
-Every `photon_*` target also links `photon_build_flags` privately: warnings (`/W4` or `-Wall -Wextra -Wpedantic`), optional warnings-as-errors, `/utf-8`, and the float model (`/fp:fast`, or `-ffast-math -fno-finite-math-only`). Third-party code does not get these flags.
+Bu sayfa ağacın bugünkü halini anlatır. Planlanan işler: [`memory-bank/01-gorevler.md`](../memory-bank/01-gorevler.md).
 
 ---
 
-## Modules
-
-| Module | Contents |
-|---|---|
-| `core` | `Vec2f/Vec3f/Vec4f`, `Mat4f`, `Transform`, `Ray`, `AABB`, `Frame` (Duff 2017 ONB), `Quaternion`; `Color3f`; `Image` (float RGB + per-pixel sample counts), PNG/EXR/HDR I/O via stb and tinyexr, tone mapping; PCG32 `RNG`; sampling warps; `ThreadPool` and `parallelFor2D`; an unused arena allocator. |
-| `geometry` | `Shape` interface, `Sphere`, `Triangle` (Möller–Trumbore), `TriangleMesh`, single-level binned-SAH `BVH` with 32-byte nodes. |
-| `materials` | `Material` interface (`sample`, `eval`, `pdf`, `emitted`), `Lambertian`, `Mirror`, `Dielectric` (smooth and GGX rough), `DisneyMaterial` with texture maps. |
-| `lights` | `Light` interface, `PointLight`, `DirectionalLight`, `AreaLight` (two-sided rectangle), `MeshLight`, `EnvironmentLight` (equirectangular, luminance·sinθ CDF). |
-| `camera` | `PerspectiveCamera`, `ThinLensCamera`, `OrthographicCamera`. |
-| `samplers` | `IndependentSampler`, `StratifiedSampler` (default for rendering). |
-| `integrators` | `PathTracer`: NEE + BSDF sampling with the power heuristic, Russian roulette, optional (non-physical) contact AO. |
-| `io` | `ObjLoader`, `GltfLoader`, with size and index limits on untrusted input. |
-| `engine` | Render `Scene` (shapes, lights, environment, BVH), `Renderer` (tile-major `render`, pass-major `renderSamplePass`/`renderProgressive`), `denoiser` (OIDN or a 3×3 blur). |
-| `scene` | Editable `SceneGraph` of `SceneNode`s, compiled into a render `Scene`; `MaterialLibrary` (JSON presets); project files; `UndoStack`; Cornell box builder. |
-| `preview` | `GLPreview` (OpenGL GGX/IBL raster preview), `PickingPass`, `ViewportTexture`. |
-| `ui` | ImGui theme, `OrbitCamera`, Windows file dialog, drag-and-drop payload ids. |
-| `app` | `Application`: window, panels, preview render thread, full render and turntable jobs. |
-
----
-
-## Data flow (desktop app)
+## 1. Bağlantı grafiği
 
 ```
-SceneGraph (UI thread)
-   │  SceneGraph::compile — bakes meshes to world space, builds the BVH
-   ▼
-render Scene  ──►  Renderer::renderSamplePass (preview thread + ThreadPool tiles)
-                       per pixel: sampler → camera ray → PathTracer::Li → Image::addSample
-   ▼
-Image (sum + count) ──► ViewportTexture::upload (average, tone map, sRGB) ──► ImGui viewport
-                    └─► saveImagePNG / saveImageEXR
+photon_app ──► photon_ui (tema, widget, orbit kamera, dosya diyaloğu) ──► imgui, photon_core
+     ├──► photon_scene ──► photon_engine ──► integrators, io, camera, samplers, lights,
+     │                         │              materials, geometry, core
+     │                         ├──► embree4 (varsa)     └──► OIDN (varsa)
+     │                         
+     └──► imguizmo, glfw, OpenGL
+photon_render (CLI) ──► photon_scene
+photon_tests ──► photon_engine, photon_scene, gtest
 ```
 
-The threading model, its single `imageMutex`, and the races it allows are described in the "UI → render veri akışı" section of [`memory-bank/02-bulgular.md`](../memory-bank/02-bulgular.md).
+## 2. Bir karenin yolculuğu (viewport)
 
----
+```
+ UI thread (ImGui, ~60 fps)                      Render thread (RenderController)
+ ─────────────────────────                       ────────────────────────────────
+ kullanıcı düzenler ──► belge (AppState):
+   SceneGraph, LightDesc[], EnvironmentDesc
+        │  markDocumentChanged()
+        ▼
+ compileIfDirty(): buildRenderScene()
+   ağaç → dünya uzayına bake, zemin, ışıklar,
+   ortam (HDRI + CDF), Embree/BVH
+        │  setScene(shared_ptr<const Scene>) ──────► sıradaki pass yeni sahneyi alır
+ her kare: setCamera / setDisplay ─────────────────► değiştiyse restart (birikim = 0)
+                                                    pass: parallelFor2D karoları
+                                                      tracePixel → PathTracer::Li
+                                                      Film += örnek, AOV += albedo/normal/alfa
+                                                    etkileşimde: 1/2–1/8 çözünürlük + OIDN(fast)
+                                                    durunca: tam çözünürlük, 2^k örnekte OIDN
+                                                    ton eşleme → RGBA8 → publish()
+ uploadViewportFrame() ◄── fetchFrame() ◄──────────
+   glTexSubImage2D → ImGui::Image
+```
 
-## Build targets
+Kurallar:
+- **UI hiçbir zaman bir pass'i beklemez.** Sahne değişince yeni, değişmez bir `Scene` kurulur ve
+  `shared_ptr` ile verilir; render thread'i eskisini pass bitene kadar tutar.
+- **Yerinde değişen tek şey malzeme parametreleridir** (kaydırıcı sürüklerken her karede sahne
+  derlemek pahalı olurdu). Bunun için `RenderController::edit()` / `Application::editLive()`:
+  mevcut pass iptal edilir (karo/satır düzeyinde, milisaniyeler), sahne kilidi alınır, değer
+  yazılır, birikim yeniden başlar.
+- **İptal:** `parallelFor2D` bir `atomic<bool>` alır; karolar ve satırlar başlamadan önce kontrol eder.
+- **Son render** malzemeleri kopyalanmış (izole) ayrı bir sahneyle kendi iş parçacığında çalışır;
+  viewport bu sırada duraklatılır.
 
-| Target | Type | Notes |
+## 3. İki sahne temsili
+
+| | `SceneGraph` (scene/) | `Scene` (engine/) |
 |---|---|---|
-| `photon_core` … `photon_ui` | static library | one per `src/` folder |
-| `photon_build_flags` | interface | warnings and float model for `photon_*` |
-| `photon_app` | executable | desktop editor, `PHOTON_BUILD_APP` |
-| `photon_render` | executable | CLI, `PHOTON_BUILD_CLI` |
-| `photon_tests` | executable | GoogleTest suite, registered with CTest |
+| Kim kullanır | UI, proje dosyası, geri al | render, seçim ışınları |
+| İçerik | düğüm ağacı: yerel dönüşüm, mesh (değişmez, paylaşılan), malzeme, görünürlük, uid | dünya uzayına bake edilmiş mesh'ler, ışık listesi, ortam, arka plan, BVH/Embree |
+| Değişebilir mi | evet | hayır (her değişiklikte yenisi) |
+| Köprü | `buildRenderScene()` (scene/document.cpp) | |
+
+Işıklar ve ortam da belgede sade tanımlar olarak tutulur (`LightDesc`, `EnvironmentDesc`); her
+derlemede `buildLights()` / `buildEnvironment()` ile değişmez render nesnelerine dönüşür.
+
+## 4. Geri al
+
+`UndoStack<DocSnapshot>`: her düzenlemeden önce belgenin tam kopyası (ağaç + ışıklar + ortam).
+Geometri değişmez olduğu için paylaşılır; yalnız malzemeler ve dönüşümler kopyalanır. Kaydırıcı
+sürüklemeleri tek adımda birleşir (`undoPoint`).
+
+## 5. Işık taşıma (integrators/path_tracer.cpp)
+
+- Her köşede: ışık örneklemesi (NEE, ışık seçimi düzgün, MIS ağırlığında seçim olasılığı dahil) +
+  BSDF örneklemesi; ikisi güç sezgiseliyle birleşir.
+- Delta yüzeyler (`Material::isDelta()`): ayna ve pürüzsüz camda NEE yapılmaz.
+- Rus ruleti: throughput'un en büyük bileşenine göre.
+- Ortam ışığı: luminance × sin θ dağılımından 2B CDF ile önem örneklemesi.
+- Örnekleyici: Owen karıştırmalı Sobol (samplers/sobol_sampler.*).
+
+## 6. Kesişim
+
+- `EmbreeAccel` (engine/embree_accel.*): Embree 4 varsa üretim yolu. Embree yalnız t ve
+  barisentrikleri verir; yüzey verisi motorun `Triangle::fillHit` koduyla hesaplanır.
+- `BVH` (geometry/bvh.*): kendi 12 kovalı SAH BVH'miz; yaprak sırasında yalın üçgen dizisi, yakın
+  çocuk önce, gölge ışınlarında erken çıkış. Embree yoksa ve testlerde kullanılır.
+
+## 7. Renk hattı
+
+Sahne doğrusal Rec.709. `Film` (toplam + sayı) → `resolve()` ortalama → (OIDN) → pozlama (2^EV) →
+ton eğrisi (PBR Nötr / AgX / ACES / ...) → sRGB OETF → titreşimli 8 bit. EXR çıktısı ton eşlenmemiş
+doğrusal radyanstır. Şeffaf arka planda renk önceden çarpılmış biriktiği için PNG'ye yazarken alfaya bölünür.
+
+## 8. Uygulama dosyaları (src/app)
+
+| Dosya | Sorumluluk |
+|---|---|
+| `application.*` | pencere, ImGui, ana döngü, kısayollar, sürükle-bırak, ekran görüntüsü modu |
+| `render_controller.*` | viewport render thread'i, çözünürlük merdiveni, OIDN, yayınlama |
+| `scene_ops.cpp` | belge işlemleri, geri al, proje kaydet/aç, seçim ışını |
+| `final_render.cpp` | son render ve turntable işleri |
+| `thumbnails.*` | malzeme küreleri ve HDRI önizlemeleri (arka planda, disk önbellekli) |
+| `ui_layout.cpp` | menü, panel yerleşimi, durum çubuğu, kısayollar |
+| `ui_library.cpp`, `ui_viewport.cpp`, `ui_scene.cpp`, `ui_properties.cpp`, `ui_render.cpp` | paneller |
+| `ui_common.*` | panel başlığı, küçük resim kartı, TRS ayrıştırma |

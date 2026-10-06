@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace photon {
 
@@ -288,9 +289,18 @@ void RenderController::threadMain() {
 
         const auto passStart = Clock::now();
         bool ok = false;
-        {
+        try {
             std::lock_guard<std::mutex> sceneLock(m_sceneMutex);
             ok = m_renderer.renderSamplePass(*scene, *camera, rs, m_film, m_spp, &m_cancel, &m_aovs);
+        } catch (const std::exception& e) {
+            // Bir karodaki hata thread'i öldürmesin: birikimi at, bir sonraki
+            // değişiklikte yeniden dene (F1.8). Hata konsola yazılır.
+            std::fprintf(stderr, "Viewport render hatası: %s\n", e.what());
+            std::lock_guard<std::mutex> relk(m_mutex);
+            m_dirty = false;
+            m_passInteractive = false;
+            m_spp = m_targetSpp > 0 ? m_targetSpp : m_spp;
+            continue;
         }
         m_passInteractive = false;
         const double passMs = std::chrono::duration<double, std::milli>(Clock::now() - passStart).count();

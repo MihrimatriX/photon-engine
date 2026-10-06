@@ -1,3 +1,6 @@
+// stratified_sampler.h — Tabakalı (jittered) örnekleyici: alanı nx × ny hücreye bölüp her
+// hücreye bir örnek düşürür. Örnek sayısı nx·ny ile sabittir; sayı önceden bilinmeyen
+// ilerlemeli render'da Owen-karıştırmalı Sobol daha uygundur.
 #pragma once
 
 /// @file stratified_sampler.h

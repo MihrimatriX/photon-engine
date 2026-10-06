@@ -65,6 +65,7 @@ int main(int argc, char** argv) {
         else if (a == "--timeout") opts.screenshotTimeout = static_cast<float>(std::atof(next().c_str()));
         else if (a == "--scene") opts.scene = next();
         else if (a == "--ui") opts.uiState = next();
+        else if (a == "--save-project") opts.saveProjectPath = next();
         else if (a == "--size") {
             const std::string s = next();
             std::sscanf(s.c_str(), "%dx%d", &opts.windowW, &opts.windowH);

@@ -1,3 +1,5 @@
+// test_ortho.cpp — Ortografik kamera (paralel ışınlar, farklı başlangıç noktaları) ve
+// odak uzaklığı (mm) ↔ dikey görüş açısı (FOV) dönüşümü testleri.
 #include <gtest/gtest.h>
 #include "camera/orthographic_camera.h"
 #include <cmath>

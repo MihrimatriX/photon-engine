@@ -1,3 +1,5 @@
+// test_ray.cpp — Işın (Ray) temel testleri: kurulum, varsayılan tMin (yüzeyin kendisiyle yeniden
+// kesişmeyi önleyen küçük ofset) ve r(t) = o + t·d.
 #include "gtest/gtest.h"
 #include "core/math/ray.h"
 

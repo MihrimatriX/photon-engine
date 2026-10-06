@@ -1,3 +1,7 @@
+// test_area_light.cpp — Alan ışığı testleri: sampleLi ile pdfLi'nin tutarlılığı, kameranın ışığı
+// doğrudan görmesi, NEE + BSDF yollarının MIS ile çift sayılmaması ve aynada ışığın görünmesi.
+// pdf ile sample() tutarlılığı bozulursa MIS ağırlıklarının toplamı 1 olmaz ve görüntü
+// sistematik olarak yanlış parlaklıkta (fazla ya da eksik) çıkar.
 #include "gtest/gtest.h"
 #include "lights/area_light.h"
 #include "engine/scene.h"
@@ -17,6 +21,9 @@ using namespace photon;
 
 namespace {
 
+// Önceden yazılmış sayıları sırayla döndüren sahte örnekleyici. Path tracer'ın her rastgele kararı
+// (ışık seçimi, ışık üzerindeki nokta, BSDF yönü) böylece sabitlenir ve tek bir yol, elle
+// hesaplanan beklenen değerle hassas karşılaştırılabilir. Liste bitince 0.5 döner.
 class ScriptedSampler : public Sampler {
 public:
     explicit ScriptedSampler(std::vector<float> xs) : m_xs(std::move(xs)) {}
@@ -99,6 +106,9 @@ TEST(AreaLight, CameraSeesEmissiveQuad) {
     EXPECT_NEAR(L.b, light->radiance().b, 1e-3f);
 }
 
+// Aynı ışık iki yoldan bulunabilir: NEE (ışığı örnekle) ve BSDF yönünün ışığa çarpması. İkisi de
+// tam ağırlıkla eklenirse ışık iki kez sayılır. MIS (güç sezgiseli, Veach 1997) katkıyı
+// w_nee + w_bsdf = 1 olacak şekilde böler. Test beklenen değeri adım adım elle kurar.
 TEST(AreaLight, DiffuseFloorLitWithoutDoubleCount) {
     auto floorMat = std::make_shared<Lambertian>(Color3f::white());
     Scene scene;

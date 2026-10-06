@@ -1,3 +1,8 @@
+// sampler.h — Soyut örnekleyici arayüzü: Monte Carlo integrali için [0,1) sayıları üretir.
+// Bir piksel örneği bir "yol"dur ve her get1D/get2D çağrısı o yolun bir sonraki boyutunu
+// (piksel jitter, lens, BSDF yönü, ışık seçimi, Rus ruleti...) besler. İyi örnekleyici bu
+// boyutların her birinde noktaları düzgün yayarak aynı örnek sayısında daha az gürültü verir.
+// Kullanım: startPixel(x,y) → her örnek için startSample(i) → get1D/get2D çağrıları.
 #pragma once
 
 /// @file sampler.h

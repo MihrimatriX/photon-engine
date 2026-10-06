@@ -61,33 +61,21 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - Faz 1b **yarım (WIP commit, derlenmiyor)**. Yapılanlar: `core/math/float_bits.h`, `core/color/transfer.{h,cpp}` (sRGB; `srgbEncode` TODO(human), şimdilik gamma 2.2), `core/image/film.{h,cpp}` (toplam+sayı, NaN/negatif reddi), `core/platform/path.h` (UTF-8 yollar), `Image` artık yalnız düz RGB, `image_io` (ortalama + dither'lı PNG, half+ZIP EXR, `TextureEncoding` sRGB/Linear, LDR/HDR biçim kontrolü, STBI UTF-8), tone mapping (EV varsayılanı 0, sRGB encode), denoiser ve renderer `Film`'e geçti (y=0 üstte, `renderProgressive` iptal edilebilir ve `Image` döner), OBJ'de V çevrildi, Disney veri haritaları doğrusal, viewport_texture sadeleşti.
   - **Kalan (derlemeyi tamamlamak için):** `application.{h,cpp}`: `accumImage` → `Film accumFilm` + `Image displayImage` + `displayDirty`; render thread `accumFilm.resize`; UI upload'ta kilit altında `resolve()`, denoise ve upload kilit dışında; export `displayImage`'ı yazar; tam render `renderProgressive` dönüş değerini kaydeder; ton eşleme/pozlama `markDirty` yerine `displayDirty`; CPU dokusu UV (0,0)-(1,1), GL önizleme (0,1)-(1,0); `gpuTexture` silinir. `tests/test_product.cpp` Denoise testleri `Image`/`Film`'e göre güncellenir. Ardından yeni testler: `test_export_roundtrip`, `test_texture_colorspace`; `tests/learning/test_srgb_oetf.cpp` ayrı `photon_learning_tests` hedefinde, ctest etiketi `todo_human`.
   - Sonra Faz 1c (cam: `refractVec` gövdesi TODO(human) olarak kalır, kırmızı `test_snell` learning hedefine), 1d ve 1a.
+- **2026-10-06 (oturum 3, "KeyShot'un yerini alacak" büyük geçiş, dal `keyshot-overhaul`):**
+  - Windows/MSVC derlemesi ilk kez yeşil: VS 18'in kendi vcpkg'si (`VCPKG_ROOT` oturumda ona çevrilir), testler geçiyor.
+  - **Fizik (paralel ajan, birleştirildi):** cam kırılması ters değil, eta² ölçekleme, PBRT-v4 pürüzlü cam + VNDF, kararlı GGX, F0 = 0.08·specular, enerji korunan clearcoat, iletimde |cos| NEE, son köşe, MIS'te ışık seçim olasılığı, max-bileşen Rus ruleti, NaN koruması, Owen-Sobol örnekleyici (üretimde), kesin sRGB OETF, küçük üçgen eşiği, küre teğeti. `refractVec` TODO(human)'ı ve `srgbEncode` TODO(human)'ı kapandı.
+  - **Motor:** iptal edilebilir karolar, kayıp-uyanma yarışı kapandı, Scene malzemeleri sahiplenir, BVH tek sefer, ortam ışığı `shared_ptr<const Image>` + döndürme/parlaklık, arka plan (ortam/renk/şeffaf), AOV'ler örnek başına (ek ışın yok, `PathTracer::Li(..., PrimaryHit*)`), kalıcı OIDN cihazı (2.5.1, `third_party/oidn`), AgX + Khronos PBR Nötr, PNG alfa/JPEG çıktısı, `Material::isDelta/evalPdf`, Embree 4 (`engine/embree_accel.*`, kendi BVH yedek), yalın üçgen testli BVH gezinmesi.
+  - **Belge katmanı (scene/):** JSON malzeme kütüphanesi (42 preset, dokulu olanlar dahil, kutu eşleme + tekrar), `LightDesc`/`EnvironmentDesc`, kameraya göreli stüdyo preset'leri (6), model içe aktarma, proje v2 (her şey kaydedilir, göreli yollar, atomik yazım), anlık-görüntü geri al, `buildRenderScene`.
+  - **Uygulama yeniden yazıldı (src/app, 13 dosya):** UI'ı bekletmeyen `RenderController` (çözünürlük merdiveni + etkileşimde OIDN), motorla render edilen küçük resimler (disk önbelleği), ImGuizmo, yön küpü, imlece doğru zoom, çift tık pivot, seçim/üzerine gelme kutuları, ışık şekilleri, kayıtlı kameralar, malzeme kopyala/yapıştır, asenkron içe aktarma/HDRI, son render penceresi (önizleme, kalan süre, durdur ve kaydet), turntable, `--screenshot` modu. Inter + Lucide, Türkçe arayüz, WIN32 alt sistemi, kullanıcı klasörü `%APPDATA%/PhotonEngine`.
+  - **CLI:** `photon_render` proje/model render eder, `--stats` yazar. `bench/scenes/showcase.photon`.
+  - **Yorumlar:** her kaynak dosyada Türkçe başlık; özel mantığa açıklamalar. `docs/file-reference.md` başlıklardan üretilir (`scripts/gen_file_reference.sh`).
+  - **Ölçüm (i7-6700K, 960×540, 8 sekme, Embree öncesi):** 2.3 M örnek/sn; tek thread profil: kesişim %44, malzeme değerlendirme %27.
 - **Sıradaki adımlar:**
-  - `F0.1` baz commit. Onay gerekiyor: 13 değişmiş ve 6 izlenmeyen dosya var.
-  - `F0.2` vcpkg seçimi: VS'in kendi vcpkg'si mi, yoksa `C:\vcpkg`'ye yeniden kurulum mu.
-  - `F0.4`: tek doğruluk kaynağı ne olacak, bu klasör mü yoksa `docs/ROADMAP.md` mi.
-- **Açık karar:** `memory-bank/` git'e commit edilecek mi? Öneri: evet. Yalnız geliştirici notu; ürünle dağıtılmaz.
-
-## Mimari özet (bugünkü hal)
-
-- **Modül zinciri:**
-  - `photon_core` ← `geometry` ← `materials`/`lights` ← `integrators` ← `engine` (Scene, Renderer, denoiser) ← `scene` (SceneGraph, MaterialLibrary, project_io) ← `preview`/`ui` ← `app`.
-  - Döngü var: `path_tracer.cpp` dosyası `engine/scene.h`'i içeriyor ama o modüle bağlanmıyor.
-- **İki sahne temsili:**
-  - Düzenlenebilir `SceneGraph`.
-  - Düz render `Scene`: dünya uzayına bake edilmiş kopyalar ve tek global BVH.
-  - Tek köprü `SceneGraph::compile`. Ama köprü bir anlık görüntü üretmiyor: malzemeler, HDRI ve dokular ham işaretçiyle ödünç alınıyor.
-- **Thread'ler:**
-  - UI thread'i.
-  - Önizleme kontrol thread'i.
-  - Global havuz (`hardware_concurrency` işçi).
-  - Tam render ya da turntable thread'i.
-- **Kilit:** tek kilit `imageMutex` var ve bir pass boyunca tutuluyor; bu yüzden UI pass hızında (~4 fps) çalışıyor. Ayrıntılı veri akışı `02-bulgular.md`'nin sonunda.
-- **Sağlam olanlar (üzerine inşa edilir):**
-  - Duff 2017 ONB, kofaktör ters matris, ters-transpoz normal dönüşümü, PCG32.
-  - Örnekleme warp'ları ve pdf'leri, kesin dielektrik Fresnel.
-  - Ortam ışığı CDF'si ve sinθ Jakobiyeni.
-  - MIS iskeleti, binned SAH BVH, thin lens.
-  - `ScriptedSampler` test düzeneği (`tests/test_area_light.cpp:20-43`).
+  - Embree sonrası ölçüm ve `bench/BASELINE.md` (F2.13).
+  - F2.6/F2.7 furnace + chi-kare testleri; F2.8 golden görüntüler.
+  - F3.8 malzeme ID tablosu / geometri önbelleği: büyük modelde ışık-ortam düzenlemesi tüm sahneyi yeniden bake ediyor. Faz 6 TLAS/BLAS (Embree instancing) ile birlikte.
+  - Kutu eşleme dünya uzayında (nesne taşınınca doku kayar) → nesne uzayı.
+  - TODO(human) öğrenme maddeleri bu oturumda kullanıcı yokken Claude tarafından yazıldı (kullanıcı isteği: "tüm işleri sen yap"). İstenirse ilgili fonksiyonlar egzersiz olarak yeniden boşaltılabilir.
 
 ## Kaynaklar (CG/CGI pipeline)
 

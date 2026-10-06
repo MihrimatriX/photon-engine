@@ -1,3 +1,8 @@
+// gltf_loader.cpp — cgltf ile glTF 2.0 okuma ve motor türlerine dönüştürme.
+// glTF, ikili tamponlara işaret eden bir JSON'dur: buffer → bufferView → accessor zinciri.
+// Bu zincirdeki her uzunluk/ofset güvenilmez girdi sayılıp burada doğrulanır.
+// Dönüşümler: düğüm matrisi (sütun-öncelikli) → Transform, konum/normal → dünya uzayı,
+// pbrMetallicRoughness → DisneyMaterial, baseColor dokusu → albedo görüntüsü.
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 
@@ -39,6 +44,8 @@ bool fileWithin(const std::filesystem::path& p, uintmax_t cap) {
     return !ec && sz <= cap;
 }
 
+// Bozuk dosyada işaretçiler cgltf'in kendi dizilerinin dışını gösterebilir. nodeOwned /
+// meshOwned, işaretçinin gerçekten data->nodes / data->meshes dizisinin içinde olduğunu doğrular.
 bool nodeOwned(const cgltf_data* data, const cgltf_node* node) {
     return data && data->nodes && node
         && node >= data->nodes && node < data->nodes + data->nodes_count;
@@ -49,6 +56,8 @@ bool meshOwned(const cgltf_data* data, const cgltf_mesh* mesh) {
         && mesh >= data->meshes && mesh < data->meshes + data->meshes_count;
 }
 
+// Ebeveyn zinciri sonlu mu? cgltf_node_transform_world bu zinciri yukarı doğru yürür;
+// döngülü bir dosya (A'nın ebeveyni B, B'ninki A) sonsuz döngü olurdu.
 bool parentChainFinite(const cgltf_data* data, const cgltf_node* node) {
     const cgltf_node* p = node;
     for (int steps = 0; p; ++steps) {
@@ -58,6 +67,7 @@ bool parentChainFinite(const cgltf_data* data, const cgltf_node* node) {
     return true;
 }
 
+// Bir accessor elemanının bayt boyutu = bileşen sayısı (VEC3 → 3) × bileşen boyutu (float → 4).
 uint64_t accessorElemBytes(const cgltf_accessor* acc) {
     int comps = 0;
     switch (acc->type) {
@@ -79,6 +89,9 @@ uint64_t accessorElemBytes(const cgltf_accessor* acc) {
     return static_cast<uint64_t>(comps) * static_cast<uint64_t>(compBytes);
 }
 
+// Accessor'ın okuyacağı son bayt bufferView'un içinde mi? Son elemanın bitişi:
+//   offset + stride·(count - 1) + elemBoyutu ≤ view.size   (64-bit'te, taşma kontrolüyle).
+// bufferView'suz accessor glTF kuralına göre sıfırlarla dolu sayılır, okumak güvenlidir.
 bool accessorBytesFit(const cgltf_accessor* acc) {
     if (!acc || acc->count > kMaxGltfCorners) return false;
     if (!acc->buffer_view) return true;
@@ -95,6 +108,8 @@ bool accessorBytesFit(const cgltf_accessor* acc) {
     return last >= static_cast<uint64_t>(acc->offset) && last <= view->size;
 }
 
+// Tamponlar yüklenmeden ÖNCE, JSON aşamasında sayım sınırları: devasa bir "count" bellek
+// tahsisini patlatmasın diye dosya daha baştan reddedilir.
 bool countsOk(const cgltf_data* data) {
     if (!data) return false;
     if (data->nodes_count > kMaxGltfNodes || (data->nodes_count && !data->nodes)) return false;
@@ -128,6 +143,8 @@ bool countsOk(const cgltf_data* data) {
     return true;
 }
 
+// Harici .bin dosyalarının boyutu da yüklemeden önce kontrol edilir. "data:" URI'leri
+// JSON'un içindedir, dolayısıyla zaten dosya boyutu sınırına dahildir.
 bool buffersWithinLimit(const cgltf_data* data, const std::filesystem::path& baseDir) {
     uint64_t total = 0;
     for (cgltf_size i = 0; i < data->buffers_count; ++i) {
@@ -143,6 +160,8 @@ bool buffersWithinLimit(const cgltf_data* data, const std::filesystem::path& bas
     return true;
 }
 
+// glTF matrisleri sütun-öncelikli (column-major) saklar: cm[col·4 + row]. Mat4f(row, col)
+// erişimiyle yerleştirilir; öteleme son sütunda (col = 3) kalır.
 Mat4f fromCgltfColumnMajor(const cgltf_float* cm) {
     Mat4f m;
     for (int col = 0; col < 4; ++col) {
@@ -153,6 +172,10 @@ Mat4f fromCgltfColumnMajor(const cgltf_float* cm) {
     return m;
 }
 
+// baseColor dokusu: önce harici dosya (png/jpg/...), olmazsa .glb içine gömülü bufferView.
+// glTF'e göre baseColor dokusu sRGB kodludur; loadImageLDR varsayılan olarak sRGB → doğrusal
+// (linear) çözer (bkz. image_io.h TextureEncoding). Pürüzlülük/normal haritaları doğrusal
+// veri olurdu (TextureEncoding::Linear); onlar henüz okunmuyor.
 void tryBaseColor(DisneyMaterial& disney, const cgltf_material& mat, const std::filesystem::path& baseDir) {
     if (!mat.has_pbr_metallic_roughness) return;
     const cgltf_texture* tex = mat.pbr_metallic_roughness.base_color_texture.texture;
@@ -185,6 +208,9 @@ void tryBaseColor(DisneyMaterial& disney, const cgltf_material& mat, const std::
     if (loaded) disney.setAlbedoImage(std::make_shared<Image>(std::move(*loaded)));
 }
 
+// glTF metallic-roughness → Disney: baseColor, metallic ve roughness doğrudan eşleşir.
+// Pürüzlülük 0.001'e kırpılır: α = r² → 0 olursa GGX D sonsuza gider (tam ayna delta'dır).
+// Son argüman specular = 0.5 → F0 = 0.08·0.5 = 0.04, glTF'in sabit dielektrik yansıması.
 std::shared_ptr<Material> makePbrMaterial(const cgltf_material& mat, const std::filesystem::path& baseDir) {
     if (mat.has_pbr_metallic_roughness) {
         const auto& pbr = mat.pbr_metallic_roughness;
@@ -198,6 +224,9 @@ std::shared_ptr<Material> makePbrMaterial(const cgltf_material& mat, const std::
     return std::make_shared<Lambertian>(Color3f(0.8f));
 }
 
+// Tek bir primitive'i TriangleMesh'e çevirir. Yalnız TRIANGLES modu desteklenir; strip/fan/
+// çizgi sessizce atlanır (hata değil → true). Konum ve normaller burada dünya uzayına
+// taşınır, mesh'in ayrıca bir dönüşümü olmaz. TANGENT özniteliği okunmaz.
 bool appendPrimitive(GltfLoadResult& result, const cgltf_primitive& prim, const Transform& world,
                      const Material* defaultMaterial, const std::filesystem::path& baseDir,
                      size_t& corners) {
@@ -236,6 +265,8 @@ bool appendPrimitive(GltfLoadResult& result, const cgltf_primitive& prim, const 
         out = world.transformPoint(Vec3f(v[0], v[1], v[2]));
         return finite3(out.x, out.y, out.z);
     };
+    // Normaller nokta gibi dönüşmez: düzgün olmayan ölçekte yüzeye dik kalmaları için
+    // ters-devrik (M⁻¹)ᵀ ile çarpılır (transformNormal), sonra yeniden normalize edilir.
     auto readNormal = [&](const cgltf_accessor* acc, size_t i, Vec3f& out) -> bool {
         float v[3] = {};
         if (!cgltf_accessor_read_float(acc, i, v, 3)) return false;
@@ -244,6 +275,8 @@ bool appendPrimitive(GltfLoadResult& result, const cgltf_primitive& prim, const 
         out = n.lengthSquared() > 0.0f ? n.normalized() : n;
         return finite3(out.x, out.y, out.z);
     };
+    // glTF'te UV (0,0) görüntünün sol-ÜST köşesidir, Image satır düzeniyle aynı:
+    // OBJ'deki gibi v = 1 - v çevirmesi gerekmez.
     auto readVec2 = [&](const cgltf_accessor* acc, size_t i, Vec2f& out) -> bool {
         float v[2] = {};
         if (!cgltf_accessor_read_float(acc, i, v, 2)) return false;
@@ -259,6 +292,8 @@ bool appendPrimitive(GltfLoadResult& result, const cgltf_primitive& prim, const 
     if (normAcc && !accessorBytesFit(normAcc)) return false;
     if (uvAcc && !accessorBytesFit(uvAcc)) return false;
 
+    // İndeksli çizimde de köşeler kopyalanır (yeni indeks = sıra numarası). Her indeks
+    // konum/normal/uv accessor sayısına karşı doğrulanır; tek bozuk indeks dosyayı reddeder.
     auto pushCorner = [&](cgltf_size vi, uint32_t slot) -> bool {
         if (vi >= posAcc->count) return false;
         if (normAcc && vi >= normAcc->count) return false;
@@ -281,6 +316,7 @@ bool appendPrimitive(GltfLoadResult& result, const cgltf_primitive& prim, const 
     };
 
     if (prim.indices) {
+        // glTF'e göre indeks bileşeni yalnız işaretsiz 8/16/32 bit olabilir.
         const auto comp = prim.indices->component_type;
         if (comp != cgltf_component_type_r_8u && comp != cgltf_component_type_r_16u
             && comp != cgltf_component_type_r_32u) return false;
@@ -305,6 +341,9 @@ bool appendPrimitive(GltfLoadResult& result, const cgltf_primitive& prim, const 
     return true;
 }
 
+// Sahne ağacını derinlik-öncelikli gezer. cgltf_node_transform_world, düğümün tüm ebeveyn
+// matrislerini çarparak dünya matrisini verir. 'seen' bir düğümün iki kez ziyaret edilmesini
+// (döngü veya paylaşılan çocuk) reddeder; özyineleme derinliği de sınırlıdır.
 bool walkNode(const cgltf_data* data, GltfLoadResult& result, cgltf_node* node,
               const Material* defaultMaterial, const std::filesystem::path& baseDir,
               int depth, std::unordered_set<const cgltf_node*>& seen, size_t& corners) {
@@ -335,6 +374,8 @@ bool walkNode(const cgltf_data* data, GltfLoadResult& result, cgltf_node* node,
 
 } // namespace
 
+// Akış: dosya boyutu → JSON ayrıştır → sayım/tampon sınırları → tamponları yükle → sahneyi gez.
+// Herhangi bir adımda hata olursa yarım sonuç yerine boş sonuç döner (ya hep ya hiç).
 GltfLoadResult GltfLoader::load(const std::string& path, const Material* defaultMaterial) {
     GltfLoadResult result;
     if (!fileWithin(path, kMaxGltfFileBytes)) {
@@ -376,6 +417,7 @@ GltfLoadResult GltfLoader::load(const std::string& path, const Material* default
         }
     }
 
+    // Sahne ağacı hiç mesh vermediyse (ör. düğümsüz dosya) mesh'ler birim dönüşümle doğrudan alınır.
     if (ok && result.meshes.empty()) {
         for (size_t mi = 0; ok && mi < data->meshes_count; ++mi) {
             const cgltf_mesh& mesh = data->meshes[mi];

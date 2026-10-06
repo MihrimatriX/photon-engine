@@ -36,6 +36,12 @@ bool GhostButton(const char* label, const ImVec2& size = ImVec2(0, 0));
 /// Yan yana seçenekler; tıklanınca *current değişir.
 bool Segmented(const char* id, int* current, const char* const* items, int count, float width = -1.0f);
 
+/// "Doldurmalı" kaydırıcılar: değer çubuğun soldan dolan kısmıyla gösterilir,
+/// sayı ortada okunur (ImGui'nin tutamacı metnin üstüne binmez). İmzalar
+/// ImGui::SliderFloat/SliderInt ile aynı; Ctrl+tık ile değer yazılabilir.
+bool SliderF(const char* id, float* v, float vMin, float vMax, const char* fmt = "%.2f", ImGuiSliderFlags flags = 0);
+bool SliderI(const char* id, int* v, int vMin, int vMax, const char* fmt = "%d", ImGuiSliderFlags flags = 0);
+
 /// Açık/kapalı anahtarı (iOS tarzı).
 bool Toggle(const char* id, bool* value);
 

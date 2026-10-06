@@ -1,3 +1,4 @@
+# src/materials/CMakeLists.txt — photon_materials: BSDF'ler (Lambertian, ayna, cam, Disney).
 add_library(photon_materials STATIC
     lambertian.cpp
     mirror.cpp

@@ -60,9 +60,9 @@ struct PixelSample {
     float alpha = 1.0f;
 };
 
-// Tek bir alt-piksel örneği. Arka plan modu ya da AOV istendiğinde birincil
-// ışın önce burada kesiştirilir: ıskalarsa integrator hiç çağrılmaz (arka plan
-// rengi / şeffaflık doğrudan yazılır), çarparsa ilk yüzeyden AOV toplanır.
+// Tek bir alt-piksel örneği. AOV istendiğinde ya da arka plan modu ortam değilse
+// path tracer ilk kesişimi bize bildirir (ayrı bir birincil ışın atılmaz): ıskalayan
+// kamera ışınına arka plan rengi/şeffaflık uygulanır, çarpanda albedo ve normal alınır.
 PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& integrator,
                        Sampler& sampler, int x, int y, int sampleIndex,
                        int width, int height, bool wantAovs) {
@@ -77,26 +77,25 @@ PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& int
 
     PixelSample out;
     const Background& bg = scene.background();
-    if (wantAovs || bg.mode != Background::Mode::Environment) {
-        Ray probe = ray;
-        SurfaceInteraction isect;
-        if (!scene.intersect(probe, isect)) {
-            const EnvironmentLight* env = scene.environment();
-            Color3f envL = env ? env->eval(ray.direction) : Color3f::black();
-            switch (bg.mode) {
-                case Background::Mode::Environment: out.L = envL; break;
-                case Background::Mode::Color: out.L = bg.color; break;
-                case Background::Mode::Transparent: out.L = Color3f::black(); break;
-            }
-            out.albedo = clamp01(bg.mode == Background::Mode::Color ? bg.color : envL);
-            out.normal = Color3f(0.0f);
-            out.alpha = 0.0f;
-            return out;
-        }
-        out.albedo = clamp01(primaryAlbedo(isect));
-        out.normal = Color3f(isect.normal.x, isect.normal.y, isect.normal.z);
+    if (!wantAovs && bg.mode == Background::Mode::Environment) {
+        out.L = integrator.Li(ray, scene, sampler);
+        return out;
     }
-    out.L = integrator.Li(ray, scene, sampler);
+    PathTracer::PrimaryHit primary;
+    out.L = integrator.Li(ray, scene, sampler, &primary);
+    if (primary.hit) {
+        out.albedo = clamp01(primaryAlbedo(primary.isect));
+        const Vec3f n = primary.isect.normal;
+        out.normal = Color3f(n.x, n.y, n.z);
+        out.alpha = 1.0f;
+    } else {
+        // OIDN için ıskalayan pikselin albedosu: görünen arka planın rengi (≤ 1).
+        const EnvironmentLight* env = scene.environment();
+        out.albedo = clamp01(bg.mode == Background::Mode::Color ? bg.color
+                             : env ? env->eval(ray.direction) : Color3f::black());
+        out.normal = Color3f(0.0f);
+        out.alpha = 0.0f;
+    }
     return out;
 }
 

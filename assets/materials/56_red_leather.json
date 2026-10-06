@@ -1,0 +1,13 @@
+{
+  "id": "red_leather",
+  "name": "Kırmızı Deri",
+  "category": "Dokulu",
+  "type": "generic",
+  "baseColor": [1.0, 1.0, 1.0],
+  "roughness": 0.5,
+  "metallic": 0,
+  "specular": 0.5,
+  "maps": { "albedo": "leather_red_03_diff_1k.jpg", "normal": "leather_red_03_nor_gl_1k.jpg", "roughness": "leather_red_03_rough_1k.jpg" },
+  "mapping": "box",
+  "texScale": 3
+}

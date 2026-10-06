@@ -192,6 +192,19 @@ void DisneyMaterial::setMetalnessMap(const std::string& p) {
     m_metalnessTex = loadMap(p, TextureEncoding::Linear);
 }
 
+// Doku koordinatı. Kutu eşleme (triplanar'ın en basit hali): geometrik normalin
+// mutlak değerce en büyük bileşeni hangi eksense, nokta o eksene dik düzleme
+// izdüşürülür (ör. yukarı bakan yüzeyde (x, z)). ponytail: dünya uzayında; nesne
+// taşınınca doku kayar. Nesne uzayı için bake sırasında yerel konum saklanmalı.
+Vec2f DisneyMaterial::textureCoord(const SurfaceInteraction& si) const {
+    if (m_mapping == TextureMapping::UV) return si.uv * m_texScale;
+    const Vec3f n = si.ng.lengthSquared() > 0.0f ? si.ng : si.normal;
+    const float ax = std::abs(n.x), ay = std::abs(n.y), az = std::abs(n.z);
+    const Vec3f& p = si.point;
+    Vec2f uv = (ax >= ay && ax >= az) ? Vec2f(p.z, p.y) : (ay >= az ? Vec2f(p.x, p.z) : Vec2f(p.x, p.y));
+    return uv * m_texScale;
+}
+
 DisneyMaterial::ShadingParams DisneyMaterial::resolve(const SurfaceInteraction& si) const {
     ShadingParams p;
     p.baseColor = m_baseColor;
@@ -205,21 +218,22 @@ DisneyMaterial::ShadingParams DisneyMaterial::resolve(const SurfaceInteraction& 
     p.diffuseTransmission = m_diffuseTransmission;
     p.normal = si.normal;
     p.tangent = si.tangent;
+    const Vec2f uv = (m_albedoTex || m_roughnessTex || m_metalnessTex || m_normalTex) ? textureCoord(si) : si.uv;
 
     if (m_albedoTex) {
-        p.baseColor = m_albedoTex->sampleBilinear(si.uv.x, si.uv.y);
+        p.baseColor = m_albedoTex->sampleBilinear(uv.x, uv.y);
     }
     if (m_roughnessTex) {
-        Color3f c = m_roughnessTex->sampleBilinear(si.uv.x, si.uv.y);
+        Color3f c = m_roughnessTex->sampleBilinear(uv.x, uv.y);
         // ponytail: use green channel (glTF ORM) with R fallback
         p.roughness = std::max(0.001f, c.g > 1e-6f ? c.g : c.r);
     }
     if (m_metalnessTex) {
-        Color3f c = m_metalnessTex->sampleBilinear(si.uv.x, si.uv.y);
+        Color3f c = m_metalnessTex->sampleBilinear(uv.x, uv.y);
         p.metallic = std::clamp(c.b > 1e-6f ? c.b : c.r, 0.0f, 1.0f);
     }
     if (m_normalTex) {
-        Color3f c = m_normalTex->sampleBilinear(si.uv.x, si.uv.y);
+        Color3f c = m_normalTex->sampleBilinear(uv.x, uv.y);
         Vec3f nTs(c.r * 2.0f - 1.0f, c.g * 2.0f - 1.0f, c.b * 2.0f - 1.0f);
         Vec3f T = si.tangent;
         if (T.lengthSquared() < 1e-8f) {
@@ -295,6 +309,18 @@ Color3f DisneyMaterial::eval(const Vec3f& wo, const Vec3f& wi, const SurfaceInte
 
 float DisneyMaterial::pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {
     return pdfLobes(wo, wi, resolve(si));
+}
+
+} // namespace photon
+
+namespace photon {
+
+// NEE için: parametreler (dokular dahil) bir kez çözülür, eval ve pdf ikisi de kullanır.
+Color3f DisneyMaterial::evalPdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si,
+                                float& pdfOut) const {
+    const ShadingParams p = resolve(si);
+    pdfOut = pdfLobes(wo, wi, p);
+    return evalLobes(wo, wi, p);
 }
 
 } // namespace photon

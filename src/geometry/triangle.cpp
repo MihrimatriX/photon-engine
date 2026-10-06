@@ -45,7 +45,13 @@ bool Triangle::intersect(Ray& ray, SurfaceInteraction& isect) const {
 
     // Hit confirmed!
     ray.tMax = t; // Update ray's tMax
+    fillHit(ray, t, u, v, isect);
+    return true;
+}
 
+void Triangle::fillHit(const Ray& ray, float t, float u, float v, SurfaceInteraction& isect) const {
+    const Vec3f edge1 = m_v1 - m_v0;
+    const Vec3f edge2 = m_v2 - m_v0;
     isect.t = t;
     isect.point = ray.at(t);
 
@@ -89,8 +95,6 @@ bool Triangle::intersect(Ray& ray, SurfaceInteraction& isect) const {
     isect.tangent = isect.tangent.normalized();
 
     isect.material = m_material;
-
-    return true;
 }
 
 AABB Triangle::bounds() const {

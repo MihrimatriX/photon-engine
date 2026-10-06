@@ -167,6 +167,10 @@ void Application::drawStatusBar() {
                 ImGui::TextColored(m_s.statusError ? pal.danger : pal.success,
                                    m_s.statusError ? ICON_TRIANGLE_ALERT : ICON_CHECK);
                 ImGui::TextUnformatted(m_s.statusText.c_str());
+            } else if (!m_jobs.empty()) {
+                const char* spin = "|/-\\";
+                ImGui::TextColored(pal.accent, "%c", spin[static_cast<int>(ImGui::GetTime() * 8.0) % 4]);
+                ImGui::TextUnformatted(m_jobs.front().label.c_str());
             } else if (m_s.finalJob.active) {
                 ImGui::TextColored(pal.accent, ICON_CLAPPERBOARD);
                 if (m_s.finalJob.frames > 0)
@@ -216,6 +220,7 @@ void Application::drawAboutWindows() {
                 {"F", "Seçime odaklan"}, {"Shift+A", "Tümünü kadrajla"}, {"1 / 2 / 3 / 4", "Ön / yan / üst / dörtte üç"},
                 {"Q / W / E / R", "Seç / taşı / döndür / ölçekle"}, {"G", "Seçimi zemine oturt"},
                 {"T", "Turntable önizleme"}, {"Del", "Sil"}, {"Ctrl+D", "Çoğalt"},
+                {"Ctrl+C / Ctrl+V", "Malzemeyi kopyala / yapıştır"}, {"Ctrl + tekerlek", "Odak uzaklığı (zoom lens)"},
                 {"Ctrl+Z / Ctrl+Y", "Geri al / yinele"}, {"Ctrl+O", "Model içe aktar"},
                 {"Ctrl+S", "Projeyi kaydet"}, {"Ctrl+P", "Render"}, {"Ctrl+E", "Viewport görüntüsünü kaydet"},
                 {"F5", "Önizlemeyi yeniden başlat"},

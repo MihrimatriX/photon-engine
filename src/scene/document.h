@@ -7,6 +7,7 @@
 #pragma once
 
 #include "engine/scene.h"
+#include "scene/scene_graph.h"
 #include "core/image/image.h"
 #include "core/math/aabb.h"
 #include "lights/light.h"
@@ -94,10 +95,22 @@ struct StudioPreset {
     std::vector<Rig> lights;
 };
 
+/// Zemin sahne ağacında bir düğüm değildir; seçimde bu özel kimlikle temsil edilir.
+constexpr uint64_t kGroundNodeUid = ~0ull;
+
+/// Belgeden (ağaç + ışıklar + ortam) render'a hazır sahne: geometri, otomatik
+/// zemin, ışıklar, ortam, arka plan ve BVH. Uygulama ve CLI aynı yolu kullanır.
+/// @param isolate Malzemeleri kopyala (son render; kullanıcı düzenlemesinden bağımsız).
+std::shared_ptr<Scene> buildRenderScene(const SceneGraph& graph, const std::vector<LightDesc>& lights,
+                                        const EnvironmentDesc& env, EnvironmentCache& cache, bool isolate);
+
 /// assets/studios/*.json dosyalarını oku.
 std::vector<StudioPreset> loadStudioPresets(const std::string& dir);
 
 /// Preset ışıklarını sahne sınırlarına göre yerleştir.
-std::vector<LightDesc> placeStudioLights(const StudioPreset& preset, const AABB& sceneBounds);
+/// @p azimuthOffsetDeg: preset açıları kameraya göredir; kameranın yatay açısı eklenir
+/// ki "ana ışık kameranın 50° solunda" her bakış açısında doğru kalsın.
+std::vector<LightDesc> placeStudioLights(const StudioPreset& preset, const AABB& sceneBounds,
+                                         float azimuthOffsetDeg = 0.0f);
 
 } // namespace photon

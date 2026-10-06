@@ -8,6 +8,7 @@
 #pragma once
 
 #include "geometry/bvh.h"
+#include "engine/embree_accel.h"
 #include "lights/light.h"
 #include "lights/environment_light.h"
 #include "materials/material.h"
@@ -51,6 +52,9 @@ public:
     /// Eklenen tüm şekiller üzerinde BVH'yi kur. Derlemenin son adımı.
     void buildAccelerator();
 
+    /// Embree varken bile kendi BVH'mizi kullan (testler ve karşılaştırma için).
+    static void setPreferOwnBvh(bool own);
+
     /// Tüm içeriği temizle.
     void reset();
 
@@ -84,7 +88,8 @@ private:
     std::shared_ptr<EnvironmentLight> m_environment;
     Background m_background;
 
-    BVH m_bvh;
+    BVH m_bvh;                            ///< Kendi BVH'miz (Embree yoksa / testlerde)
+    std::unique_ptr<EmbreeAccel> m_embree; ///< Varsa üretim hızlandırıcısı
 
     // Integrator'ün hızlı erişimi için ham işaretçi önbelleği.
     std::vector<const Light*> m_lightPtrs;

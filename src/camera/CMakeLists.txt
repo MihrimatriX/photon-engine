@@ -1,3 +1,5 @@
+# camera/CMakeLists.txt — photon_camera kütüphanesi: iğne deliği, ince mercek ve
+# ortografik kameralar. Yalnızca photon_core'a (matematik + örnekleme) bağımlıdır.
 add_library(photon_camera STATIC
     perspective_camera.cpp
     thin_lens_camera.cpp

@@ -1,3 +1,6 @@
+// cornell_box.h — Klasik Cornell kutusu test sahnesini SceneGraph'a kuran yardımcılar.
+// 555 birimlik kutu: kırmızı/yeşil yan duvarlar renk taşmasını (color bleeding), cam küre
+// kırılma ve kostikleri, altın küre metal BRDF'i, ayna kutu yansımaları sınar.
 #pragma once
 
 #include "scene/scene_graph.h"
@@ -9,6 +12,7 @@
 
 namespace photon {
 
+// Dörtgen = iki üçgen (0,1,2) ve (0,2,3); köşeler çevre sırasıyla verilmeli, n tüm köşelere atanır.
 inline void addQuad(SceneGraph& graph, SceneNode* parent,
                     const Vec3f& v0, const Vec3f& v1, const Vec3f& v2, const Vec3f& v3,
                     const Vec3f& n, std::shared_ptr<Material> mat, const char* name) {
@@ -22,6 +26,7 @@ inline void addQuad(SceneGraph& graph, SceneNode* parent,
     parent->addChild(std::move(node));
 }
 
+// minP–maxP eksen hizalı kutusu: altı dörtgen, normaller dışa bakar.
 inline void addBox(SceneGraph& graph, SceneNode* parent,
                    const Vec3f& minP, const Vec3f& maxP, std::shared_ptr<Material> mat, const char* name) {
     Vec3f v0(minP.x, minP.y, minP.z), v1(maxP.x, minP.y, minP.z);

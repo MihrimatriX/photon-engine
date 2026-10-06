@@ -1,3 +1,6 @@
+// frame.h — Ortonormal koordinat çerçevesi (s, t, n) = yerel "gölgeleme uzayı".
+// BSDF'ler hep yerel uzayda yazılır: normal = +Z, bu yüzden cosθ = w.z gibi formüller
+// basitleşir. Kesişim noktasında Frame kurulur; yön world→local→BSDF→world dolaşır.
 #pragma once
 
 /// @file frame.h
@@ -23,6 +26,10 @@ struct Frame {
     /// Construct from normal vector. Builds orthonormal basis using Duff et al. 2017 method.
     inline explicit Frame(const Vec3f& normal) : n(normal) {
         // Duff et al. 2017 method: "Building an Orthonormal Basis, Revisited"
+        // Tek bir birim normalden, dallanmasız ve çapraz çarpım kullanmadan iki dik birim
+        // vektör üretir (Frisvad 2012 yönteminin n.z ≈ −1 tekilliği giderilmiş hâli).
+        // sign = ±1, (sign + n.z) paydasının asla 0'a yaklaşmamasını sağlar. Formüller
+        // |s| = |t| = 1 ve s·n = t·n = s·t = 0 koşullarını cebirsel olarak tam sağlar.
         float sign = std::copysign(1.0f, n.z);
         const float a = -1.0f / (sign + n.z);
         const float b = n.x * n.y * a;
@@ -33,6 +40,8 @@ struct Frame {
     // ── Transformations ──────────────────────────────────────
 
     /// Transform world vector to local shading space
+    // Taban ortonormal olduğu için matrisin tersi = transpozu; yerel bileşenler sadece
+    // her eksene iz düşümdür (nokta çarpım). toWorld ise bunun tersi: doğrusal birleşim.
     constexpr Vec3f toLocal(const Vec3f& v) const {
         return {v.dot(s), v.dot(t), v.dot(n)};
     }
@@ -43,6 +52,8 @@ struct Frame {
     }
 
     // ── Shading coordinate utilities (local vectors) ─────────
+    // Yerel uzayda birim w = (sinθ·cosφ, sinθ·sinφ, cosθ) küresel koordinatlarıdır;
+    // θ normalden açı, φ teğet düzlemindeki azimut (PBRT 4. baskı, bölüm 9.1.1).
     static constexpr float cosTheta(const Vec3f& w) { return w.z; }
     static constexpr float cosTheta2(const Vec3f& w) { return w.z * w.z; }
     static inline    float sinTheta2(const Vec3f& w) { return std::max(0.0f, 1.0f - cosTheta2(w)); }

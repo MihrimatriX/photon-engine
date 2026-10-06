@@ -1,3 +1,6 @@
+// obj_loader.h — Wavefront OBJ (+ MTL) model yükleyicisinin arayüzü.
+// Her OBJ şekli malzeme kimliğine göre ayrı TriangleMesh'lere bölünür; MTL'deki Kd
+// (dağınık renk) Lambertian malzemeye dönüşür. Sahne katmanındaki içe aktarma bunu çağırır.
 #pragma once
 
 /// @file obj_loader.h

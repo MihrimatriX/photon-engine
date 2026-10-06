@@ -106,6 +106,8 @@ json materialJson(const Material& mat, const fs::path& base) {
         if (!d->roughnessMap().empty()) maps["roughness"] = relPath(d->roughnessMap(), base);
         if (!d->metalnessMap().empty()) maps["metalness"] = relPath(d->metalnessMap(), base);
         if (!maps.empty()) j["maps"] = maps;
+        j["mapping"] = d->textureMapping() == DisneyMaterial::TextureMapping::Box ? "box" : "uv";
+        j["texScale"] = d->textureScale();
     } else if (const auto* g = dynamic_cast<const Dielectric*>(&mat)) {
         j["type"] = "glass";
         j["ior"] = g->ior();
@@ -145,6 +147,9 @@ std::shared_ptr<Material> materialFromJson(const json& j, const fs::path& base) 
     d->setSheen(j.value("sheen", 0.0f));
     d->setDiffuseTransmission(j.value("diffuseTransmission", 0.0f));
     d->setEmission(readCol3(j, "emission", Color3f::black()));
+    d->setTextureMapping(j.value("mapping", std::string("uv")) == "box" ? DisneyMaterial::TextureMapping::Box
+                                                                         : DisneyMaterial::TextureMapping::UV);
+    d->setTextureScale(j.value("texScale", 1.0f));
     if (auto maps = j.find("maps"); maps != j.end() && maps->is_object()) {
         if (maps->contains("albedo")) d->setAlbedoMap(resolvePath((*maps)["albedo"].get<std::string>(), base));
         if (maps->contains("normal")) d->setNormalMap(resolvePath((*maps)["normal"].get<std::string>(), base));

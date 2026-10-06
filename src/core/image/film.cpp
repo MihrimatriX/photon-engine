@@ -1,3 +1,4 @@
+// film.cpp — Film uygulaması: örnek ekleme (geçersizleri reddederek) ve ortalama çözümleme.
 #include "core/image/film.h"
 #include "core/math/float_bits.h"
 
@@ -43,6 +44,10 @@ void Film::clear() {
     m_rejected.store(0, std::memory_order_relaxed);
 }
 
+// Piksel tahmini: I ≈ (1/N) Σ L_i. Geçersiz (NaN/Inf/negatif) örnek de N'e sayılır ama
+// toplama 0 olarak girer — yani siyah bir örnek gibi davranır. Bu tahmini çok az aşağı
+// çeker ama tek bir NaN'ın pikseli kalıcı olarak bozmasından iyidir; sayaç ile izlenir.
+// Atomik değil: farklı iş parçacıkları farklı piksellere (karolara) yazdığı için güvenli.
 void Film::addSample(int x, int y, const Color3f& L) {
     assert(x >= 0 && x < m_width && y >= 0 && y < m_height);
     const size_t flat = flatIndex(x, y);

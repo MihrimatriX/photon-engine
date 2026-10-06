@@ -1,3 +1,5 @@
+// perspective_camera.h — İdeal iğne deliği perspektif kamera (alan derinliği yok).
+// Açıklık > 0 ise renderer bunun yerine ThinLensCamera kullanır.
 #pragma once
 
 /// @file perspective_camera.h

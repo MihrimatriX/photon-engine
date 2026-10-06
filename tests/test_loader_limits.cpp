@@ -1,3 +1,7 @@
+// test_loader_limits.cpp — Güvenilmez girdi testleri: boş, kesik, sınır dışı indeksli, NaN/Inf
+// içeren ya da devasa sayım bildiren OBJ/glTF/HDR/PNG/EXR/proje dosyaları çökmeden
+// reddedilmeli; geçerli küçük dosyalar ise yüklenmeli. Ayrıca proje kaydet/aç gidiş-dönüşü
+// (Türkçe karakterli UTF-8 yol dahil).
 #include <gtest/gtest.h>
 #include "core/image/image.h"
 #include "core/image/image_io.h"
@@ -36,6 +40,8 @@ void writeText(const std::filesystem::path& path, const std::string& text) {
     writeBytes(path, text.data(), text.size());
 }
 
+// Radiance .hdr (RGBE) üretir. Genişlik 8..32767 ise yeni tip satır RLE'si kullanılır:
+// satır başına (2, 2, genişlik_hi, genişlik_lo), sonra her kanal için (128+koşu, değer) çiftleri.
 std::string rleHdr(int width, int height) {
     std::string s = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y " + std::to_string(height)
         + " +X " + std::to_string(width) + "\n";
@@ -89,6 +95,7 @@ void writeTriangleGltf(const std::filesystem::path& dir, const float verts[9], c
 })");
 }
 
+// Belleğe gömülü en küçük geçerli 1×1 RGB PNG (dosya ve bellekten yükleme testi için).
 const unsigned char kPng1x1[] = {
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
     0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,

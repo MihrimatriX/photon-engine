@@ -4,6 +4,7 @@
 #include "geometry/triangle.h"
 #include "lights/area_light.h"
 #include "materials/lambertian.h"
+#include <atomic>
 
 namespace photon {
 
@@ -60,7 +61,22 @@ void Scene::retainMaterial(std::shared_ptr<const Material> material) {
     if (material) m_materials.push_back(std::move(material));
 }
 
+namespace {
+std::atomic<bool> gPreferOwnBvh{false};
+}
+
+void Scene::setPreferOwnBvh(bool own) {
+    gPreferOwnBvh = own;
+}
+
 void Scene::buildAccelerator() {
+    m_embree.reset();
+    if (!gPreferOwnBvh && EmbreeAccel::available()) {
+        m_embree = std::make_unique<EmbreeAccel>();
+        m_embree->build(m_shapes);
+        m_bvh = BVH{};
+        return;
+    }
     m_bvh.build(m_shapes);
 }
 
@@ -70,6 +86,7 @@ void Scene::reset() {
     m_shapes.clear();
     m_environment.reset();
     m_bvh = BVH{};
+    m_embree.reset();
     m_emissiveMaterials.clear();
     m_materials.clear();
     m_shapeOwner.clear();
@@ -77,15 +94,15 @@ void Scene::reset() {
 }
 
 bool Scene::intersect(Ray& ray, SurfaceInteraction& isect) const {
-    return m_bvh.intersect(ray, isect);
+    return m_embree ? m_embree->intersect(ray, isect) : m_bvh.intersect(ray, isect);
 }
 
 bool Scene::intersectAny(const Ray& ray) const {
-    return m_bvh.intersectAny(ray);
+    return m_embree ? m_embree->intersectAny(ray) : m_bvh.intersectAny(ray);
 }
 
 AABB Scene::bounds() const {
-    return m_bvh.bounds();
+    return m_embree ? m_embree->bounds() : m_bvh.bounds();
 }
 
 } // namespace photon

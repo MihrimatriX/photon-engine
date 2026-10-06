@@ -1,3 +1,6 @@
+// test_mesh_uv.cpp — Mesh testleri: UV ile albedo dokusundan doğru texel okunması, ölçekli
+// dönüşümde normallerin ters-devrik matrisle dönüşmesi ve OBJ dörtgeninin yelpazeyle iki
+// üçgene bölünmesi. Normal yanlış dönüşürse eğik yüzeyler yanlış gölgelenir.
 #include <gtest/gtest.h>
 #include "scene/scene_graph.h"
 #include "materials/disney.h"
@@ -41,6 +44,8 @@ TEST(MeshBake, UvSamplesAlbedoCorner) {
     EXPECT_GT(shaded.baseColor.g, shaded.baseColor.r);
 }
 
+// x'te 2 kat ölçek: n = (1,1,0)/√2 düz M ile çarpılsa (2,1,0) olurdu, yüzeye dik değil.
+// Doğrusu (M⁻¹)ᵀ·n ∝ (0.5, 1, 0) → normal.y / normal.x = 2.
 TEST(MeshBake, NormalsUseInverseTranspose) {
     std::vector<Vec3f> pos = {{0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}};
     Vec3f n = Vec3f(1, 1, 0).normalized();

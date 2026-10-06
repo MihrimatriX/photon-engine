@@ -1,3 +1,6 @@
+// ray.h — Işın: P(t) = origin + t·direction, geçerli aralık [tMin, tMax].
+// Kesişim testleri tMax'ı en yakın isabete kısaltarak ilerler; tMin > 0 ise yüzeyden
+// çıkan ışının aynı yüzeye tekrar çarpmasını ("shadow acne") önler.
 #pragma once
 
 /// @file ray.h
