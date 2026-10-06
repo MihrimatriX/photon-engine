@@ -53,6 +53,11 @@ private:
     unsigned int m_checkerTex = 0;
     unsigned int m_logoTex = 0;
     bool m_layoutBuilt = false;
+    // Tutamaç (gizmo): sürükleme boyunca sabit tutulan pivot matrisi. Her karede
+    // değişim = yeni · eski⁻¹ seçili tüm düğümlere uygulanır (bkz. drawGizmo).
+    Mat4f m_gizmoPivot = Mat4f::identity();
+    bool m_gizmoUndoPushed = false;
+    uint64_t m_treePendingUid = 0;    ///< Seçili satıra basıldı: bırakınca tek seçime in (sürüklenmediyse)
 
     // ── application.cpp ──
     void initWindow();
@@ -88,10 +93,32 @@ public:
     void undo();
     void redo();
     void markDocumentChanged(bool interactive = false);
+    /// Birincil seçili düğüm (çoklu seçimde son tıklanan).
     SceneNode* selectedNode();
+    /// Tüm seçili düğümler; içi de seçili grupların çocukları atılır, ağaç sırasıyla.
+    std::vector<SceneNode*> selectedNodes();
+    bool isNodeSelected(uint64_t uid) const;
+    /// Tek seçim (öncekiler bırakılır). kGroundNodeUid zemini seçer.
     void selectNode(uint64_t uid);
+    /// Ctrl+tık: seçime ekle / çıkar.
+    void toggleNodeSelection(uint64_t uid);
+    /// Shift+tık: çapadan bu düğüme kadar sahne panelinde görünen satırlar.
+    void selectNodeRange(uint64_t uid);
+    void selectAllNodes();
     void selectLight(int index);
     void clearSelection();
+    /// Geri al/yinele sonrası artık var olmayan düğümleri seçimden çıkarır.
+    void pruneSelection();
+
+    // Sahne düzenleme (seçime uygulanır)
+    void toggleSelectionVisibility();
+    void isolateSelection();
+    void showAllNodes();
+    void groupSelection();
+    void ungroupSelection();
+    /// Sürükle-bırak: düğümleri @p newParent altına @p index sırasına taşır.
+    void moveNodes(const std::vector<uint64_t>& uids, uint64_t newParentUid, size_t index);
+    void beginRename();
     void newScene();
     void loadSampleScene();
     void loadCornellScene();

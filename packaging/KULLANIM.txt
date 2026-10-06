@@ -46,11 +46,32 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
      Get-ChildItem C:\modeller\*.obj | ForEach-Object {
          .\photon_render.exe $_.FullName --out "C:\cikti\$($_.BaseName).png" --spp 128 }
 
-5) KISAYOLLAR (uygulamada F1)
+5) SAHNE PANELİ VE NESNELER
+---------------------------
+  - Seçim: tık tek seçer; Ctrl+tık seçime ekler/çıkarır; panelde Shift+tık aralık seçer;
+    Ctrl+A hepsini seçer; ↑/↓ ile panelde gezinilir. Bir modelin parçasına ilk tık
+    modeli, ikinci tık parçayı seçer.
+  - Taşıma: W (taşı), E (döndür), R (ölçekle). Birden çok nesne birlikte döner ve
+    ölçeklenir; dönme merkezi seçimin ortasıdır. Ctrl basılı tutmak (ya da mıknatıs
+    düğmesi) adımlı hareket verir: 15° dönüş, sahneye göre yuvarlak taşıma adımı.
+    Dünya/yerel eksen düğmesi tutamacın eksenlerini değiştirir. Alan ve nokta ışıkları
+    da W ile taşınır (alan ışığı hedefine bakmaya devam eder).
+  - Düzen: panelde satırları sürükleyin. Gruba bırakmak içine, parçaya bırakmak yanına
+    taşır; listenin altında beliren alana bırakmak en üst seviyeye çıkarır. Nesneler
+    dünyadaki yerlerinden oynamaz. Ctrl+G gruplar, Ctrl+Shift+G grubu çözer.
+  - Görünürlük: H gizler/gösterir, I yalnız seçimi gösterir, Alt+H hepsini gösterir.
+  - Ad: F2 ya da çift tık. Enter veya başka yere tıklamak kaydeder, Esc vazgeçer.
+  - Arama kutusu ada göre süzer (ı/i, ş/Ş gibi harflerde büyük/küçük ayrımı yok).
+  - Ctrl+D ile çoğaltılan kopyalar malzemeyi paylaşır; ayırmak için Malzeme
+    sekmesinde "Bağımsız yap".
+
+6) KISAYOLLAR (uygulamada F1)
 -----------------------------
   Sol fare: döndür   Orta/sağ fare: kaydır   Tekerlek: yakınlaş   Çift tık: döndürme merkezi
   F: seçime odaklan   Shift+A: tümünü kadrajla   1/2/3/4: ön/yan/üst/dörtte üç
   Q/W/E/R: seç/taşı/döndür/ölçekle   G: zemine oturt   T: turntable   Del: sil   Ctrl+D: çoğalt
+  Ctrl+tık: seçime ekle   Ctrl+A: tümünü seç   Ctrl+G / Ctrl+Shift+G: grupla / çöz   F2: ad
+  H: gizle   I: yalnız seçim   Alt+H: hepsini göster   Ctrl (sürüklerken): adımlı
   Ctrl+C / Ctrl+V: malzeme kopyala/yapıştır   Ctrl+Z / Ctrl+Y: geri al/yinele
   Ctrl+O: model   Ctrl+S: kaydet   Ctrl+P: render   Ctrl+E: viewport görüntüsü   F5: yeniden başlat
 

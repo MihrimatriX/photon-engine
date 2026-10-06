@@ -107,7 +107,32 @@ void Application::drawProperties() {
             // ── Nesne: ad, görünürlük, konum / dönüş / ölçek ──
             SceneNode* node = selectedNode();
             if (!node) {
-                ui::Hint("Bir parça seçin: viewport'ta tıklayın ya da Sahne panelinden seçin.");
+                ui::Hint("Bir parça seçin: viewport'ta tıklayın ya da Sahne panelinden seçin. "
+                         "Ctrl+tık seçime ekler, Shift+tık panelde aralık seçer.");
+                break;
+            }
+            if (const std::vector<SceneNode*> sel = selectedNodes(); sel.size() > 1) {
+                // Çoklu seçim: dönüşüm tutamaçla (W/E/R) hepsine birlikte uygulanır;
+                // burada yalnız toplu işlemler var.
+                ImGui::PushFont(ui::fonts().semibold, 0.0f);
+                ImGui::Text("%zu nesne seçili", sel.size());
+                ImGui::PopFont();
+                for (size_t i = 0; i < sel.size() && i < 8; ++i)
+                    ImGui::TextColored(pal.textDim, "  %s", sel[i]->name.c_str());
+                if (sel.size() > 8) ImGui::TextColored(pal.textFaint, "  … ve %zu tane daha", sel.size() - 8);
+                ImGui::Spacing();
+                const float hb = (ImGui::GetContentRegionAvail().x - 4.0f) / 2.0f;
+                if (ui::GhostButton(ICON_GROUP "  Grupla", ImVec2(hb, 0))) groupSelection();
+                ImGui::SameLine(0, 4);
+                if (ui::GhostButton(ICON_FOCUS "  Odaklan", ImVec2(hb, 0))) frameSelection();
+                if (ui::GhostButton("Zemine oturt", ImVec2(hb, 0))) placeSelectionOnGround();
+                ImGui::SameLine(0, 4);
+                if (ui::GhostButton(ICON_EYE_OFF "  Gizle / göster", ImVec2(hb, 0))) toggleSelectionVisibility();
+                if (ui::GhostButton(ICON_COPY "  Çoğalt", ImVec2(hb, 0))) duplicateSelection();
+                ImGui::SameLine(0, 4);
+                if (ui::GhostButton(ICON_TRASH_2 "  Sil", ImVec2(hb, 0))) deleteSelection();
+                ImGui::Spacing();
+                ui::Hint("Birlikte taşımak, döndürmek ya da ölçeklemek için viewport'ta W / E / R tutamaçlarını kullanın.");
                 break;
             }
             if (ui::BeginProps("obj")) {
@@ -184,6 +209,10 @@ void Application::drawProperties() {
                     pushUndo();
                     node->localTransform = Transform{};
                     markDocumentChanged();
+                }
+                if (node->type == SceneNodeType::Group && !node->children.empty()) {
+                    if (ui::GhostButton(ICON_UNGROUP "  Grubu çöz", ImVec2(-FLT_MIN, 0))) ungroupSelection();
+                    ui::Tooltip("Parçalar grubun yerine geçer, dünyadaki yerleri değişmez (Ctrl+Shift+G)");
                 }
             }
             if (ui::Section(ICON_INFO, "Bilgi", false)) {
@@ -303,7 +332,20 @@ void Application::drawMaterialProps() {
         ImGui::PopFont();
         const bool glass = dynamic_cast<Dielectric*>(mat.get()) != nullptr;
         ImGui::TextColored(pal.textDim, "%s", glass ? "Cam (kırılma)" : "Principled (genel)");
-        if (users > 1) ImGui::TextColored(pal.textFaint, "%d parçada ortak", users);
+        if (users > 1) {
+            ImGui::TextColored(pal.textFaint, "%d parçada ortak", users);
+            ImGui::SameLine();
+            // Paylaşımı kopar: bu düğümün parçaları malzemenin kendi kopyasını alır.
+            if (ImGui::SmallButton("Bağımsız yap")) {
+                pushUndo();
+                auto own = cloneMaterial(*mat);
+                for (SceneNode* h : holders)
+                    if (h->material == mat) h->material = own;
+                markDocumentChanged();
+                setStatus("Malzeme bu nesneye özel yapıldı");
+            }
+            ui::Tooltip("Kopyalar ve aynı malzemeyi paylaşan parçalar birlikte değişir; bu nesneyi ayırır.");
+        }
         if (ui::GhostButton(ICON_SAVE "  Kütüphaneye kaydet")) ImGui::OpenPopup("savemat");
         if (ImGui::BeginPopup("savemat")) {
             static std::string name;

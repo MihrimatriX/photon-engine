@@ -22,6 +22,7 @@ add_executable(photon_tests
     test_snell.cpp
     test_sobol.cpp
     test_integrator.cpp
+    test_scene_edit.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE

@@ -98,11 +98,24 @@ struct AppState {
     std::vector<SavedCamera> savedCameras;
 
     // ── Seçim ──
+    // Çoklu seçim: selNodes tüm seçili düğümler; selUid bunlardan "birincil" olanı
+    // (son tıklanan). Özellikler paneli ve malzeme düzenleme birincili gösterir;
+    // sil/çoğalt/gizle/grupla/taşı hepsine uygulanır.
     SelectionKind selKind = SelectionKind::None;
     uint64_t selUid = 0;
+    std::vector<uint64_t> selNodes;
+    uint64_t selAnchor = 0;                ///< Shift ile aralık seçiminin başlangıcı
     int selLight = -1;
     uint64_t hoverUid = 0;                 ///< İmlecin altındaki parça (vurgulama)
     std::shared_ptr<Material> clipboardMaterial; ///< Malzeme kopyala / yapıştır
+
+    // ── Sahne paneli ──
+    std::string sceneFilter;               ///< Ada göre süzme
+    uint64_t renamingUid = 0;              ///< Yeniden adlandırılan düğüm (0 = yok)
+    int renamingLight = -1;                ///< Yeniden adlandırılan ışık (-1 = yok)
+    std::string renameBuf;
+    bool renameFocus = false;              ///< Ad kutusuna yalnız ilk karede odak ver
+    std::vector<uint64_t> treeOrder;       ///< Son karede görünen satırlar (Shift aralığı, ok tuşları)
 
     // ── Kütüphaneler ──
     std::string assetsRoot;
@@ -130,6 +143,8 @@ struct AppState {
     int leftTab = 0;
     int rightTab = 0;
     int gizmoOp = 0;               ///< 0 yok, 1 taşı, 2 döndür, 3 ölçekle
+    bool gizmoLocal = false;       ///< Tutamaç eksenleri: nesnenin kendi eksenleri / dünya
+    bool snap = false;             ///< Adımlı taşı/döndür/ölçekle (Ctrl basılıyken tersine döner)
     std::string librarySearch;
     std::string statusText;
     float statusTimer = 0.0f;

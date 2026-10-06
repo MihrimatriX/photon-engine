@@ -289,7 +289,13 @@ void Application::handleShortcuts() {
     if (ctrl && pressed(ImGuiKey_D)) duplicateSelection();
     if (ctrl && pressed(ImGuiKey_C)) copyMaterial();
     if (ctrl && pressed(ImGuiKey_V)) pasteMaterial();
+    if (ctrl && pressed(ImGuiKey_A)) selectAllNodes();
+    if (ctrl && pressed(ImGuiKey_G)) { shift ? ungroupSelection() : groupSelection(); }
     if (ctrl) return;
+    if (pressed(ImGuiKey_H)) { io.KeyAlt ? showAllNodes() : toggleSelectionVisibility(); }
+    if (io.KeyAlt) return; // Alt+F4 vb. tek tuş kısayollarını tetiklemesin
+    if (pressed(ImGuiKey_I)) isolateSelection();
+    if (pressed(ImGuiKey_F2)) beginRename();
     // Tek tuşlu kısayollar yalnız viewport ya da sahne paneli üzerindeyken değil,
     // metin girişi yokken her yerde çalışır (KeyShot gibi).
     if (pressed(ImGuiKey_F)) frameSelection();
@@ -420,6 +426,20 @@ int Application::run() {
     if (ui == "render") m_s.showRenderDialog = true;
     else if (ui == "shortcuts") m_s.showShortcuts = true;
     else if (ui == "about") m_s.showAbout = true;
+    else if (ui == "multi" || ui == "group") {
+        // Krom + cam küre birlikte seçili; "group" ayrıca gruplar (sahne paneli görsel kontrolü).
+        for (auto& c : m_s.graph.root()->children)
+            if (c->name == "Krom Küre" || c->name == "Cam Küre") toggleNodeSelection(c->uid);
+        if (ui == "group") groupSelection();
+        m_s.rightTab = 0;
+        m_s.gizmoOp = 1;
+    }
+    else if (ui == "filter") m_s.sceneFilter = "küre";
+    else if (ui == "lightgizmo") {
+        selectLight(0);
+        m_s.gizmoOp = 1;
+        frameSelection();
+    }
     else if (ui == "material") { selectFirst(); m_s.rightTab = 1; }
     else if (ui == "object") { selectFirst(); m_s.rightTab = 0; m_s.gizmoOp = 1; }
     else if (ui == "env") { m_s.rightTab = 2; m_s.leftTab = 1; }

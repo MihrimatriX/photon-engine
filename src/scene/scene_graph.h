@@ -11,6 +11,7 @@
 #include "lights/light.h"
 #include "lights/environment_light.h"
 #include "core/math/aabb.h"
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -59,6 +60,31 @@ public:
     AABB worldBounds() const;
     /// Tek bir alt ağacın dünya uzayı sınırları.
     static AABB nodeWorldBounds(const SceneNode& node);
+
+    // ── Hiyerarşi düzenleme (sahne paneli) ──
+    // Hepsi düğümlerin DÜNYA konumunu korur: taşınan parça ekranda yerinden oynamaz.
+
+    /// @p a, @p n'nin (kendisi değil) atası mı?
+    static bool isAncestor(const SceneNode& a, const SceneNode& n);
+    /// Ataları da kümede olanları atar, kalanları ağaç sırasıyla döndürür
+    /// (ör. grup ve içindeki parça birlikte seçiliyse yalnız grup işlenir).
+    std::vector<SceneNode*> topmost(const std::vector<SceneNode*>& nodes) const;
+    /// Düğümü @p newParent altına, kardeşler arasında @p index sırasına taşır
+    /// (SIZE_MAX = sona). Kök, kendisi ya da kendi alt ağacı hedef olamaz → false.
+    bool reparent(SceneNode* node, SceneNode* newParent, size_t index = SIZE_MAX);
+    /// Birden çok düğümü ağaç sıralarını koruyarak @p index'ten başlayarak art arda
+    /// yerleştirir (sürükle-bırak). Hedefin kendisi/ataları atlanır. Taşınan sayısı.
+    size_t move(const std::vector<SceneNode*>& nodes, SceneNode* newParent, size_t index = SIZE_MAX);
+    /// Düğümleri yeni bir gruba toplar. Hepsi aynı ebeveyndeyse grup oraya, ilk
+    /// düğümün yerine konur; değilse en üst seviyeye. Yeni grubu döndürür.
+    SceneNode* group(const std::vector<SceneNode*>& nodes, const std::string& name);
+    /// Grubu çözer: çocukları grubun yerine geçer. Taşınan çocukları döndürür.
+    std::vector<SceneNode*> ungroup(SceneNode* group);
+    /// Parçanın içe aktarıldığı dosyayla bağını koparır (sourceIndex = -1): proje
+    /// kaydı geometrisini gömer. Kaynak grubundan çıkan ya da kopyalanan parçalar
+    /// için gerekir; yoksa proje açılırken yanlış parçayla eşleşir ya da kaybolur.
+    /// Kendi kaynağı olan iç gruplara (sourcePath dolu) dokunmaz.
+    static void detachFromSource(SceneNode& node);
 
 private:
     std::unique_ptr<SceneNode> m_root;

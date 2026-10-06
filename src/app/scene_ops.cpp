@@ -90,8 +90,7 @@ void Application::undo() {
     m_s.graph.setRoot(std::move(cur.root));
     m_s.lights = std::move(cur.lights);
     m_s.environment = std::move(cur.environment);
-    if (m_s.selKind == SelectionKind::Node && !m_s.graph.findByUid(m_s.selUid)) clearSelection();
-    if (m_s.selKind == SelectionKind::Light && m_s.selLight >= static_cast<int>(m_s.lights.size())) clearSelection();
+    pruneSelection();
     markDocumentChanged();
     setStatus("Geri alındı");
 }
@@ -108,7 +107,7 @@ void Application::redo() {
     m_s.graph.setRoot(std::move(cur.root));
     m_s.lights = std::move(cur.lights);
     m_s.environment = std::move(cur.environment);
-    if (m_s.selKind == SelectionKind::Node && !m_s.graph.findByUid(m_s.selUid)) clearSelection();
+    pruneSelection();
     markDocumentChanged();
     setStatus("Yinelendi");
 }
@@ -119,10 +118,23 @@ SceneNode* Application::selectedNode() {
     return m_s.selKind == SelectionKind::Node ? m_s.graph.findByUid(m_s.selUid) : nullptr;
 }
 
+std::vector<SceneNode*> Application::selectedNodes() {
+    std::vector<SceneNode*> v;
+    if (m_s.selKind != SelectionKind::Node) return v;
+    for (uint64_t uid : m_s.selNodes)
+        if (SceneNode* n = m_s.graph.findByUid(uid)) v.push_back(n);
+    return m_s.graph.topmost(v);
+}
+
+bool Application::isNodeSelected(uint64_t uid) const {
+    return m_s.selKind == SelectionKind::Node &&
+           std::find(m_s.selNodes.begin(), m_s.selNodes.end(), uid) != m_s.selNodes.end();
+}
+
 void Application::selectNode(uint64_t uid) {
     if (uid == kGroundUid) {
+        clearSelection();
         m_s.selKind = SelectionKind::Ground;
-        m_s.selUid = 0;
         m_s.rightTab = 2; // Ortam sekmesi zemin ayarlarını gösterir
         return;
     }
@@ -132,7 +144,55 @@ void Application::selectNode(uint64_t uid) {
     }
     m_s.selKind = SelectionKind::Node;
     m_s.selUid = uid;
+    m_s.selNodes = {uid};
+    m_s.selAnchor = uid;
+    m_s.selLight = -1;
     if (m_s.rightTab != 0 && m_s.rightTab != 1) m_s.rightTab = 1; // Malzeme
+}
+
+void Application::toggleNodeSelection(uint64_t uid) {
+    if (!m_s.graph.findByUid(uid)) return;
+    if (m_s.selKind != SelectionKind::Node) {
+        selectNode(uid);
+        return;
+    }
+    auto it = std::find(m_s.selNodes.begin(), m_s.selNodes.end(), uid);
+    if (it != m_s.selNodes.end()) {
+        m_s.selNodes.erase(it);
+        if (m_s.selNodes.empty()) {
+            clearSelection();
+            return;
+        }
+        if (m_s.selUid == uid) m_s.selUid = m_s.selNodes.back();
+    } else {
+        m_s.selNodes.push_back(uid);
+        m_s.selUid = uid;
+    }
+    m_s.selAnchor = uid;
+}
+
+void Application::selectNodeRange(uint64_t uid) {
+    const auto& order = m_s.treeOrder;
+    const auto a = std::find(order.begin(), order.end(), m_s.selAnchor);
+    const auto b = std::find(order.begin(), order.end(), uid);
+    if (m_s.selKind != SelectionKind::Node || a == order.end() || b == order.end()) {
+        selectNode(uid);
+        return;
+    }
+    const uint64_t anchor = m_s.selAnchor;
+    m_s.selNodes.assign(std::min(a, b), std::max(a, b) + 1);
+    m_s.selUid = uid;
+    m_s.selAnchor = anchor; // çapa sabit: Shift ile aralık genişletilip daraltılabilir
+}
+
+void Application::selectAllNodes() {
+    if (m_s.graph.empty()) return;
+    m_s.selKind = SelectionKind::Node;
+    m_s.selNodes.clear();
+    for (const auto& c : m_s.graph.root()->children) m_s.selNodes.push_back(c->uid);
+    m_s.selUid = m_s.selNodes.back();
+    m_s.selAnchor = m_s.selNodes.front();
+    m_s.selLight = -1;
 }
 
 void Application::selectLight(int index) {
@@ -140,6 +200,7 @@ void Application::selectLight(int index) {
         clearSelection();
         return;
     }
+    clearSelection();
     m_s.selKind = SelectionKind::Light;
     m_s.selLight = index;
     m_s.rightTab = 3; // Işıklar
@@ -148,7 +209,20 @@ void Application::selectLight(int index) {
 void Application::clearSelection() {
     m_s.selKind = SelectionKind::None;
     m_s.selUid = 0;
+    m_s.selNodes.clear();
     m_s.selLight = -1;
+}
+
+void Application::pruneSelection() {
+    if (m_s.selKind == SelectionKind::Node) {
+        std::erase_if(m_s.selNodes, [&](uint64_t u) { return !m_s.graph.findByUid(u); });
+        if (m_s.selNodes.empty()) clearSelection();
+        else if (!m_s.graph.findByUid(m_s.selUid)) m_s.selUid = m_s.selNodes.back();
+    } else if (m_s.selKind == SelectionKind::Light && m_s.selLight >= static_cast<int>(m_s.lights.size())) {
+        clearSelection();
+    }
+    if (m_s.renamingUid && !m_s.graph.findByUid(m_s.renamingUid)) m_s.renamingUid = 0;
+    if (m_s.renamingLight >= static_cast<int>(m_s.lights.size())) m_s.renamingLight = -1;
 }
 
 // ── Sahneler ─────────────────────────────────────────────────────────────
@@ -379,48 +453,216 @@ void Application::addLight(LightDesc::Type type) {
 
 void Application::deleteSelection() {
     if (m_s.selKind == SelectionKind::Node) {
-        SceneNode* n = selectedNode();
-        if (!n) return;
+        const std::vector<SceneNode*> nodes = selectedNodes();
+        if (nodes.empty()) return;
         pushUndo();
-        const std::string name = n->name;
-        m_s.graph.removeNode(n);
+        const std::string what = nodes.size() == 1 ? nodes.front()->name : std::to_string(nodes.size()) + " nesne";
+        for (SceneNode* n : nodes) m_s.graph.removeNode(n); // topmost: biri diğerinin içinde değil
         clearSelection();
         markDocumentChanged();
-        setStatus("Silindi: " + name);
+        setStatus("Silindi: " + what);
     } else if (m_s.selKind == SelectionKind::Light && m_s.selLight >= 0 &&
                m_s.selLight < static_cast<int>(m_s.lights.size())) {
         pushUndo();
+        const std::string name = m_s.lights[static_cast<size_t>(m_s.selLight)].name;
         m_s.lights.erase(m_s.lights.begin() + m_s.selLight);
         clearSelection();
         markDocumentChanged();
+        setStatus("Silindi: " + name);
     }
 }
 
+// Kopyalar malzemeyi paylaşır (KeyShot'taki bağlı kopya gibi: birini düzenlemek
+// hepsini değiştirir; ayırmak için Malzeme sekmesinde "Bağımsız yap").
+// Birden çok nesne birlikte kopyalanır ve birlikte, seçimin genişliği kadar kayar.
 void Application::duplicateSelection() {
-    SceneNode* n = selectedNode();
-    if (!n || !n->parent) return;
+    if (m_s.selKind == SelectionKind::Light && m_s.selLight >= 0 &&
+        m_s.selLight < static_cast<int>(m_s.lights.size())) {
+        pushUndo();
+        LightDesc l = m_s.lights[static_cast<size_t>(m_s.selLight)];
+        l.name += " kopya";
+        // Hedef etrafında 25° yana döndür: kopya üst üste binmesin, yine ürüne baksın.
+        const float a = 25.0f * DEG_TO_RAD;
+        const Vec3f d = l.position - l.target;
+        l.position = l.target + Vec3f(d.x * std::cos(a) - d.z * std::sin(a), d.y, d.x * std::sin(a) + d.z * std::cos(a));
+        l.azimuthDeg += 25.0f;
+        m_s.lights.push_back(l);
+        selectLight(static_cast<int>(m_s.lights.size()) - 1);
+        markDocumentChanged();
+        setStatus("Işık çoğaltıldı");
+        return;
+    }
+    const std::vector<SceneNode*> nodes = selectedNodes();
+    if (nodes.empty()) return;
     pushUndo();
-    auto copy = SceneGraph::cloneTree(*n, false); // malzeme paylaşılır (KeyShot'taki bağlı kopya gibi)
-    reassignUids(*copy);
-    copy->name = n->name + " kopya";
-    const AABB box = SceneGraph::nodeWorldBounds(*n);
-    const float dx = box.pMin.x <= box.pMax.x ? (box.pMax.x - box.pMin.x) * 1.15f : 1.0f;
-    copy->localTransform = Transform::translate(Vec3f(dx, 0, 0)) * copy->localTransform;
-    const uint64_t uid = copy->uid;
-    n->parent->addChild(std::move(copy));
-    selectNode(uid);
+    AABB all = AABB::empty();
+    for (SceneNode* n : nodes) all.merge(SceneGraph::nodeWorldBounds(*n));
+    const float dx = all.pMin.x <= all.pMax.x ? (all.pMax.x - all.pMin.x) * 1.15f : 1.0f;
+    std::vector<uint64_t> copies;
+    for (SceneNode* n : nodes) {
+        auto copy = SceneGraph::cloneTree(*n, false);
+        reassignUids(*copy);
+        SceneGraph::detachFromSource(*copy); // kaynak grubundaki parça kopyası: geometri projeye gömülür
+        copy->name = n->name + " kopya";
+        // Dünya X'inde kaydır: ebeveyn dönmüş/ölçeklenmiş olsa da kopya yana gider.
+        const Mat4f world = Transform::translate(Vec3f(dx, 0, 0)).matrix() * n->worldTransform().matrix();
+        copy->localTransform = Transform(n->parent->worldTransform().inverseMatrix() * world);
+        copies.push_back(copy->uid);
+        n->parent->addChild(std::move(copy));
+    }
+    m_s.selKind = SelectionKind::Node;
+    m_s.selNodes = copies;
+    m_s.selUid = copies.back();
+    m_s.selAnchor = copies.front();
     markDocumentChanged();
+    setStatus(copies.size() == 1 ? "Çoğaltıldı" : std::to_string(copies.size()) + " nesne çoğaltıldı");
 }
 
 void Application::frameSelection() {
     AABB box = AABB::empty();
-    if (SceneNode* n = selectedNode()) box = SceneGraph::nodeWorldBounds(*n);
+    for (SceneNode* n : selectedNodes()) box.merge(SceneGraph::nodeWorldBounds(*n));
+    if (m_s.selKind == SelectionKind::Light && m_s.selLight >= 0 && m_s.selLight < static_cast<int>(m_s.lights.size())) {
+        const LightDesc& l = m_s.lights[static_cast<size_t>(m_s.selLight)];
+        if (l.type != LightDesc::Type::Directional) {
+            // Işık ve baktığı nokta birlikte kadraja girsin.
+            const float pad = std::max({l.width, l.height, 0.1f}) * 0.6f;
+            box.merge(l.position - Vec3f(pad));
+            box.merge(l.position + Vec3f(pad));
+            if (l.type == LightDesc::Type::Area) box.merge(l.target);
+        }
+    }
     if (box.pMin.x > box.pMax.x) {
         frameAll();
         return;
     }
     const float aspect = m_s.viewportPxH > 0 ? static_cast<float>(m_s.viewportPxW) / m_s.viewportPxH : 1.6f;
     m_s.camera.frame(box, aspect);
+}
+
+// H: seçimde görünen varsa hepsini gizle, hiçbiri görünmüyorsa hepsini göster
+// (karışık seçimde tek basış hep aynı sonucu verir).
+void Application::toggleSelectionVisibility() {
+    if (m_s.selKind == SelectionKind::Light && m_s.selLight >= 0 && m_s.selLight < static_cast<int>(m_s.lights.size())) {
+        pushUndo();
+        LightDesc& l = m_s.lights[static_cast<size_t>(m_s.selLight)];
+        l.enabled = !l.enabled;
+        markDocumentChanged();
+        return;
+    }
+    const std::vector<SceneNode*> nodes = selectedNodes();
+    if (nodes.empty()) return;
+    const bool anyVisible = std::any_of(nodes.begin(), nodes.end(), [](SceneNode* n) { return n->visible; });
+    pushUndo();
+    for (SceneNode* n : nodes) n->visible = !anyVisible;
+    markDocumentChanged();
+    setStatus(anyVisible ? "Gizlendi" : "Gösterildi");
+}
+
+// Yalnız seçili olanları göster: seçimin ataları görünür kalır (yoksa çocuk da
+// gizlenirdi), seçimle ilgisi olmayan dallar gizlenir. Seçimin içindekilere
+// dokunulmaz: kullanıcının daha önce gizlediği bir alt parça gizli kalır.
+void Application::isolateSelection() {
+    const std::vector<SceneNode*> nodes = selectedNodes();
+    if (nodes.empty()) return;
+    pushUndo();
+    auto walk = [&](auto&& self, SceneNode& n) -> void {
+        for (auto& c : n.children) {
+            if (std::find(nodes.begin(), nodes.end(), c.get()) != nodes.end()) {
+                c->visible = true;
+            } else if (std::any_of(nodes.begin(), nodes.end(), [&](SceneNode* s) { return SceneGraph::isAncestor(*c, *s); })) {
+                c->visible = true;
+                self(self, *c);
+            } else {
+                c->visible = false;
+            }
+        }
+    };
+    walk(walk, *m_s.graph.root());
+    markDocumentChanged();
+    setStatus("Yalnız seçim gösteriliyor (Alt+H: hepsini göster)");
+}
+
+void Application::showAllNodes() {
+    bool any = false;
+    auto check = [&](auto&& self, const SceneNode& n) -> void {
+        for (const auto& c : n.children) {
+            any = any || !c->visible;
+            self(self, *c);
+        }
+    };
+    check(check, *m_s.graph.root());
+    if (!any) return;
+    pushUndo();
+    auto walk = [&](auto&& self, SceneNode& n) -> void {
+        for (auto& c : n.children) {
+            c->visible = true;
+            self(self, *c);
+        }
+    };
+    walk(walk, *m_s.graph.root());
+    markDocumentChanged();
+    setStatus("Tüm nesneler gösteriliyor");
+}
+
+void Application::groupSelection() {
+    const std::vector<SceneNode*> nodes = selectedNodes();
+    if (nodes.empty()) return;
+    pushUndo();
+    SceneNode* g = m_s.graph.group(nodes, "Grup");
+    if (!g) return;
+    selectNode(g->uid);
+    beginRename(); // yeni klasör gibi: ad kutusu hemen açılır, Enter "Grup" adını kabul eder
+    markDocumentChanged();
+    setStatus(std::to_string(nodes.size()) + " nesne gruplandı");
+}
+
+void Application::ungroupSelection() {
+    std::vector<SceneNode*> groups;
+    for (SceneNode* n : selectedNodes())
+        if (n->type == SceneNodeType::Group && !n->children.empty()) groups.push_back(n);
+    if (groups.empty()) {
+        setStatus("Grubu çözmek için bir grup seçin", true);
+        return;
+    }
+    pushUndo();
+    std::vector<uint64_t> freed;
+    for (SceneNode* g : groups)
+        for (SceneNode* c : m_s.graph.ungroup(g)) freed.push_back(c->uid);
+    m_s.selKind = SelectionKind::Node;
+    m_s.selNodes = freed;
+    m_s.selUid = freed.back();
+    m_s.selAnchor = freed.front();
+    markDocumentChanged();
+    setStatus("Grup çözüldü");
+}
+
+void Application::moveNodes(const std::vector<uint64_t>& uids, uint64_t newParentUid, size_t index) {
+    SceneNode* parent = newParentUid ? m_s.graph.findByUid(newParentUid) : m_s.graph.root();
+    if (!parent) return;
+    std::vector<SceneNode*> nodes;
+    for (uint64_t u : uids)
+        if (SceneNode* n = m_s.graph.findByUid(u)) nodes.push_back(n);
+    nodes = m_s.graph.topmost(nodes);
+    // Hedefin kendisi ya da atası taşınamaz (döngü); hepsi geçersizse geri al adımı da açma.
+    std::erase_if(nodes, [&](SceneNode* n) { return n == parent || SceneGraph::isAncestor(*n, *parent); });
+    if (nodes.empty()) return;
+    pushUndo();
+    m_s.graph.move(nodes, parent, index);
+    markDocumentChanged();
+    setStatus(nodes.size() == 1 ? "Taşındı: " + nodes.front()->name : std::to_string(nodes.size()) + " nesne taşındı");
+}
+
+void Application::beginRename() {
+    if (SceneNode* n = selectedNode()) {
+        m_s.renamingUid = n->uid;
+        m_s.renameBuf = n->name;
+        m_s.renameFocus = true;
+    } else if (m_s.selKind == SelectionKind::Light && m_s.selLight >= 0 &&
+               m_s.selLight < static_cast<int>(m_s.lights.size())) {
+        m_s.renamingLight = m_s.selLight;
+        m_s.renameBuf = m_s.lights[static_cast<size_t>(m_s.selLight)].name;
+        m_s.renameFocus = true;
+    }
 }
 
 void Application::frameAll() {
@@ -430,15 +672,23 @@ void Application::frameAll() {
     m_s.camera.frame(box, aspect);
 }
 
+// Her nesne ayrı ayrı zemine iner (yığın değil): en alt noktası y = 0 olur.
+// Dünya uzayındaki kayma, ebeveyn dönüşümünün tersiyle yerel uzaya çevrilir.
 void Application::placeSelectionOnGround() {
-    SceneNode* n = selectedNode();
-    if (!n) return;
-    const AABB box = SceneGraph::nodeWorldBounds(*n);
-    if (box.pMin.x > box.pMax.x || std::abs(box.pMin.y) < 1e-6f) return;
-    pushUndo();
-    n->localTransform = Transform::translate(Vec3f(0.0f, -box.pMin.y, 0.0f)) * n->localTransform;
+    bool pushed = false;
+    int count = 0;
+    for (SceneNode* n : selectedNodes()) {
+        const AABB box = SceneGraph::nodeWorldBounds(*n);
+        if (box.pMin.x > box.pMax.x || std::abs(box.pMin.y) < 1e-6f) continue;
+        if (!pushed) pushUndo();
+        pushed = true;
+        const Mat4f world = Transform::translate(Vec3f(0.0f, -box.pMin.y, 0.0f)).matrix() * n->worldTransform().matrix();
+        n->localTransform = Transform(n->parent->worldTransform().inverseMatrix() * world);
+        ++count;
+    }
+    if (!pushed) return;
     markDocumentChanged();
-    setStatus("Zemine oturtuldu: " + n->name);
+    setStatus(count == 1 ? "Zemine oturtuldu" : std::to_string(count) + " nesne zemine oturtuldu");
 }
 
 void Application::applyCameraPreset(const char* id) {
@@ -661,16 +911,18 @@ void Application::copyMaterial() {
 }
 
 void Application::pasteMaterial() {
-    SceneNode* n = selectedNode();
-    if (!n || !m_s.clipboardMaterial) {
+    const std::vector<SceneNode*> nodes = selectedNodes();
+    if (nodes.empty() || !m_s.clipboardMaterial) {
         setStatus(m_s.clipboardMaterial ? "Yapıştırmak için bir parça seçin" : "Panoda malzeme yok", true);
         return;
     }
     pushUndo();
+    // Tek kopya tüm seçime: yapıştırılan parçalar aynı malzemeyi paylaşır.
     auto mat = cloneMaterial(*m_s.clipboardMaterial);
-    forEachMesh(*n, [&](SceneNode& s) { s.material = mat; });
+    for (SceneNode* n : nodes) forEachMesh(*n, [&](SceneNode& s) { s.material = mat; });
     markDocumentChanged();
-    setStatus("Malzeme yapıştırıldı → " + n->name);
+    setStatus(nodes.size() == 1 ? "Malzeme yapıştırıldı → " + nodes.front()->name
+                                : "Malzeme yapıştırıldı → " + std::to_string(nodes.size()) + " nesne");
 }
 
 } // namespace photon

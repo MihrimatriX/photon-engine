@@ -75,7 +75,15 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - Paket temiz klasörde denendi: CLI proje/model renderı ve uygulama (`--ui material|object|render|about`) çalışıyor.
   - Düzeltmeler: CLI model modu artık uygulamayla aynı "Ürün Stüdyosu" preset'ini + HDRI'ı kullanıyor ve modeli zemine oturtuyor (önce aşırı pozlanıyordu); `findAssetsRoot/executableDir` `core/platform/path.cpp`'ye taşındı; içe aktarılan model seçili kalıyor (applyStudio seçimi siliyordu); Hakkında'da sürüm (`PHOTON_VERSION`).
   - Not: `--screenshot` çekimleri sırasında pencere odak alır; kullanıcı o an tıklar/yazarsa görüntü bozulur (yanlış alarm olarak hata sanıldı).
+- **2026-10-06 (oturum 5, sahne ve kontroller):**
+  - `SceneGraph`: `reparent` / `move` / `group` / `ungroup` / `topmost` / `detachFromSource` (dünya konumu korunur, döngü reddedilir); `tests/test_scene_edit.cpp` (7 test).
+  - **Veri kaybı düzeltildi:** içe aktarılmış modelin parçası aynı grupta çoğaltılınca kopya projede geometrisiz kaydediliyor, açılışta kayboluyordu. Kopyalanan/taşınan parçaların kaynak bağı koparılır, geometri gömülür.
+  - Çoklu seçim (`selNodes` + birincil `selUid`), Ctrl/Shift+tık, Ctrl+A, ↑/↓; sahne panelinde sürükle-bırak, arama (Türkçe harf katlama), F2/çift tık ad (başka satıra tıklayınca kaydeder), ışık sağ tık menüsü, gizle/izole/hepsini göster (H/I/Alt+H), grupla/çöz (Ctrl+G/Ctrl+Shift+G).
+  - Tutamaç: pivot seçimin ortası, çoklu nesne, ışık taşıma, adımlı hareket (mıknatıs / Ctrl), yerel/dünya eksen; geri al adımı ilk değişiklikte (önceden ilk kare değişmezse kaçıyordu).
+  - Malzeme: "Bağımsız yap" (paylaşılan malzemeyi ayır). Nesne sekmesi çoklu seçimde toplu işlemler.
+  - `--ui multi|group|filter|lightgizmo` ekran görüntüsü durumları.
 - **Sıradaki adımlar:**
+  - Tutamaç sürüklenirken Esc ile iptal (şimdilik Ctrl+Z).
   - Kurulum paketi (Inno Setup, makinede yok), kod imzalama, log + çökme dökümü, otomatik kaydetme (eksik analizi "Faz 1").
   - Embree sonrası ölçüm ve `bench/BASELINE.md` (F2.13).
   - F2.6/F2.7 furnace + chi-kare testleri; F2.8 golden görüntüler.

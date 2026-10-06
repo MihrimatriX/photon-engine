@@ -98,6 +98,14 @@
 #define ICON_COMPONENT               "\xEE\x8A\xAD" // U+E2AD
 #define ICON_CYLINDER                "\xEE\x94\xA5" // U+E525
 #define ICON_SQUARE_DASHED           "\xEE\x87\x8B" // U+E1CB
+#define ICON_UNGROUP                 "\xEE\x91\xA7" // U+E467
+#define ICON_MAGNET                  "\xEE\x8A\xB5" // U+E2B5
+#define ICON_PENCIL                  "\xEE\x87\xB9" // U+E1F9
+#define ICON_EARTH                   "\xEE\x87\xB3" // U+E1F3
+#define ICON_LOCATE_FIXED            "\xEE\x87\x9B" // U+E1DB
+#define ICON_FOLDER_INPUT            "\xEE\x8C\xB4" // U+E334
+#define ICON_LIST_FILTER             "\xEE\x91\xA0" // U+E460
+#define ICON_SCAN                    "\xEE\x89\x97" // U+E257
 
 // Font yüklerken ikon aralığı (1.92 dinamik yükler; yine de birleşim sınırı için).
 #define ICON_MIN_LUCIDE 0xE000

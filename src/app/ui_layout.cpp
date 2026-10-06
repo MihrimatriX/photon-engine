@@ -24,7 +24,7 @@ void Application::buildDefaultLayout(unsigned int dockId) {
     ImGuiID center = dockId;
     ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.205f, nullptr, &center);
     ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.27f, nullptr, &center);
-    ImGuiID rightTop = ImGui::DockBuilderSplitNode(right, ImGuiDir_Up, 0.34f, nullptr, &right);
+    ImGuiID rightTop = ImGui::DockBuilderSplitNode(right, ImGuiDir_Up, 0.40f, nullptr, &right);
     ImGui::DockBuilderDockWindow("###Library", left);
     ImGui::DockBuilderDockWindow("###Viewport", center);
     ImGui::DockBuilderDockWindow("###Scene", rightTop);
@@ -90,11 +90,22 @@ void Application::drawMenuBar() {
         if (ImGui::MenuItem(ICON_UNDO_2 "  Geri al", "Ctrl+Z", false, m_s.undo.canUndo())) undo();
         if (ImGui::MenuItem(ICON_REDO_2 "  Yinele", "Ctrl+Y", false, m_s.undo.canRedo())) redo();
         ImGui::Separator();
-        const bool hasSel = m_s.selKind == SelectionKind::Node || m_s.selKind == SelectionKind::Light;
-        if (ImGui::MenuItem(ICON_COPY "  Çoğalt", "Ctrl+D", false, m_s.selKind == SelectionKind::Node)) duplicateSelection();
-        if (ImGui::MenuItem(ICON_TRASH_2 "  Sil", "Del", false, hasSel)) deleteSelection();
-        if (ImGui::MenuItem("      Zemine oturt", "G", false, m_s.selKind == SelectionKind::Node)) placeSelectionOnGround();
+        const bool hasNode = m_s.selKind == SelectionKind::Node;
+        const bool hasSel = hasNode || m_s.selKind == SelectionKind::Light;
+        if (ImGui::MenuItem("      Tümünü seç", "Ctrl+A", false, !m_s.graph.empty())) selectAllNodes();
         if (ImGui::MenuItem("      Seçimi kaldır", "Esc", false, hasSel)) clearSelection();
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_COPY "  Çoğalt", "Ctrl+D", false, hasSel)) duplicateSelection();
+        if (ImGui::MenuItem(ICON_PENCIL "  Yeniden adlandır", "F2", false, hasSel)) beginRename();
+        if (ImGui::MenuItem(ICON_TRASH_2 "  Sil", "Del", false, hasSel)) deleteSelection();
+        if (ImGui::MenuItem("      Zemine oturt", "G", false, hasNode)) placeSelectionOnGround();
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_GROUP "  Grupla", "Ctrl+G", false, hasNode)) groupSelection();
+        if (ImGui::MenuItem(ICON_UNGROUP "  Grubu çöz", "Ctrl+Shift+G", false, hasNode)) ungroupSelection();
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_EYE_OFF "  Gizle / göster", "H", false, hasSel)) toggleSelectionVisibility();
+        if (ImGui::MenuItem(ICON_SCAN_EYE "  Yalnız seçimi göster", "I", false, hasNode)) isolateSelection();
+        if (ImGui::MenuItem(ICON_EYE "  Hepsini göster", "Alt+H")) showAllNodes();
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Ekle")) {
@@ -217,8 +228,11 @@ void Application::drawAboutWindows() {
             const Row rows[] = {
                 {"Sol fare", "Kamerayı döndür (orbit)"}, {"Orta / sağ fare", "Kaydır (pan)"},
                 {"Tekerlek", "Yakınlaş / uzaklaş"}, {"Tık", "Parça seç"}, {"Çift tık", "Döndürme merkezini buraya al"},
+                {"Ctrl+tık", "Seçime ekle / çıkar"}, {"Shift+tık (panel)", "Aralık seç"}, {"Ctrl+A", "Tümünü seç"},
                 {"F", "Seçime odaklan"}, {"Shift+A", "Tümünü kadrajla"}, {"1 / 2 / 3 / 4", "Ön / yan / üst / dörtte üç"},
-                {"Q / W / E / R", "Seç / taşı / döndür / ölçekle"}, {"G", "Seçimi zemine oturt"},
+                {"Q / W / E / R", "Seç / taşı / döndür / ölçekle"}, {"Ctrl (sürüklerken)", "Adımlı taşı / döndür"},
+                {"G", "Seçimi zemine oturt"}, {"Ctrl+G / Ctrl+Shift+G", "Grupla / grubu çöz"},
+                {"H / Alt+H", "Gizle / hepsini göster"}, {"I", "Yalnız seçimi göster"}, {"F2", "Yeniden adlandır"},
                 {"T", "Turntable önizleme"}, {"Del", "Sil"}, {"Ctrl+D", "Çoğalt"},
                 {"Ctrl+C / Ctrl+V", "Malzemeyi kopyala / yapıştır"}, {"Ctrl + tekerlek", "Odak uzaklığı (zoom lens)"},
                 {"Ctrl+Z / Ctrl+Y", "Geri al / yinele"}, {"Ctrl+O", "Model içe aktar"},

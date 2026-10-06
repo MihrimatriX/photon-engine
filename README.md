@@ -104,7 +104,9 @@ arayüzü çizip ekran görüntüsü alır ve çıkar (görsel regresyon için).
 1. Modeli (OBJ / glTF / GLB) pencereye sürükleyin. Zemine oturtulur, kamera kadrajlanır, varsayılan stüdyo ışıkları kurulur.
 2. **Kütüphane → Malzeme**'den bir küreyi viewport'taki parçanın üzerine bırakın (ya da parçayı seçip çift tıklayın).
 3. **Kütüphane → Ortam / Stüdyo** ile aydınlatmayı değiştirin. Ortamı **Özellikler → Ortam**'dan döndürün.
-4. Parçayı tıklayıp **W / E / R** ile taşıyın, döndürün, ölçekleyin.
+4. Parçayı tıklayıp **W / E / R** ile taşıyın, döndürün, ölçekleyin (Ctrl+tık ile birden çok nesne;
+   Ctrl basılıyken adımlı). Sahne panelinde sürükleyerek gruplara taşıyın, **Ctrl+G** ile gruplayın,
+   **H / I / Alt+H** ile gizleyin, yalnız seçimi gösterin, hepsini gösterin.
 5. **Render** (Ctrl+P) → çözünürlük ve kaliteyi seçip başlatın. Çıktı varsayılan olarak `Resimler/PhotonEngine`.
 
 Tüm kısayollar: **F1**.

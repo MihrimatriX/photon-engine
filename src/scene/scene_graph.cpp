@@ -231,4 +231,117 @@ void SceneGraph::compileInto(Scene& outScene, bool isolateMaterials) const {
     compileNode(*m_root, outScene, Transform{}, isolateMaterials);
 }
 
+// ── Hiyerarşi düzenleme ──────────────────────────────────────────────────
+
+bool SceneGraph::isAncestor(const SceneNode& a, const SceneNode& n) {
+    for (const SceneNode* p = n.parent; p; p = p->parent)
+        if (p == &a) return true;
+    return false;
+}
+
+std::vector<SceneNode*> SceneGraph::topmost(const std::vector<SceneNode*>& nodes) const {
+    std::vector<SceneNode*> out;
+    // Ağacı sırayla dolaş; kümedeki bir düğüme rastlayınca onu al ve altına inme.
+    auto walk = [&](auto&& self, SceneNode& n) -> void {
+        for (auto& c : n.children) {
+            if (std::find(nodes.begin(), nodes.end(), c.get()) != nodes.end()) out.push_back(c.get());
+            else self(self, *c);
+        }
+    };
+    walk(walk, *m_root);
+    return out;
+}
+
+void SceneGraph::detachFromSource(SceneNode& node) {
+    if (!node.sourcePath.empty()) return; // kendi dosyası olan grup: bağı geçerli
+    node.sourceIndex = -1;
+    for (auto& c : node.children) detachFromSource(*c);
+}
+
+namespace {
+
+size_t indexInParent(const SceneNode& n) {
+    const auto& sib = n.parent->children;
+    for (size_t i = 0; i < sib.size(); ++i)
+        if (sib[i].get() == &n) return i;
+    return sib.size();
+}
+
+} // namespace
+
+// yerel' = yeniEbeveynDünya⁻¹ · dünya: parça dünyada aynı yerde kalır.
+bool SceneGraph::reparent(SceneNode* node, SceneNode* newParent, size_t index) {
+    if (!node || !newParent || !node->parent || node == newParent || isAncestor(*node, *newParent)) return false;
+    SceneNode* oldParent = node->parent;
+    const size_t oldIndex = indexInParent(*node);
+    if (oldIndex >= oldParent->children.size()) return false;
+    const Mat4f world = node->worldTransform().matrix();
+    std::unique_ptr<SceneNode> owned = std::move(oldParent->children[oldIndex]);
+    oldParent->children.erase(oldParent->children.begin() + static_cast<std::ptrdiff_t>(oldIndex));
+    if (oldParent == newParent) {
+        // Aynı ebeveynde yalnız sıra değişir; dönüşüm aynen kalır (yuvarlama hatası yok).
+        if (index != SIZE_MAX && oldIndex < index) --index;
+    } else {
+        owned->localTransform = Transform(newParent->worldTransform().inverseMatrix() * world);
+        detachFromSource(*owned);
+    }
+    owned->parent = newParent;
+    auto& to = newParent->children;
+    to.insert(to.begin() + static_cast<std::ptrdiff_t>(std::min(index, to.size())), std::move(owned));
+    ++m_revision;
+    return true;
+}
+
+// Sıra: her taşınan düğüm bir öncekinin hemen arkasına gelir. reparent aynı
+// ebeveyndeki öndeki bir düğümü çıkarırken hedef sırayı kendisi bir azaltır; o
+// durumda dış sayaç sabit kalır, diğer durumlarda bir artar.
+size_t SceneGraph::move(const std::vector<SceneNode*>& nodesIn, SceneNode* newParent, size_t index) {
+    if (!newParent) return 0;
+    std::vector<SceneNode*> nodes = topmost(nodesIn);
+    std::erase_if(nodes, [&](SceneNode* n) { return n == newParent || isAncestor(*n, *newParent); });
+    size_t moved = 0;
+    for (SceneNode* n : nodes) {
+        const bool samePrior = index != SIZE_MAX && n->parent == newParent && indexInParent(*n) < index;
+        if (!reparent(n, newParent, index)) continue;
+        ++moved;
+        if (index != SIZE_MAX && !samePrior) ++index;
+    }
+    return moved;
+}
+
+SceneNode* SceneGraph::group(const std::vector<SceneNode*>& nodesIn, const std::string& name) {
+    const std::vector<SceneNode*> nodes = topmost(nodesIn);
+    if (nodes.empty()) return nullptr;
+    SceneNode* parent = nodes.front()->parent;
+    for (SceneNode* n : nodes)
+        if (n->parent != parent) parent = m_root.get();
+    const size_t at = parent == nodes.front()->parent ? indexInParent(*nodes.front()) : parent->children.size();
+    auto g = std::make_unique<SceneNode>(name, SceneNodeType::Group);
+    SceneNode* gp = g.get();
+    g->parent = parent;
+    parent->children.insert(parent->children.begin() + static_cast<std::ptrdiff_t>(at), std::move(g));
+    for (SceneNode* n : nodes) reparent(n, gp);
+    ++m_revision;
+    return gp;
+}
+
+std::vector<SceneNode*> SceneGraph::ungroup(SceneNode* g) {
+    std::vector<SceneNode*> moved;
+    if (!g || !g->parent || g->type != SceneNodeType::Group) return moved;
+    SceneNode* parent = g->parent;
+    size_t at = indexInParent(*g);
+    // Çocukların yeni yereli = grubun yereli · çocuğun yereli (ebeveyn aynı kaldığı için).
+    while (!g->children.empty()) {
+        std::unique_ptr<SceneNode> c = std::move(g->children.front());
+        g->children.erase(g->children.begin());
+        c->localTransform = g->localTransform * c->localTransform;
+        c->parent = parent;
+        detachFromSource(*c);
+        moved.push_back(c.get());
+        parent->children.insert(parent->children.begin() + static_cast<std::ptrdiff_t>(++at), std::move(c));
+    }
+    removeNode(g);
+    return moved;
+}
+
 } // namespace photon

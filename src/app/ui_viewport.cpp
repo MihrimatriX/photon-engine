@@ -178,20 +178,35 @@ void Application::drawViewport() {
             } else {
                 // Grubun bir parçasına tıklanırsa önce grup seçilir; seçili grubun
                 // içine tekrar tıklayınca parçanın kendisi seçilir (KeyShot davranışı).
+                // Ctrl ya da Shift basılıysa aynı hedef seçime eklenir / çıkarılır.
                 SceneNode* n = m_s.graph.findByUid(uid);
-                if (n && n->parent && n->parent != m_s.graph.root() && m_s.selUid != uid &&
-                    m_s.selUid != n->parent->uid)
-                    selectNode(n->parent->uid);
-                else
-                    selectNode(uid);
+                uint64_t target = uid;
+                if (n && n->parent && n->parent != m_s.graph.root() && !isNodeSelected(uid) &&
+                    !isNodeSelected(n->parent->uid))
+                    target = n->parent->uid;
+                if ((io.KeyCtrl || io.KeyShift) && n) toggleNodeSelection(target);
+                else if (!(io.KeyCtrl || io.KeyShift)) selectNode(target);
             }
         }
         if (ImGui::BeginPopupContextItem("##vpctx")) {
-            if (ImGui::MenuItem(ICON_FOCUS "  Seçime odaklan", "F", false, m_s.selKind == SelectionKind::Node)) frameSelection();
+            // Sağ tık seçili olmayan bir parçanın üstündeyse önce onu seç.
+            if (ImGui::IsWindowAppearing()) {
+                const uint64_t under = pickAt((io.MousePos.x - origin.x) / size.x, (io.MousePos.y - origin.y) / size.y);
+                if (m_s.graph.findByUid(under) && !isNodeSelected(under)) selectNode(under);
+            }
+            const bool hasNode = m_s.selKind == SelectionKind::Node;
+            if (ImGui::MenuItem(ICON_FOCUS "  Seçime odaklan", "F", false, hasNode)) frameSelection();
             if (ImGui::MenuItem(ICON_MAXIMIZE "  Tümünü kadrajla", "Shift+A")) frameAll();
             ImGui::Separator();
-            if (ImGui::MenuItem(ICON_COPY "  Çoğalt", "Ctrl+D", false, m_s.selKind == SelectionKind::Node)) duplicateSelection();
-            if (ImGui::MenuItem(ICON_TRASH_2 "  Sil", "Del", false, m_s.selKind == SelectionKind::Node)) deleteSelection();
+            if (ImGui::MenuItem(ICON_COPY "  Çoğalt", "Ctrl+D", false, hasNode)) duplicateSelection();
+            if (ImGui::MenuItem(ICON_GROUP "  Grupla", "Ctrl+G", false, hasNode)) groupSelection();
+            if (ImGui::MenuItem("      Zemine oturt", "G", false, hasNode)) placeSelectionOnGround();
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_EYE_OFF "  Gizle", "H", false, hasNode)) toggleSelectionVisibility();
+            if (ImGui::MenuItem(ICON_SCAN_EYE "  Yalnız seçimi göster", "I", false, hasNode)) isolateSelection();
+            if (ImGui::MenuItem(ICON_EYE "  Hepsini göster", "Alt+H")) showAllNodes();
+            ImGui::Separator();
+            if (ImGui::MenuItem(ICON_TRASH_2 "  Sil", "Del", false, hasNode)) deleteSelection();
             ImGui::EndPopup();
         }
     }
@@ -289,12 +304,27 @@ void Application::drawSelectionOutline(const ImVec2& origin, const ImVec2& size)
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->PushClipRect(origin, ImVec2(origin.x + size.x, origin.y + size.y), true);
 
-    if (m_s.hoverUid && m_s.hoverUid != m_s.selUid && m_s.gizmoOp == 0) {
+    if (m_s.hoverUid && !isNodeSelected(m_s.hoverUid)) {
         if (SceneNode* h = m_s.graph.findByUid(m_s.hoverUid))
             drawBox(vp, SceneGraph::nodeWorldBounds(*h), origin, size, ui::col(pal.text, 0.25f), 1.0f, nullptr);
     }
-    if (SceneNode* n = selectedNode())
-        drawBox(vp, SceneGraph::nodeWorldBounds(*n), origin, size, ui::col(pal.accent, 0.75f), 1.25f, n->name.c_str());
+    // Tek seçim: kutu + ad etiketi. Çoklu seçim: her nesnenin kutusu ve hepsini
+    // saran soluk bir ortak kutu; etiket ("N nesne") ortak kutunun üstünde.
+    const std::vector<SceneNode*> sel = selectedNodes();
+    if (sel.size() == 1) {
+        drawBox(vp, SceneGraph::nodeWorldBounds(*sel.front()), origin, size, ui::col(pal.accent, 0.8f), 1.25f,
+                sel.front()->name.c_str());
+    } else if (sel.size() > 1) {
+        AABB all = AABB::empty();
+        for (SceneNode* n : sel) {
+            const AABB b = SceneGraph::nodeWorldBounds(*n);
+            all.merge(b);
+            drawBox(vp, b, origin, size, ui::col(pal.accent, n->uid == m_s.selUid ? 0.85f : 0.55f), 1.25f, nullptr);
+        }
+        char label[48];
+        std::snprintf(label, sizeof(label), "%zu nesne", sel.size());
+        drawBox(vp, all, origin, size, ui::col(pal.accent, 0.18f), 1.0f, label);
+    }
 
     if (m_s.selKind == SelectionKind::Light && m_s.selLight >= 0 && m_s.selLight < static_cast<int>(m_s.lights.size())) {
         const LightDesc& l = m_s.lights[static_cast<size_t>(m_s.selLight)];
@@ -340,8 +370,14 @@ void Application::drawSelectionOutline(const ImVec2& origin, const ImVec2& size)
     dl->PopClipRect();
 }
 
-// ImGuizmo: seçili düğümün DÜNYA matrisi düzenlenir, sonra ebeveynin tersiyle
-// çarpılarak yerel dönüşüme çevrilir: yerel = ebeveyn⁻¹ · dünya.
+// Tutamaç (ImGuizmo). Düğümlerin kendisi değil, seçimin ortasındaki bir PİVOT
+// matrisi P düzenlenir. ImGuizmo P'yi P' yapınca dünya uzayındaki değişim
+//     D = P' · P⁻¹
+// her seçili düğüme uygulanır: dünya' = D · dünya, yerel' = ebeveynDünya⁻¹ · dünya'.
+// Böylece çoklu seçim tek parça gibi döner/ölçeklenir ve dönme merkezi nesnenin
+// orijini değil görünür ortasıdır (içe aktarılan parçaların orijini çoğu zaman
+// modelin dışında kalır). P sürükleme boyunca sabit tutulur: her karede sınır
+// kutusundan yeniden hesaplansaydı döndürürken kutu değiştiği için merkez kayardı.
 void Application::drawGizmo(const ImVec2& origin, const ImVec2& size) {
     ImGuizmo::SetOrthographic(m_s.camera.orthographic);
     ImGuizmo::SetGizmoSizeClipSpace(0.16f);
@@ -352,22 +388,86 @@ void Application::drawGizmo(const ImVec2& origin, const ImVec2& size) {
     toColumnMajor(vp.view, view);
     toColumnMajor(vp.proj, proj);
 
-    static bool wasUsing = false;
-    SceneNode* n = selectedNode();
-    if (n && m_s.gizmoOp > 0) {
+    const std::vector<SceneNode*> nodes = selectedNodes();
+    LightDesc* light = nullptr;
+    if (m_s.selKind == SelectionKind::Light && m_s.selLight >= 0 && m_s.selLight < static_cast<int>(m_s.lights.size()) &&
+        m_s.lights[static_cast<size_t>(m_s.selLight)].type != LightDesc::Type::Directional)
+        light = &m_s.lights[static_cast<size_t>(m_s.selLight)];
+
+    if (m_s.gizmoOp > 0 && (!nodes.empty() || light)) {
+        // Işıklarda yalnız taşıma: alan ışığı hedefine bakmaya devam eder.
+        const int opIdx = light ? 1 : m_s.gizmoOp;
+        const ImGuizmo::OPERATION op = opIdx == 1 ? ImGuizmo::TRANSLATE : opIdx == 2 ? ImGuizmo::ROTATE : ImGuizmo::SCALE;
+        if (!ImGuizmo::IsUsing()) {
+            m_gizmoUndoPushed = false;
+            Vec3f center;
+            Mat4f rot = Mat4f::identity();
+            if (light) {
+                center = light->position;
+            } else {
+                AABB box = AABB::empty();
+                for (SceneNode* n : nodes) box.merge(SceneGraph::nodeWorldBounds(*n));
+                center = box.pMin.x <= box.pMax.x ? box.centroid() : Vec3f(0.0f);
+                // Tek nesnede yerel eksenler (ölçek her zaman nesnenin kendi eksenlerinde):
+                // dünya matrisinin sütunları Gram-Schmidt ile dik birim eksenlere çevrilir.
+                if (nodes.size() == 1 && (m_s.gizmoLocal || op == ImGuizmo::SCALE)) {
+                    const Mat4f w = nodes.front()->worldTransform().matrix();
+                    Vec3f x(w(0, 0), w(1, 0), w(2, 0)), y(w(0, 1), w(1, 1), w(2, 1));
+                    if (x.lengthSquared() > 1e-12f && y.lengthSquared() > 1e-12f) {
+                        x = x.normalized();
+                        y = (y - x * x.dot(y));
+                        if (y.lengthSquared() > 1e-12f) {
+                            y = y.normalized();
+                            const Vec3f z = x.cross(y);
+                            for (int r = 0; r < 3; ++r) {
+                                rot(r, 0) = r == 0 ? x.x : r == 1 ? x.y : x.z;
+                                rot(r, 1) = r == 0 ? y.x : r == 1 ? y.y : y.z;
+                                rot(r, 2) = r == 0 ? z.x : r == 1 ? z.y : z.z;
+                            }
+                        }
+                    }
+                }
+            }
+            m_gizmoPivot = Transform::translate(center).matrix() * rot;
+        }
+
+        // Adım: Ctrl basılıyken mıknatıs ayarı tersine döner. Taşıma adımı sahne
+        // boyutuna göre "yuvarlak" bir sayıdır (3 birimlik sahnede 0.1, 30'da 1).
+        float snap[3] = {0, 0, 0};
+        const bool snapping = m_s.snap != ImGui::GetIO().KeyCtrl;
+        if (snapping) {
+            const AABB all = m_s.graph.worldBounds();
+            const float diag = all.pMin.x <= all.pMax.x ? (all.pMax - all.pMin).length() : 1.0f;
+            const float step = op == ImGuizmo::TRANSLATE ? std::pow(10.0f, std::floor(std::log10(std::max(diag, 1e-4f)))) * 0.1f
+                             : op == ImGuizmo::ROTATE    ? 15.0f
+                                                         : 0.1f;
+            snap[0] = snap[1] = snap[2] = step;
+        }
+
         float model[16];
-        toColumnMajor(n->worldTransform().matrix(), model);
-        const ImGuizmo::OPERATION op = m_s.gizmoOp == 1 ? ImGuizmo::TRANSLATE
-                                     : m_s.gizmoOp == 2 ? ImGuizmo::ROTATE : ImGuizmo::SCALE;
-        ImGuizmo::SetID(static_cast<int>(n->uid & 0x7fffffff));
-        if (ImGuizmo::Manipulate(view, proj, op, op == ImGuizmo::SCALE ? ImGuizmo::LOCAL : ImGuizmo::WORLD, model)) {
-            if (!wasUsing) pushUndo(); // sürüklemenin başında tek bir geri al adımı
-            Transform parentWorld = n->parent ? n->parent->worldTransform() : Transform{};
-            n->localTransform = Transform(parentWorld.inverseMatrix() * fromColumnMajor(model));
+        toColumnMajor(m_gizmoPivot, model);
+        const ImGuizmo::MODE mode = (m_s.gizmoLocal || op == ImGuizmo::SCALE) ? ImGuizmo::LOCAL : ImGuizmo::WORLD;
+        if (ImGuizmo::Manipulate(view, proj, op, mode, model, nullptr, snapping ? snap : nullptr)) {
+            // Geri al: sürüklemenin İLK DEĞİŞİKLİĞİNDE bir kez (ilk kare değişmeden geçebilir).
+            if (!m_gizmoUndoPushed) {
+                pushUndo();
+                m_gizmoUndoPushed = true;
+            }
+            const Mat4f next = fromColumnMajor(model);
+            const Mat4f delta = next * m_gizmoPivot.inverse();
+            if (light) {
+                const Vec4f p = delta * Vec4f(light->position.x, light->position.y, light->position.z, 1.0f);
+                light->position = Vec3f(p.x, p.y, p.z);
+            } else {
+                for (SceneNode* n : nodes) {
+                    const Mat4f world = delta * n->worldTransform().matrix();
+                    n->localTransform = Transform(n->parent->worldTransform().inverseMatrix() * world);
+                }
+            }
+            m_gizmoPivot = next;
             markDocumentChanged(true);
         }
     }
-    wasUsing = ImGuizmo::IsUsing();
 
     // Yön küpü (sağ alt): tıklanan yüze kamerayı çevirir; sonuç görünüş matrisinden
     // orbit açılarına geri çevrilir.
@@ -398,8 +498,8 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
     // ── Sol üst: araç çubuğu ──
     const float btn = ImGui::GetFrameHeight() + 4.0f;
     const ImVec2 tb(origin.x + 12.0f, origin.y + 12.0f);
-    const int count = 9;
-    const float tbW = btn * static_cast<float>(count) + 4.0f * static_cast<float>(count - 1) + 16.0f + 2 * 10.0f;
+    const int count = 11;
+    const float tbW = btn * static_cast<float>(count) + 4.0f * static_cast<float>(count - 1) + 16.0f + 3 * 10.0f;
     dl->AddRectFilled(tb, ImVec2(tb.x + tbW, tb.y + btn + 8.0f), ui::col(pal.bg1, 0.88f), 10.0f);
     dl->AddRect(tb, ImVec2(tb.x + tbW, tb.y + btn + 8.0f), ui::col(pal.border), 10.0f);
     ImGui::SetCursorScreenPos(ImVec2(tb.x + 8.0f, tb.y + 4.0f));
@@ -411,6 +511,15 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
     if (ui::IconButton(ICON_ROTATE_3D, "Döndür (E)", m_s.gizmoOp == 2, btn)) m_s.gizmoOp = 2;
     ImGui::SameLine();
     if (ui::IconButton(ICON_SCALE_3D, "Ölçekle (R)", m_s.gizmoOp == 3, btn)) m_s.gizmoOp = 3;
+    ImGui::SameLine(0, 14);
+    if (ui::IconButton(m_s.gizmoLocal ? ICON_LOCATE_FIXED : ICON_EARTH,
+                       m_s.gizmoLocal ? "Eksenler: nesnenin kendi eksenleri (tıkla: dünya)" : "Eksenler: dünya (tıkla: nesnenin kendi eksenleri)",
+                       m_s.gizmoLocal, btn))
+        m_s.gizmoLocal = !m_s.gizmoLocal;
+    ImGui::SameLine();
+    if (ui::IconButton(ICON_MAGNET, m_s.snap ? "Adımlı hareket açık (Ctrl basılıyken serbest)" : "Adımlı hareket (Ctrl basılı tutarak da olur)",
+                       m_s.snap, btn))
+        m_s.snap = !m_s.snap;
     ImGui::SameLine(0, 14);
     if (ui::IconButton(ICON_FOCUS, "Seçime odaklan (F)", false, btn)) frameSelection();
     ImGui::SameLine();

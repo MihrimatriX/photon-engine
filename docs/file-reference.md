@@ -131,9 +131,20 @@ canlı ilerleme önizlemesi ve turntable kare dizisi.
 
 ### `src/app/ui_scene.cpp`
 
-ui_scene.cpp — Sağ üst panel: sahne ağacı (modeller ve parçalar), ışıklar ve
-ortam/zemin girdileri. Görünürlük gözü, sağ tık menüsü, çift tıkla yeniden
-adlandırma ve malzemeyi ağaçtaki bir düğüme bırakma burada.
+ui_scene.cpp — Sağ üst panel: sahne ağacı (modeller, gruplar, parçalar), ışıklar
+ve ortam/zemin girdileri.
+
+Etkileşimler:
+  tık / Ctrl+tık / Shift+tık   tek seçim / seçime ekle-çıkar / aralık seç
+  ↑ ↓ (Shift ile)              satırlar arasında gezin (aralığı genişlet)
+  sürükle-bırak                gruba taşı (gruba bırak), yanına taşı (parçaya bırak),
+                               en üst seviyeye taşı (listenin altındaki alana bırak)
+  çift tık / F2                yeniden adlandır (Enter ya da başka yere tıklamak kaydeder, Esc iptal)
+  göz ikonu                    görünürlük; gizli bir grubun çocukları soluk yazılır
+  arama kutusu                 ada göre süz (Türkçe harflerde büyük/küçük ayrımı yok)
+Ağacı değiştiren işlemler (sil, taşı, grupla…) çizim sırasında değil, ağaç
+çizildikten SONRA uygulanır: dolaşılan çocuk listesi çizim ortasında değişirse
+yineleyiciler geçersiz kalırdı.
 
 ### `src/app/ui_viewport.cpp`
 

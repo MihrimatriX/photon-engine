@@ -15,6 +15,7 @@ constexpr const char* kPayloadHdr = "PHOTON_HDR";
 constexpr const char* kPayloadStudio = "PHOTON_STUDIO";
 constexpr const char* kPayloadLight = "PHOTON_LIGHT"; // "area" | "directional"
 constexpr const char* kPayloadCamera = "PHOTON_CAMERA"; // preset id
+constexpr const char* kPayloadNode = "PHOTON_NODE";     // uint64_t düğüm kimliği (sahne panelinde taşıma)
 
 inline std::string lowerExt(std::string pathOrExt) {
     auto dot = pathOrExt.find_last_of('.');
