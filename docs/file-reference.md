@@ -354,6 +354,10 @@ Boş yuvalar "gömülü serbest liste" (intrusive free list) ile bağlanır: bo�
 kendi belleği bir sonraki boş yuvanın işaretçisini tutar, ek bellek gerekmez.
 allocate/deallocate O(1); yapıcı/yıkıcı çağrılmaz (yalnızca ham bellek verir).
 
+### `src/core/platform/path.cpp`
+
+path.cpp — Çalışan exe'nin klasörü ve assets/ kökünün bulunması (uygulama ve CLI ortak).
+
 ### `src/core/platform/path.h`
 
 path.h — UTF-8 string ↔ std::filesystem::path dönüşümü.
