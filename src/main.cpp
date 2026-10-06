@@ -110,17 +110,34 @@ int main(int argc, char** argv) {
     } else if (isSupportedModelFile(o.input)) {
         auto node = importModelFile(o.input, &err);
         if (!node) { std::cerr << err << std::endl; return 1; }
+        // Uygulamadaki "boş sahneye model" yolunun aynısı: modeli zemine oturt ve
+        // ortala, "Ürün Stüdyosu" preset'ini (HDRI + softbox'lar) uygula.
+        if (const AABB nb = SceneGraph::nodeWorldBounds(*node); nb.pMin.x <= nb.pMax.x) {
+            const Vec3f nc = nb.centroid();
+            node->localTransform = Transform::translate(Vec3f(-nc.x, -nb.pMin.y, -nc.z)) * node->localTransform;
+        }
         graph.root()->addChild(std::move(node));
-        // Varsayılan stüdyo: ortam yok, iki alan ışığı; kamera sınırlara göre.
-        StudioPreset studio;
-        StudioPreset::Rig key; key.azimuthDeg = 50; key.elevationDeg = 40; key.intensity = 6; key.size = 1.3f;
-        StudioPreset::Rig fill; fill.azimuthDeg = -60; fill.elevationDeg = 20; fill.intensity = 1.6f; fill.size = 1.8f; fill.distance = 3;
-        studio.lights = {key, fill};
         const AABB b = graph.worldBounds();
-        data.lights = placeStudioLights(studio, b, 45.0f);
+        const float phi = 0.785f;
+        const std::string assets = findAssetsRoot();
+        for (const auto& studio : loadStudioPresets(pathToUtf8(pathFromUtf8(assets) / "studios"))) {
+            if (studio.id != "product_softbox") continue;
+            data.lights = placeStudioLights(studio, b, phi * RAD_TO_DEG);
+            data.environment.rotationDeg = studio.rotationDeg;
+            data.environment.intensity = studio.intensity;
+            if (studio.hasExposure) data.render["exposure"] = studio.exposure;
+            // Preset ortamı kimlikle verir ("studio_small_09"); dosya adı çözünürlük ekiyle biter.
+            std::error_code ec;
+            for (const auto& e : std::filesystem::directory_iterator(pathFromUtf8(assets) / "environments", ec)) {
+                const std::string fn = pathToUtf8(e.path().filename());
+                if (fn.rfind(studio.environment, 0) == 0 && e.path().extension() == ".hdr")
+                    data.environment.hdrPath = pathToUtf8(e.path());
+            }
+        }
+        if (data.lights.empty()) std::cerr << "Uyarı: stüdyo preset'i bulunamadı (" << assets << "/studios)\n";
         const Vec3f c = b.centroid();
         const float r = (b.pMax - b.pMin).length() * 0.5f / std::sin(17.5f * DEG_TO_RAD) * 1.1f;
-        data.camera = {{"target", {c.x, c.y, c.z}}, {"radius", r}, {"theta", 1.15}, {"phi", 0.785}, {"fov", 35}};
+        data.camera = {{"target", {c.x, c.y, c.z}}, {"radius", r}, {"theta", 1.15}, {"phi", phi}, {"fov", 35}};
     } else if (!loadProject(o.input, graph, data, &err)) {
         std::cerr << err << std::endl;
         return 1;

@@ -26,4 +26,10 @@ inline std::string pathToUtf8(const std::filesystem::path& p) {
     return std::string(u8.begin(), u8.end());
 }
 
+/// Çalışan exe'nin bulunduğu klasör (bulunamazsa çalışma dizini).
+std::filesystem::path executableDir();
+
+/// assets/ klasörü (UTF-8): exe'nin yanında, yoksa üst klasörlerde aranır.
+std::string findAssetsRoot();
+
 } // namespace photon

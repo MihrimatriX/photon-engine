@@ -16,6 +16,7 @@ target_sources(photon_core PRIVATE
     image/tone_mapping.cpp
     threading/thread_pool.cpp
     memory/arena_allocator.cpp
+    platform/path.cpp
 )
 
 # Public include directory — parent src/ folder so includes look like:

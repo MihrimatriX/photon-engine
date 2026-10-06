@@ -47,3 +47,6 @@ add_custom_command(TARGET photon_app POST_BUILD
     COMMENT "Copying assets to output directory"
 )
 photon_copy_oidn_dlls(photon_app)
+
+# Hakkında penceresindeki sürüm; tek kaynak kök CMakeLists'teki project(VERSION).
+target_compile_definitions(photon_app PRIVATE PHOTON_VERSION="${PROJECT_VERSION}")

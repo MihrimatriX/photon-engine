@@ -1,0 +1,57 @@
+PhotonEngine — Ürün görselleştirme ve fotogerçekçi render
+=========================================================
+
+Kurulum gerekmez: klasörü istediğiniz yere çıkarın, photon_app.exe'yi çalıştırın.
+Sistem gereksinimi: Windows 10/11 64 bit, 64 bit Intel/AMD işlemci. Ekran kartı gerekmez (render işlemcide).
+Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
+
+
+1) HIZLI BAŞLANGIÇ (masaüstü uygulaması)
+----------------------------------------
+  - photon_app.exe'yi açın. Örnek sahne yüklenir; viewport sürekli render eder.
+  - Sol panelden bir malzemeyi viewport'taki bir parçanın üzerine sürükleyip bırakın.
+  - Sol panelin "Ortam" sekmesinden bir HDRI'a tıklayın: aydınlatma değişir.
+  - Ctrl+P → çözünürlük ve süre/örnek seçin → "Render". Bitince dosyaya kaydedilir
+    (varsayılan: Resimler\PhotonEngine).
+
+2) KENDİ MODELİNİZİ AÇMAK
+-------------------------
+  - Dosya > Model içe aktar (Ctrl+O), ya da .obj / .gltf / .glb dosyasını pencereye sürükleyin.
+  - Komut satırından:   photon_app.exe C:\modeller\sise.obj
+  - Model zemine oturtulur; boş sahneye gelirse stüdyo ışıkları kurulup kadrajlanır.
+    Shift+A ile istediğiniz zaman yeniden kadrajlayın.
+
+3) PROJE KAYDETMEK / AÇMAK
+--------------------------
+  - Ctrl+S: sahne, malzemeler, ışıklar, ortam ve kayıtlı kameralar .photon dosyasına yazılır.
+  - .photon dosyasını çift tıklamak için "Birlikte aç > photon_app.exe" seçin.
+  - Örnek: photon_app.exe ornekler\vitrin.photon
+
+4) KOMUT SATIRINDAN RENDER (otomasyon, toplu iş)
+------------------------------------------------
+  photon_render.exe <sahne.photon | model.obj | --cornell> [seçenekler]
+     --out dosya.png|.jpg|.exr   çıktı (varsayılan output.png)
+     --res 1920x1080             çözünürlük
+     --spp 256                   piksel başına örnek (kalite)
+     --bounces 12                en fazla ışık sekmesi
+     --threads 8                 iş parçacığı sayısı
+     --no-denoise                yapay zekâ gürültü gidermeyi kapat
+     --stats rapor.json          süre ve hız istatistiği
+
+  Örnekler (PowerShell, paket klasöründe):
+     .\photon_render.exe ornekler\vitrin.photon --out vitrin.png --res 1920x1080 --spp 128
+     .\photon_render.exe assets\models\product_stand.obj --out stand.jpg --spp 64
+
+  Bir klasördeki tüm modelleri render etmek:
+     Get-ChildItem C:\modeller\*.obj | ForEach-Object {
+         .\photon_render.exe $_.FullName --out "C:\cikti\$($_.BaseName).png" --spp 128 }
+
+5) KISAYOLLAR (uygulamada F1)
+-----------------------------
+  Sol fare: döndür   Orta/sağ fare: kaydır   Tekerlek: yakınlaş   Çift tık: döndürme merkezi
+  F: seçime odaklan   Shift+A: tümünü kadrajla   1/2/3/4: ön/yan/üst/dörtte üç
+  Q/W/E/R: seç/taşı/döndür/ölçekle   G: zemine oturt   T: turntable   Del: sil   Ctrl+D: çoğalt
+  Ctrl+C / Ctrl+V: malzeme kopyala/yapıştır   Ctrl+Z / Ctrl+Y: geri al/yinele
+  Ctrl+O: model   Ctrl+S: kaydet   Ctrl+P: render   Ctrl+E: viewport görüntüsü   F5: yeniden başlat
+
+Lisanslar: lisanslar\ klasörü. HDRI ve dokular Poly Haven (CC0).

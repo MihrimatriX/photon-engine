@@ -273,7 +273,6 @@ void Application::attachImported(const std::string& path, std::unique_ptr<SceneN
     const uint64_t uid = node->uid;
     size_t parts = node->children.size();
     m_s.graph.root()->addChild(std::move(node));
-    selectNode(uid);
     if (wasEmpty) {
         if (m_s.lights.empty()) {
             for (const auto& s : m_s.studios)
@@ -281,6 +280,8 @@ void Application::attachImported(const std::string& path, std::unique_ptr<SceneN
         }
         frameAll();
     }
+    selectNode(uid); // applyStudio seçimi temizler; bu yüzden en sonda
+
     markDocumentChanged();
     setStatus("İçe aktarıldı: " + ui::fileName(path) + " (" + std::to_string(parts) + " parça)");
 }

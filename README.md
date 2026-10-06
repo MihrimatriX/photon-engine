@@ -47,7 +47,7 @@ grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazılm
 Gerekenler: Visual Studio 2022/2026 (C++ masaüstü), CMake ≥ 3.21, Ninja (VS ile gelir).
 
 ```powershell
-# 1) Bir kez: OIDN'yi indir (vcpkg'de yok) — third_party/oidn
+# 1) Bir kez: OIDN ve Embree'nin hazır paketlerini indir — third_party/
 powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
 
 # 2) VS geliştirici kabuğu (VCPKG_ROOT, VS'in kendi vcpkg'sini gösterebilir)
@@ -60,8 +60,17 @@ cmake --build --preset release
 ctest --preset release
 ```
 
-glfw, Dear ImGui (docking), ImGuizmo, nlohmann-json ve Embree vcpkg ile gelir (`vcpkg.json`).
-İlk yapılandırma Embree'yi derlediği için birkaç dakika sürer.
+glfw, Dear ImGui (docking), ImGuizmo ve nlohmann-json vcpkg ile gelir (`vcpkg.json`).
+
+### Paketleme
+
+```powershell
+pwsh -File scripts\package.ps1   # → dist\PhotonEngine-<sürüm>-win64.zip
+```
+
+Kurulum gerektirmeyen paket: iki exe, DLL'ler, VC++ çalışma zamanı (uygulama yanına),
+`assets\`, `ornekler\vitrin.photon`, `KULLANIM.txt` (kullanıcı kılavuzu, `packaging\`) ve
+`lisanslar\`. Sürüm kök `CMakeLists.txt`'teki `project(VERSION)`'dan okunur.
 
 ### Çalıştırma
 

@@ -243,19 +243,20 @@ void Application::drawAboutWindows() {
     }
     if (m_s.showAbout) {
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(480, 0), ImGuiCond_Appearing);
         if (ImGui::Begin(ICON_APERTURE "  PhotonEngine hakkında###about", &m_s.showAbout,
                          ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::PushFont(ui::fonts().semibold, ui::fonts().baseSize * 1.6f);
             ImGui::TextUnformatted("PhotonEngine");
             ImGui::PopFont();
-            ImGui::TextColored(ui::palette().textDim, "Fiziksel tabanlı ürün görselleştirme");
+            ImGui::TextColored(ui::palette().textDim, "Sürüm %s  ·  Fiziksel tabanlı ürün görselleştirme", PHOTON_VERSION);
             ImGui::Separator();
             ImGui::BulletText("Yol izleme (path tracing): NEE + MIS, Owen-Sobol örnekleme");
             ImGui::BulletText("Malzemeler: Disney Principled, GGX/VNDF cam");
             ImGui::BulletText("Gürültü giderme: Intel Open Image Denoise %s", denoiseAvailable() ? "(etkin)" : "(yok)");
             ImGui::BulletText("Ton eşleme: AgX, Khronos PBR Nötr, ACES");
             ImGui::Spacing();
-            ImGui::TextColored(ui::palette().textFaint, "Üçüncü taraf lisansları: docs/THIRD_PARTY.md");
+            ImGui::TextColored(ui::palette().textFaint, "Üçüncü taraf lisansları: programın yanındaki lisanslar\\ klasörü");
         }
         ImGui::End();
     }

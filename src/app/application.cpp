@@ -46,29 +46,6 @@ void dropCallback(GLFWwindow*, int count, const char** paths) {
     gApp->onDrop(v);
 }
 
-fs::path executableDir() {
-#ifdef _WIN32
-    wchar_t buf[MAX_PATH];
-    DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
-    if (n > 0 && n < MAX_PATH) return fs::path(buf).parent_path();
-#endif
-    return fs::current_path();
-}
-
-// assets/ klasörünü exe'nin yanında, sonra çalışma dizininden yukarı doğru arar
-// (derleme klasöründen ya da repo kökünden çalıştırmayı destekler).
-std::string findAssetsRoot() {
-    for (fs::path start : {executableDir(), fs::current_path()}) {
-        fs::path cur = start;
-        for (int i = 0; i < 6; ++i) {
-            if (fs::exists(cur / "assets" / "materials")) return pathToUtf8(cur / "assets");
-            if (!cur.has_parent_path() || cur.parent_path() == cur) break;
-            cur = cur.parent_path();
-        }
-    }
-    return "assets";
-}
-
 // Kullanıcı verisi: %APPDATA%/PhotonEngine (Windows) ya da ~/.photon-engine.
 std::string findUserDir() {
     fs::path base;
@@ -442,6 +419,7 @@ int Application::run() {
     };
     if (ui == "render") m_s.showRenderDialog = true;
     else if (ui == "shortcuts") m_s.showShortcuts = true;
+    else if (ui == "about") m_s.showAbout = true;
     else if (ui == "material") { selectFirst(); m_s.rightTab = 1; }
     else if (ui == "object") { selectFirst(); m_s.rightTab = 0; m_s.gizmoOp = 1; }
     else if (ui == "env") { m_s.rightTab = 2; m_s.leftTab = 1; }

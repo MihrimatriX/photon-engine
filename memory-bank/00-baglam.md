@@ -70,7 +70,13 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - **CLI:** `photon_render` proje/model render eder, `--stats` yazar. `bench/scenes/showcase.photon`.
   - **Yorumlar:** her kaynak dosyada Türkçe başlık; özel mantığa açıklamalar. `docs/file-reference.md` başlıklardan üretilir (`scripts/gen_file_reference.sh`).
   - **Ölçüm (i7-6700K, 960×540, 8 sekme, Embree öncesi):** 2.3 M örnek/sn; tek thread profil: kesişim %44, malzeme değerlendirme %27.
+- **2026-10-06 (oturum 4, paketleme):**
+  - `scripts/package.ps1` → `dist/PhotonEngine-0.1.0-win64.zip` (74 MB, taşınabilir; VC++ CRT uygulama yanında, lisans metinleri `lisanslar/`). Kullanıcı kılavuzu `packaging/KULLANIM.txt`.
+  - Paket temiz klasörde denendi: CLI proje/model renderı ve uygulama (`--ui material|object|render|about`) çalışıyor.
+  - Düzeltmeler: CLI model modu artık uygulamayla aynı "Ürün Stüdyosu" preset'ini + HDRI'ı kullanıyor ve modeli zemine oturtuyor (önce aşırı pozlanıyordu); `findAssetsRoot/executableDir` `core/platform/path.cpp`'ye taşındı; içe aktarılan model seçili kalıyor (applyStudio seçimi siliyordu); Hakkında'da sürüm (`PHOTON_VERSION`).
+  - Not: `--screenshot` çekimleri sırasında pencere odak alır; kullanıcı o an tıklar/yazarsa görüntü bozulur (yanlış alarm olarak hata sanıldı).
 - **Sıradaki adımlar:**
+  - Kurulum paketi (Inno Setup, makinede yok), kod imzalama, log + çökme dökümü, otomatik kaydetme (eksik analizi "Faz 1").
   - Embree sonrası ölçüm ve `bench/BASELINE.md` (F2.13).
   - F2.6/F2.7 furnace + chi-kare testleri; F2.8 golden görüntüler.
   - F3.8 malzeme ID tablosu / geometri önbelleği: büyük modelde ışık-ortam düzenlemesi tüm sahneyi yeniden bake ediyor. Faz 6 TLAS/BLAS (Embree instancing) ile birlikte.
