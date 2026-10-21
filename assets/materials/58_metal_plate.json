@@ -1,0 +1,13 @@
+{
+  "id": "metal_plate",
+  "name": "Metal Plaka",
+  "category": "Dokulu",
+  "type": "generic",
+  "baseColor": [1.0, 1.0, 1.0],
+  "roughness": 0.3,
+  "metallic": 1,
+  "specular": 0.5,
+  "maps": { "albedo": "metal_plate_diff_1k.jpg", "normal": "metal_plate_nor_gl_1k.jpg", "roughness": "metal_plate_rough_1k.jpg" },
+  "mapping": "box",
+  "texScale": 1
+}

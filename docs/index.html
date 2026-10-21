@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PhotonEngine</title>
+<meta name="description" content="Ürün görselleştirme için fiziksel tabanlı render motoru ve masaüstü stüdyo. C++20 yol izleyici, Embree 4, Open Image Denoise.">
+<meta property="og:title" content="PhotonEngine">
+<meta property="og:description" content="Ürün görselleştirme için fiziksel tabanlı render motoru ve masaüstü stüdyo.">
+<meta property="og:image" content="https://mihrimatrix.github.io/photon-engine/img/render-final.jpg">
+<meta name="color-scheme" content="dark">
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://api.fontshare.com/v2/css?f[]=cabinet-grotesk@400,500,700,800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #131417;
+    --bg-raise: #1b1c20;
+    --bg-deep: #0d0e10;
+    --ink: #edece7;
+    --muted: #9d9fa4;
+    --faint: #6c6e74;
+    --line: rgba(237, 236, 231, 0.1);
+    --accent: #f07a1a;
+    --accent-soft: rgba(240, 122, 26, 0.16);
+    --radius-l: 28px;
+    --radius-m: 18px;
+    --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Cabinet Grotesk", ui-sans-serif, system-ui, sans-serif;
+    font-size: 1.125rem;
+    line-height: 1.55;
+    overflow-x: clip;
+  }
+  /* İnce film greni: tüm sayfanın üstünde, tıklamayı engellemez */
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 100; opacity: 0.06;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  img { display: block; max-width: 100%; height: auto; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+  code, pre, kbd { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+  main { width: 100%; max-width: 100%; overflow-x: clip; }
+  .wrap { width: 100%; max-width: 1280px; margin: 0 auto; padding: 0 16px; }
+  @media (min-width: 720px) { .wrap { padding: 0 40px; } }
+  .chapter { padding-top: 128px; padding-bottom: 128px; }
+  @media (min-width: 900px) { .chapter { padding-top: 192px; padding-bottom: 192px; } }
+  h2 {
+    font-weight: 800; font-size: clamp(2.3rem, 4.6vw, 4.2rem); line-height: 1; letter-spacing: -0.025em;
+    margin: 0; max-width: 22ch; text-wrap: balance;
+  }
+  .lead { color: var(--muted); font-size: clamp(1.1rem, 1.6vw, 1.3rem); max-width: 56ch; margin: 24px 0 0; }
+
+  /* Butonlar */
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px; padding: 15px 26px; border-radius: 999px;
+    font-weight: 700; font-size: 1.05rem; text-decoration: none; transition: transform 0.4s var(--ease), background 0.3s;
+  }
+  .btn:hover { transform: translateY(-2px); }
+  .btn-accent { background: var(--accent); color: #17120d; }
+  .btn-light { background: var(--ink); color: #131417; }
+  .btn-ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--line); }
+  .btn-ghost:hover { box-shadow: inset 0 0 0 1.5px var(--muted); }
+  .btn svg { width: 18px; height: 18px; }
+
+  /* Yüzen menü */
+  .nav {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 50;
+    display: flex; align-items: center; gap: 4px; padding: 6px 6px 6px 18px; border-radius: 999px;
+    background: rgba(27, 28, 32, 0.62); backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+    box-shadow: inset 0 0 0 1px var(--line), 0 18px 40px -20px rgba(0, 0, 0, 0.7);
+    width: max-content; max-width: calc(100% - 32px);
+  }
+  .nav .brand { font-weight: 800; text-decoration: none; margin-right: 14px; display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .nav .brand i { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 14px var(--accent); }
+  .nav .links { display: none; gap: 2px; }
+  .nav .links a { text-decoration: none; color: var(--muted); padding: 8px 14px; border-radius: 999px; font-weight: 500; font-size: 0.98rem; transition: color 0.2s, background 0.2s; }
+  .nav .links a:hover { color: var(--ink); background: rgba(255, 255, 255, 0.05); }
+  .nav .gh { padding: 9px 16px; font-size: 0.95rem; }
+  @media (min-width: 900px) { .nav .links { display: flex; } }
+
+  /* Hero: solda metin, sağda render */
+  .hero { position: relative; min-height: 100svh; display: flex; align-items: center; padding-top: 128px; padding-bottom: 96px; }
+  .hero::before {
+    content: ""; position: absolute; inset: -20% -10% auto auto; width: 70vw; height: 70vw; pointer-events: none;
+    background: radial-gradient(closest-side, rgba(240, 122, 26, 0.13), transparent 70%);
+  }
+  .hero-grid { display: grid; gap: 64px; align-items: center; position: relative; }
+  @media (min-width: 1000px) { .hero-grid { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 96px; } }
+  .hero h1 {
+    font-weight: 800; font-size: clamp(2.9rem, 5vw, 5.2rem); line-height: 0.98; letter-spacing: -0.035em;
+    margin: 0; max-width: 40rem;
+  }
+  .hero .lead { margin-top: 28px; max-width: 34rem; }
+  .hero .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 40px; }
+  .shot { position: relative; margin: 0; }
+  .shot .frame {
+    position: relative; border-radius: var(--radius-l); overflow: hidden; aspect-ratio: 16 / 9; background: #c9c9c7;
+    box-shadow: 0 60px 120px -40px rgba(0, 0, 0, 0.85), 0 0 0 1px var(--line);
+  }
+  .shot .frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .shot figcaption { margin-top: 16px; color: var(--faint); font-size: 0.95rem; }
+  @media (min-width: 1000px) { .shot { margin-right: -12vw; } }
+
+  /* Malzeme şeridi */
+  .marquee { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 28px 0; overflow: hidden; }
+  .marquee-track { display: flex; width: max-content; animation: slide 70s linear infinite; }
+  .marquee:hover .marquee-track { animation-play-state: paused; }
+  @keyframes slide { to { transform: translateX(-50%); } }
+  @media (prefers-reduced-motion: reduce) { .marquee-track { animation: none; } }
+  .chip { display: flex; align-items: center; gap: 14px; padding: 0 30px; white-space: nowrap; font-size: 1.35rem; font-weight: 500; color: var(--muted); }
+  .chip img { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; transform: scale(1.12); }
+  .chip span { color: var(--ink); }
+
+  /* Bento */
+  .bento { display: grid; gap: 16px; grid-template-columns: 1fr; grid-auto-flow: dense; margin-top: 64px; }
+  @media (min-width: 720px) { .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (min-width: 1100px) { .bento { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: minmax(250px, auto); } }
+  .card {
+    position: relative; overflow: hidden; border-radius: var(--radius-l); background: var(--bg-raise);
+    box-shadow: inset 0 0 0 1px var(--line); padding: 32px; display: flex; flex-direction: column;
+  }
+  .card h3 { margin: 0 0 10px; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.015em; line-height: 1.1; }
+  .card p { margin: 0; color: var(--muted); }
+  .card ul { margin: 14px 0 0; padding: 0; list-style: none; color: var(--muted); }
+  .card li { padding: 7px 0; border-top: 1px solid var(--line); }
+  .card .media { overflow: hidden; border-radius: var(--radius-m); margin-top: 24px; }
+  .card .media img { width: 100%; transition: transform 0.9s var(--ease); }
+  .card:hover .media img { transform: scale(1.05); }
+  @media (min-width: 720px) {
+    .c-a, .c-b, .c-e { grid-column: span 2; }
+    .c-a { grid-row: span 2; }
+  }
+  @media (min-width: 1100px) {
+    .c-a { grid-column: span 2; grid-row: span 2; }
+    .c-b { grid-column: span 2; }
+    .c-e { grid-column: span 4; flex-direction: row; gap: 48px; align-items: center; }
+    .c-e .text { flex: 0 0 34%; }
+    .c-e .media { margin-top: 0; flex: 1; }
+  }
+  .c-a .media { flex: 1; min-height: 260px; }
+  .c-a .media img { height: 100%; object-fit: cover; object-position: 50% 60%; }
+  .spheres { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 10px; margin-top: auto; padding-top: 24px; }
+  .spheres img { width: 100%; aspect-ratio: 1; border-radius: 50%; object-fit: cover; transform: scale(1.12); transition: transform 0.6s var(--ease); }
+  .spheres img:hover { transform: scale(1.3); }
+  .big-num { font-size: clamp(3.4rem, 6vw, 5rem); font-weight: 800; line-height: 0.9; letter-spacing: -0.04em; color: var(--ink); margin-bottom: auto; padding-bottom: 20px; }
+  .big-num small { font-size: 0.32em; letter-spacing: 0; font-weight: 500; color: var(--muted); margin-left: 6px; }
+  .c-d { background: radial-gradient(120% 90% at 100% 0%, var(--accent-soft), transparent 60%), var(--bg-raise); }
+
+  /* Başlık içi görseller */
+  .inline-head { font-size: clamp(2.2rem, 5.2vw, 5rem); font-weight: 800; line-height: 1.12; letter-spacing: -0.03em; margin: 0; max-width: 18em; }
+  .pill {
+    display: inline-block; width: 2.3em; height: 0.92em; border-radius: 999px; vertical-align: -0.06em; margin: 0 0.12em;
+    background-size: cover; background-position: center; box-shadow: inset 0 0 0 1px var(--line);
+  }
+  .pill.p-model { background-image: url("img/view-solid.jpg"); background-position: 50% 55%; }
+  .pill.p-mat { background-image: url("img/pill-chrome.jpg"); }
+  .pill.p-light { background-image: url("img/pill-light.jpg"); }
+  .pill.p-render { background-image: url("img/pill-scene.jpg"); }
+  ol.steps { list-style: none; margin: 80px 0 0; padding: 0; display: grid; gap: 0; grid-template-columns: 1fr; counter-reset: step; }
+  @media (min-width: 900px) { ol.steps { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+  ol.steps li { counter-increment: step; padding: 28px 24px 28px 0; border-top: 1px solid var(--line); color: var(--muted); }
+  @media (min-width: 900px) { ol.steps li { padding-right: 32px; } }
+  ol.steps li::before { content: counter(step); display: block; font-weight: 800; font-size: 2.6rem; line-height: 1; color: var(--accent); margin-bottom: 18px; }
+  ol.steps strong { display: block; color: var(--ink); font-size: 1.2rem; margin-bottom: 6px; }
+  kbd { font-size: 0.82em; padding: 2px 7px; border-radius: 6px; background: var(--bg-raise); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
+
+  /* Önce / sonra */
+  .compare { position: relative; margin-top: 64px; border-radius: var(--radius-l); overflow: hidden; aspect-ratio: 16 / 9; background: #c9c9c7; box-shadow: 0 0 0 1px var(--line); }
+  .compare img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .compare .after { clip-path: inset(0 0 0 var(--cut, 50%)); }
+  .compare .handle { position: absolute; top: 0; bottom: 0; left: var(--cut, 50%); width: 2px; background: var(--ink); transform: translateX(-1px); pointer-events: none; }
+  .compare .handle::after {
+    content: ""; position: absolute; top: 50%; left: 50%; width: 46px; height: 46px; border-radius: 50%; transform: translate(-50%, -50%);
+    background: var(--ink) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23131417' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 7-5 5 5 5M15 7l5 5-5 5'/%3E%3C/svg%3E") center / 22px no-repeat;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  }
+  .compare input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: ew-resize; margin: 0; }
+  .compare input:focus-visible ~ .handle::after { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .compare .tag { position: absolute; bottom: 16px; padding: 7px 14px; border-radius: 999px; font-size: 0.92rem; font-weight: 600; background: rgba(19, 20, 23, 0.78); color: var(--ink); pointer-events: none; }
+  .compare .tag.l { left: 16px; }
+  .compare .tag.r { right: 16px; }
+  .facts { display: grid; gap: 32px; margin-top: 48px; grid-template-columns: 1fr; }
+  @media (min-width: 760px) { .facts { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .facts div { border-top: 1px solid var(--line); padding-top: 18px; color: var(--muted); }
+  .facts strong { display: block; color: var(--ink); font-size: 1.2rem; margin-bottom: 4px; }
+
+  /* Görünüm akordeonu */
+  .accordion { display: flex; flex-direction: column; gap: 12px; margin-top: 64px; }
+  .slice { position: relative; overflow: hidden; margin: 0; min-width: 0; border-radius: var(--radius-l); background: var(--bg-deep); min-height: 300px; box-shadow: inset 0 0 0 1px var(--line); outline: none; }
+  .slice img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; transition: transform 1s var(--ease), filter 0.6s; }
+  @media (max-width: 899px) { .slice { min-height: 400px; } }
+  .slice::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(13, 14, 16, 0.92), rgba(13, 14, 16, 0) 55%); pointer-events: none; }
+  .slice .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px; z-index: 1; }
+  .slice h3 { margin: 0; font-size: 1.6rem; font-weight: 800; white-space: nowrap; }
+  .slice p { margin: 6px 0 0; color: var(--muted); max-width: 36ch; }
+  @media (min-width: 900px) {
+    .accordion { flex-direction: row; height: 600px; }
+    .slice { flex: 1; min-height: 0; transition: flex 0.8s var(--ease); cursor: pointer; }
+    .slice img { filter: grayscale(0.7) brightness(0.75); }
+    .slice p { opacity: 0; transform: translateY(8px); transition: opacity 0.4s, transform 0.5s var(--ease); }
+    .slice:hover, .slice:focus-visible, .slice.is-open { flex: 3.4; }
+    .slice:hover img, .slice:focus-visible img, .slice.is-open img { filter: none; transform: scale(1.04); }
+    .slice:hover p, .slice:focus-visible p, .slice.is-open p { opacity: 1; transform: none; }
+    .slice:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+    .accordion:hover .slice.is-open:not(:hover) { flex: 1; }
+    .accordion:hover .slice.is-open:not(:hover) img { filter: grayscale(0.7) brightness(0.75); transform: none; }
+    .accordion:hover .slice.is-open:not(:hover) p { opacity: 0; }
+  }
+
+  /* Bir karenin yolculuğu */
+  .journey { display: grid; gap: 64px; margin-top: 72px; grid-template-columns: 1fr; }
+  @media (min-width: 1000px) { .journey { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 96px; } }
+  ol.flow { list-style: none; margin: 0; padding: 0; counter-reset: f; }
+  ol.flow li { counter-increment: f; position: relative; padding: 0 0 34px 64px; }
+  ol.flow li::before {
+    content: counter(f); position: absolute; left: 0; top: 0; width: 40px; height: 40px; border-radius: 50%;
+    display: grid; place-items: center; font-weight: 800; background: var(--bg-raise); box-shadow: inset 0 0 0 1px var(--line);
+  }
+  ol.flow li::after { content: ""; position: absolute; left: 19.5px; top: 46px; bottom: 6px; width: 1px; background: var(--line); }
+  ol.flow li:last-child::after { display: none; }
+  ol.flow li.ui::before { background: var(--ink); color: var(--bg); }
+  ol.flow li.rt::before { background: var(--accent); color: #17120d; }
+  ol.flow strong { display: block; font-size: 1.2rem; }
+  ol.flow span { color: var(--muted); }
+  ol.flow code { font-size: 0.86em; color: var(--ink); }
+  .legend { display: flex; gap: 22px; flex-wrap: wrap; color: var(--muted); font-size: 0.95rem; margin: 0 0 32px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
+  .bench { background: var(--bg-raise); border-radius: var(--radius-l); padding: 36px; box-shadow: inset 0 0 0 1px var(--line); align-self: start; }
+  .bench h3 { margin: 0 0 6px; font-size: 1.6rem; font-weight: 800; }
+  .bench > p { margin: 0 0 28px; color: var(--muted); }
+  .bar-row { display: grid; grid-template-columns: 7.5rem 1fr 3.4rem; gap: 14px; align-items: center; margin-bottom: 14px; font-size: 0.98rem; }
+  .bar-row span:first-child { color: var(--muted); }
+  .bar-row b { text-align: right; font-variant-numeric: tabular-nums; }
+  .bar { height: 12px; border-radius: 6px; background: rgba(255, 255, 255, 0.05); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 6px; background: var(--muted); }
+  .bar i.hot { background: var(--accent); }
+  .profile { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin: 32px 0 14px; }
+  .profile i { display: block; height: 100%; }
+  .profile-key { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 0.92rem; margin: 0; padding: 0; list-style: none; }
+  .profile-key i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; }
+  .bench .note { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.95rem; }
+
+  /* Yol haritası: üst üste binen kartlar */
+  .stack { margin-top: 72px; display: grid; gap: 28px; }
+  .phase-card {
+    position: sticky; top: calc(96px + var(--i) * 14px);
+    background: var(--bg-raise); border-radius: var(--radius-l); padding: 36px; box-shadow: inset 0 0 0 1px var(--line), 0 -30px 60px -30px rgba(0, 0, 0, 0.6);
+    transform-origin: 50% 0;
+  }
+  /* Kart ekrandan uzunsa yapışkan yığın alt kısmı gizler; kısa ve dar ekranda normal akışa dön */
+  @media (max-width: 899px) and (max-height: 819px) { .phase-card { position: relative; top: auto; } }
+  @media (min-width: 900px) { .phase-card { padding: 48px 56px; display: grid; grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); gap: 56px; } }
+  .phase-card .range { font-size: clamp(3rem, 6vw, 5rem); font-weight: 800; line-height: 0.9; letter-spacing: -0.04em; color: var(--faint); }
+  .phase-card.now .range { color: var(--accent); }
+  .phase-card h3 { margin: 18px 0 8px; font-size: 1.8rem; font-weight: 800; letter-spacing: -0.015em; line-height: 1.1; }
+  .phase-card .state { display: inline-block; margin-top: 18px; font-size: 0.92rem; font-weight: 700; padding: 5px 12px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); }
+  .phase-card.now .state { background: var(--accent); color: #17120d; box-shadow: none; }
+  .phase-card.done .state { background: var(--ink); color: var(--bg); box-shadow: none; }
+  .phase-card ul { list-style: none; margin: 24px 0 0; padding: 0; }
+  @media (min-width: 900px) { .phase-card ul { margin-top: 0; } }
+  .phase-card li { padding: 16px 0; border-top: 1px solid var(--line); }
+  .phase-card li:first-child { border-top: 0; padding-top: 0; }
+  .phase-card li strong { display: flex; justify-content: space-between; gap: 16px; font-size: 1.1rem; }
+  .phase-card li strong em { font-style: normal; color: var(--muted); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .phase-card li > span { display: block; color: var(--muted); font-size: 0.98rem; margin-top: 2px; }
+  .phase-card .bar { height: 6px; margin-top: 10px; }
+  .phase-card .bar i { background: var(--ink); }
+  .phase-card.now .bar i { background: var(--accent); }
+  .road-note { color: var(--muted); max-width: 70ch; margin-top: 48px; }
+  .road-note a { color: var(--ink); }
+
+  /* Derleme */
+  .build { display: grid; gap: 24px; margin-top: 64px; grid-template-columns: 1fr; }
+  @media (min-width: 1000px) { .build { grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr); } }
+  .build > * { min-width: 0; }
+  pre { margin: 0; padding: 28px; border-radius: var(--radius-m); background: var(--bg-deep); box-shadow: inset 0 0 0 1px var(--line); overflow-x: auto; font-size: 0.92rem; line-height: 1.7; color: #d9d8d3; }
+  pre .c { color: var(--faint); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.98rem; }
+  th, td { text-align: left; padding: 12px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  td code, th code { color: var(--ink); font-size: 0.9em; }
+  .build h3 { margin: 0 0 14px; font-size: 1.3rem; }
+  .build .stack-gap { display: grid; gap: 24px; }
+
+  /* Kapanış */
+  .cta { position: relative; text-align: center; padding-top: 160px; padding-bottom: 160px; overflow: hidden; }
+  .cta::before { content: ""; position: absolute; left: 50%; top: 55%; width: 900px; height: 900px; transform: translate(-50%, -50%); background: radial-gradient(closest-side, rgba(240, 122, 26, 0.16), transparent 70%); pointer-events: none; }
+  .cta h2 { margin: 0 auto; max-width: 18ch; font-size: clamp(2.8rem, 7vw, 6.4rem); position: relative; }
+  .cta .lead { margin: 28px auto 0; position: relative; }
+  .cta .actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 12px; margin-top: 44px; position: relative; }
+  footer { border-top: 1px solid var(--line); padding: 40px 0 56px; color: var(--muted); font-size: 0.98rem; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 20px 40px; justify-content: space-between; }
+  footer nav { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+  footer a { text-decoration: none; }
+  footer a:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+
+<nav class="nav" aria-label="Ana menü">
+  <a class="brand" href="#"><i aria-hidden="true"></i>PhotonEngine</a>
+  <div class="links">
+    <a href="#ozellikler">Özellikler</a>
+    <a href="#gorunumler">Görünümler</a>
+    <a href="#ic-yapi">İç yapı</a>
+    <a href="#yol-haritasi">Yol haritası</a>
+    <a href="#derleme">Derleme</a>
+  </div>
+  <a class="btn btn-accent gh" href="https://github.com/MihrimatriX/photon-engine">GitHub</a>
+</nav>
+
+<main>
+  <header class="hero">
+    <div class="wrap hero-grid">
+      <div>
+        <h1>Işığın fiziğiyle çalışan bir ürün stüdyosu</h1>
+        <p class="lead">PhotonEngine, ürün görselleştirme için yazılmış bir yol izleyici ve masaüstü stüdyo. Modeli bırakın, malzemeyi parçanın üzerine sürükleyin, birkaç saniyede gürültüsüz önizlemeyi görün.</p>
+        <div class="actions">
+          <a class="btn btn-light" href="https://github.com/MihrimatriX/photon-engine">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+            Kaynak kodu
+          </a>
+          <a class="btn btn-ghost" href="#yol-haritasi">Yol haritası</a>
+        </div>
+      </div>
+      <figure class="shot">
+        <div class="frame">
+          <img src="img/render-final.jpg" alt="PhotonEngine ile render edilmiş ürün vitrini: kırmızı küp, altın küre, siyah kaide üzerinde krom küre ve cam küre, gri stüdyo zemininde." width="1920" height="1080" fetchpriority="high">
+          <img class="noisy" src="img/render-32spp.jpg" alt="" width="1920" height="1080" aria-hidden="true">
+        </div>
+        <figcaption>Bu görüntü PhotonEngine ile render edildi. Açılışta görünen gürültülü kare, aynı kameradan 32 örneklik ham çıktı.</figcaption>
+      </figure>
+    </div>
+  </header>
+
+  <div class="marquee" aria-label="Hazır malzemelerden bazıları">
+    <div class="marquee-track" id="marquee"></div>
+  </div>
+
+  <section id="ozellikler" class="chapter">
+    <div class="wrap">
+      <h2>Bir stüdyonun ihtiyacı olan her şey, tek pencerede</h2>
+      <p class="lead">KeyShot tarzı bir iş akışı: içe aktar, malzeme ver, ışığı seç, render al. Altında ise her satırı Türkçe açıklanmış, C++20 ile yazılmış bir fiziksel render motoru var.</p>
+
+      <div class="bento">
+        <article class="card c-a">
+          <h3>Yol izleme, doğru yapılmış</h3>
+          <p>Işık örneklemesi ve BSDF örneklemesi güç sezgiseli ile birleşir. Owen karıştırmalı Sobol dizisi, ilerlemeli render'da gürültüyü hızlı düşürür.</p>
+          <ul>
+            <li>NEE, MIS ve Rus ruleti</li>
+            <li>Intel Embree 4 kesişimi, yoksa kendi SAH BVH'si</li>
+            <li>PBR Nötr, AgX, ACES ve Hable ton eşleme</li>
+          </ul>
+          <div class="media"><img src="img/view-render.jpg" alt="Viewport'ta render görünümü: seçili krom küre turuncu çerçeveyle işaretli." width="925" height="889" loading="lazy"></div>
+        </article>
+
+        <article class="card c-b">
+          <h3>37 hazır malzeme</h3>
+          <p>Disney Principled tabanlı: vernikli araç boyası, fırçalanmış metal, buzlu cam, kadife. Küçük resimler motorun kendisiyle render edilir.</p>
+          <div class="spheres" id="spheres"></div>
+        </article>
+
+        <article class="card c-c">
+          <div class="big-num">6<small>stüdyo</small></div>
+          <h3>Işık hazır gelir</h3>
+          <p>Sahneye ve kameraya göre yerleşen stüdyo ışıkları, HDRI ortamlar ve gölge taşıyan sonsuz zemin.</p>
+        </article>
+
+        <article class="card c-d">
+          <div class="big-num">OIDN<small>2.5</small></div>
+          <h3>Gürültüsüz önizleme</h3>
+          <p>Kamerayı sürüklerken bile yapay zekâ ile gürültü giderme. Albedo ve normal AOV'leri örnek başına toplanır.</p>
+        </article>
+
+        <article class="card c-e">
+          <div class="text">
+            <h3>Arayüz hiç beklemez</h3>
+            <p>Render ayrı bir thread'de çalışır. Siz sürüklerken çözünürlük düşer ve anında temizlenir; bıraktığınızda tam kaliteye döner. Geri al, proje dosyası, çoklu seçim, gruplar ve gizmo hazır.</p>
+          </div>
+          <div class="media"><img src="img/ui-full.jpg" alt="PhotonEngine arayüzünün tamamı: malzeme kütüphanesi, viewport, sahne ağacı ve özellikler paneli." width="1600" height="940" loading="lazy"></div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter" style="padding-top:0">
+    <div class="wrap">
+      <p class="inline-head">Modeli <span class="pill p-model" aria-hidden="true"></span> bırakın, malzemeyi <span class="pill p-mat" aria-hidden="true"></span> sürükleyin, ışığı <span class="pill p-light" aria-hidden="true"></span> seçin, render'ı <span class="pill p-render" aria-hidden="true"></span> alın.</p>
+      <ol class="steps">
+        <li><strong>İçe aktarın</strong>OBJ, glTF ya da GLB dosyasını pencereye sürükleyin. Model zemine oturur, kamera kadrajlanır.</li>
+        <li><strong>Malzeme verin</strong>Kütüphaneden bir küreyi viewport'taki parçanın üzerine bırakın.</li>
+        <li><strong>Işığı seçin</strong>Bir HDRI ya da stüdyo hazırı seçin, ortamı döndürün.</li>
+        <li><strong>Düzenleyin</strong><kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> ile taşıyın, döndürün, ölçekleyin. <kbd>Z</kbd> görünümü değiştirir.</li>
+        <li><strong>Render alın</strong><kbd>Ctrl</kbd> + <kbd>P</kbd> ile çözünürlüğü ve kaliteyi seçin. PNG, JPEG ya da EXR.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="chapter" style="padding-top:0">
+    <div class="wrap">
+      <h2>Gürültüden temiz görüntüye</h2>
+      <p class="lead">Yol izlemede her piksel, rastgele ışık yollarının ortalamasıdır ve hata 1/√N ile düşer. Gürültüyü yarıya indirmek için dört kat örnek gerekir. OIDN bu yolu kısaltır. Çizgiyi sürükleyip iki kareyi karşılaştırın.</p>
+      <div class="compare reveal" id="compare">
+        <img src="img/render-32spp.jpg" alt="32 örnek, gürültü giderme kapalı: görüntü belirgin şekilde karıncalı." width="1920" height="1080" loading="lazy">
+        <img class="after" src="img/render-final.jpg" alt="128 örnek ve OIDN: aynı sahne temiz." width="1920" height="1080" loading="lazy">
+        <input type="range" min="0" max="100" value="50" aria-label="Karşılaştırma çizgisinin konumu">
+        <span class="handle" aria-hidden="true"></span>
+        <span class="tag l" aria-hidden="true">32 örnek, ham</span>
+        <span class="tag r" aria-hidden="true">128 örnek + OIDN</span>
+      </div>
+      <div class="facts">
+        <div><strong>78 saniye</strong>1920 × 1080, 128 örnek ve OIDN ile sağdaki karenin toplam süresi.</div>
+        <div><strong>4 çekirdek</strong>Ölçümler i7-6700K üzerinde, 8 iş parçacığıyla, yalnız CPU'da yapıldı.</div>
+        <div><strong>Aynı kamera</strong>İki kare de <code>bench/scenes/showcase.photon</code> sahnesinden.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="gorunumler" class="chapter" style="padding-top:0">
+    <div class="wrap">
+      <h2>Düzenlerken farklı gözlerle bakın</h2>
+      <p class="lead">Yol izleme sürerken GPU'da anında çizilen görünümlere geçebilirsiniz. <kbd>Z</kbd> tuşu aralarında dolaşır.</p>
+      <div class="accordion">
+        <figure class="slice is-open" tabindex="0">
+          <img src="img/view-render.jpg" alt="Render görünümü." width="925" height="889" loading="lazy">
+          <figcaption class="cap"><h3>Render</h3><p>İlerlemeli yol izleme ve anlık OIDN. Gördüğünüz, son render'ın kendisi.</p></figcaption>
+        </figure>
+        <figure class="slice" tabindex="0">
+          <img src="img/view-solid.jpg" alt="Katı görünüm." width="925" height="889" loading="lazy">
+          <figcaption class="cap"><h3>Katı</h3><p>Malzemelerin taban rengiyle hızlı gölgeleme. Yerleşim ve kompozisyon için.</p></figcaption>
+        </figure>
+        <figure class="slice" tabindex="0">
+          <img src="img/view-wire.jpg" alt="Tel kafes görünümü." width="925" height="889" loading="lazy">
+          <figcaption class="cap"><h3>Tel kafes</h3><p>12,5 bin üçgen, 171 fps. Topolojiyi ve seçimi net görmek için.</p></figcaption>
+        </figure>
+        <figure class="slice" tabindex="0">
+          <img src="img/view-overlay.jpg" alt="Render üzerine tel kafes bindirmesi." width="925" height="889" loading="lazy">
+          <figcaption class="cap"><h3>Bindirme</h3><p>Render'ın üstünde tel kafes. Işığı ve geometriyi aynı anda görürsünüz.</p></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="ic-yapi" class="chapter" style="padding-top:0">
+    <div class="wrap">
+      <h2>Bir karenin yolculuğu</h2>
+      <p class="lead">İki thread, iki sahne temsili ve tek bir kural: arayüz hiçbir zaman render'ı beklemez. Sahne değişince yeni ve değişmez bir sahne kurulur; render thread'i eskisini o anki tur bitene kadar tutar.</p>
+      <div class="journey">
+        <div>
+          <p class="legend"><span><i style="background:var(--ink)"></i>Arayüz thread'i</span><span><i style="background:var(--accent)"></i>Render thread'i</span></p>
+          <ol class="flow">
+            <li class="ui"><strong>Belge düzenlenir</strong><span>Sahne ağacı, ışık ve ortam tanımları değişir. Her düzenlemeden önce geri al için anlık görüntü alınır.</span></li>
+            <li class="ui"><strong>Sahne derlenir</strong><span><code>buildRenderScene()</code> ağacı dünya uzayına bake eder, ortam için 2B CDF ve Embree yapısını kurar.</span></li>
+            <li class="rt"><strong>Karolar izlenir</strong><span>Her karo paralel işlenir. <code>PathTracer::Li</code> ışınları izler; Film'e örnek, AOV'lere albedo ve normal eklenir.</span></li>
+            <li class="rt"><strong>Çözünürlük merdiveni</strong><span>Etkileşim sırasında 1/2 ile 1/8 çözünürlük ve hızlı OIDN. Durunca tam çözünürlük, 2'nin kuvveti örneklerde gürültü giderme.</span></li>
+            <li class="rt"><strong>Renk hattı</strong><span>Doğrusal Rec.709 ortalama, pozlama, ton eğrisi, sRGB ve titreşimli 8 bit. EXR ton eşlenmemiş radyans yazar.</span></li>
+            <li class="ui"><strong>Ekrana çıkar</strong><span>Hazır kare dokuya yüklenir ve viewport'ta gösterilir. Arayüz bu sırada 60 fps'te kalır.</span></li>
+          </ol>
+        </div>
+        <aside class="bench">
+          <h3>Ölçülen hız</h3>
+          <p>Milyon örnek / saniye, 960 × 540, 32 örnek, gürültü giderme kapalı.</p>
+          <div class="bar-row"><span>Başlangıç</span><span class="bar"><i style="width:63.7%"></i></span><b>2.32</b></div>
+          <div class="bar-row"><span>Embree 4</span><span class="bar"><i class="hot" style="width:100%"></i></span><b>3.64</b></div>
+          <div class="bar-row"><span>1 thread, önce</span><span class="bar"><i style="width:12.6%"></i></span><b>0.46</b></div>
+          <div class="bar-row"><span>1 thread, sonra</span><span class="bar"><i class="hot" style="width:19.8%"></i></span><b>0.72</b></div>
+          <div class="profile" role="img" aria-label="Köşe başına süre dağılımı: kesişim yüzde 44, malzeme yüzde 27, ışık örnekleme yüzde 6, ortam yüzde 3, diğer yüzde 20.">
+            <i style="width:44%;background:var(--accent)"></i><i style="width:27%;background:#e9c08f"></i><i style="width:6%;background:#8fb7e9"></i><i style="width:3%;background:#a5d6a7"></i><i style="width:20%;background:#55575c"></i>
+          </div>
+          <ul class="profile-key">
+            <li><i style="background:var(--accent)"></i>Kesişim %44</li>
+            <li><i style="background:#e9c08f"></i>Malzeme %27</li>
+            <li><i style="background:#8fb7e9"></i>Işık %6</li>
+            <li><i style="background:#a5d6a7"></i>Ortam %3</li>
+            <li><i style="background:#55575c"></i>Diğer %20</li>
+          </ul>
+          <p class="note">Profil Embree öncesine ait. Darboğazın kesişim olduğunu gösterdiği için önce Embree geldi; köşe başına üç gereksiz BSDF değerlendirmesi de bu adımda kalktı.</p>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section id="yol-haritasi" class="chapter" style="padding-top:0">
+    <div class="wrap">
+      <h2>Yol haritası</h2>
+      <p class="lead">Sıra bilinçli: önce doğruluk ve kararlılık, sonra ölçüm, sonra hız. Yanlış bir görüntüyü hızlandırmanın anlamı yok. Her fazın bitişi bir test ya da ölçümle kanıtlanır.</p>
+
+      <div class="stack">
+        <article class="phase-card done" style="--i:0">
+          <div>
+            <div class="range">0–1</div>
+            <h3>Sağlam zemin, doğru görüntü</h3>
+            <p class="lead" style="margin-top:0;font-size:1.05rem">Derleme, belgeler, sahiplik ve thread güvenliği; cam kırılması, sRGB ve dışa aktarma düzeltmeleri.</p>
+            <span class="state">Büyük ölçüde bitti</span>
+          </div>
+          <ul>
+            <li><strong>Faz 0: Zemin <em>9 / 10</em></strong><span>ctest yeşil, belgeler kodla uyumlu.</span><div class="bar"><i style="width:90%"></i></div></li>
+            <li><strong>Faz 1: Çökme yok, görüntü doğru <em>37 / 42</em></strong><span>Dışa aktarma, Snell ve renk uzayı testleri.</span><div class="bar"><i style="width:88%"></i></div></li>
+          </ul>
+        </article>
+
+        <article class="phase-card now" style="--i:1">
+          <div>
+            <div class="range">2</div>
+            <h3>Ölçüm altyapısı</h3>
+            <p class="lead" style="margin-top:0;font-size:1.05rem">Hızlandırma kararlarını tahmine değil sayıya dayandırmak için: istatistik dosyası, fırın, chi-kare ve golden testler.</p>
+            <span class="state">Sırada</span>
+          </div>
+          <ul>
+            <li><strong>Faz 2: Ölçüm <em>4 / 15</em></strong><span>Kanıt: <code>bench/BASELINE.md</code> ilk satırı ve fırın testi ≈ 1.</span><div class="bar"><i style="width:27%"></i></div></li>
+          </ul>
+        </article>
+
+        <article class="phase-card now" style="--i:2">
+          <div>
+            <div class="range">3–4</div>
+            <h3>Anında tepki, kolay arayüz</h3>
+            <p class="lead" style="margin-top:0;font-size:1.05rem">İptal edilebilir render, GPU ton eşleme, ilk açılış deneyimi, gizmo ve tema.</p>
+            <span class="state">Sürüyor</span>
+          </div>
+          <ul>
+            <li><strong>Faz 3: Etkileşim ve gürültü giderme <em>8 / 12</em></strong><span>Hedef: orbit ≥ 60 fps, ilk kare &lt; 50 ms.</span><div class="bar"><i style="width:67%"></i></div></li>
+            <li><strong>Faz 4: Kolay ve şık <em>16 / 18</em></strong><span>Hedef: bir ürün render'ı 2 dakikanın altında.</span><div class="bar"><i style="width:89%"></i></div></li>
+          </ul>
+        </article>
+
+        <article class="phase-card" style="--i:3">
+          <div>
+            <div class="range">5–6</div>
+            <h3>Işık taşıma ve ham hız</h3>
+            <p class="lead" style="margin-top:0;font-size:1.05rem">Daha akıllı örnekleme ve hızlandırma yapıları. Embree 4 bu fazın önünde, erken geldi.</p>
+            <span class="state">Planlandı</span>
+          </div>
+          <ul>
+            <li><strong>Faz 5: Örnekleme <em>2 / 14</em></strong><span>Sobol, BSDFSample bayrakları, alias tablosu. Kanıt: eşit sürede varyans düşüşü.</span><div class="bar"><i style="width:14%"></i></div></li>
+            <li><strong>Faz 6: Hızlandırma <em>0 / 11</em></strong><span>Yalın BVH, BLAS/TLAS, Embree 4. Kanıt: Mrays/s artışı.</span><div class="bar"><i style="width:0%"></i></div></li>
+          </ul>
+        </article>
+
+        <article class="phase-card" style="--i:4">
+          <div>
+            <div class="range">7–8</div>
+            <h3>Malzeme gerçekçiliği ve raster izi</h3>
+            <p class="lead" style="margin-top:0;font-size:1.05rem">Enerji koruyan mikro yüzeyler, OpenPBR ve yol izlemeyle karşılaştırılabilir bir rasterizasyon yolu.</p>
+            <span class="state">Planlandı</span>
+          </div>
+          <ul>
+            <li><strong>Faz 7: Malzeme ve renk <em>0 / 12</em></strong><span>VNDF, Kulla–Conty, OpenPBR. Kanıt: fırın ≈ 1, Mitsuba relMSE &lt; %1.</span><div class="bar"><i style="width:0%"></i></div></li>
+            <li><strong>Faz 8: Rasterizasyon <em>0 / 6</em></strong><span>Split-sum IBL, gölge haritası. Kanıt: fark haritası.</span><div class="bar"><i style="width:0%"></i></div></li>
+          </ul>
+        </article>
+
+        <article class="phase-card" style="--i:5">
+          <div>
+            <div class="range">9–10</div>
+            <h3>GPU ve ileri konular</h3>
+            <p class="lead" style="margin-top:0;font-size:1.05rem">Aynı çekirdeklerin CPU ve GPU'da paylaşıldığı CUDA 12.x yolu, ardından seçmeli ileri konular.</p>
+            <span class="state">Planlandı</span>
+          </div>
+          <ul>
+            <li><strong>Faz 9: GTX 1080'de CUDA <em>0 / 9</em></strong><span>En büyük faz. Kanıt: CPU ile GPU eşleşme testi.</span><div class="bar"><i style="width:0%"></i></div></li>
+            <li><strong>Faz 10: İleri konular <em>0 / 8</em></strong><span>Seçmeli.</span><div class="bar"><i style="width:0%"></i></div></li>
+          </ul>
+        </article>
+      </div>
+
+      <p class="road-note">Sayılar <a href="https://github.com/MihrimatriX/photon-engine/blob/main/memory-bank/01-gorevler.md">görev listesindeki</a> kutucuklardır. Gerekçeler <a href="https://github.com/MihrimatriX/photon-engine/blob/main/plan.md">plan.md</a>, özet <a href="https://github.com/MihrimatriX/photon-engine/blob/main/docs/ROADMAP.md">ROADMAP.md</a> dosyasında. Plandaki hız rakamları tahmin; Faz 2'deki ölçümden sonra 3–7 arası yeniden sıralanacak.</p>
+    </div>
+  </section>
+
+  <section id="derleme" class="chapter" style="padding-top:0">
+    <div class="wrap">
+      <h2>Derleyin ve çalıştırın</h2>
+      <p class="lead">Windows ve MSVC. Gerekenler: Visual Studio 2022 ya da 2026 (C++ masaüstü), CMake 3.21+ ve Ninja. glfw, Dear ImGui, ImGuizmo ve nlohmann-json vcpkg ile gelir.</p>
+      <div class="build">
+        <pre><code><span class="c"># Bir kez: OIDN ve Embree paketlerini indir</span>
+powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
+
+<span class="c"># VS geliştirici kabuğu</span>
+. .\scripts\devshell.ps1
+
+<span class="c"># Yapılandır, derle, test et</span>
+cmake --preset release
+cmake --build --preset release
+ctest --preset release
+
+<span class="c"># Masaüstü uygulaması</span>
+build\release\src\app\photon_app.exe model.obj
+
+<span class="c"># Arayüzsüz render ve ölçüm</span>
+build\release\photon_render.exe sahne.photon --res 1920x1080 ^
+  --spp 256 --out render.png --stats stats.json
+
+<span class="c"># Kurulum gerektirmeyen zip paketi</span>
+pwsh -File scripts\package.ps1</code></pre>
+        <div class="stack-gap">
+          <div>
+            <h3>CMake seçenekleri</h3>
+            <table>
+              <tr><th><code>PHOTON_BUILD_APP</code></th><td>Masaüstü uygulaması</td></tr>
+              <tr><th><code>PHOTON_BUILD_CLI</code></th><td>Komut satırı renderer'ı</td></tr>
+              <tr><th><code>PHOTON_BUILD_TESTS</code></th><td>GoogleTest birim testleri</td></tr>
+              <tr><th><code>PHOTON_ENABLE_OIDN</code></th><td>Gürültü giderme</td></tr>
+              <tr><th><code>PHOTON_ENABLE_SIMD</code></th><td>AVX2 ve FMA</td></tr>
+              <tr><th><code>PHOTON_ENABLE_ASAN</code></th><td>AddressSanitizer (varsayılan kapalı)</td></tr>
+            </table>
+          </div>
+          <div>
+            <h3>Kaynak düzeni</h3>
+            <table>
+              <tr><th><code>core/</code></th><td>Matematik, renk, görüntü, ton eşleme, örnekleme</td></tr>
+              <tr><th><code>materials/</code></th><td>Lambert, cam, Disney Principled</td></tr>
+              <tr><th><code>integrators/</code></th><td>Yol izleyici</td></tr>
+              <tr><th><code>engine/</code></th><td>Render sahnesi, Embree, OIDN</td></tr>
+              <tr><th><code>scene/</code></th><td>Sahne ağacı, kütüphane, proje dosyası, geri al</td></tr>
+              <tr><th><code>app/</code></th><td>Render denetleyicisi ve paneller</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <div class="wrap">
+      <h2>Kodu açın, ilk render'ınızı alın</h2>
+      <p class="lead">PhotonEngine aynı zamanda bir öğrenme projesi: kod, bilgisayar grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazıldı.</p>
+      <div class="actions">
+        <a class="btn btn-accent" href="https://github.com/MihrimatriX/photon-engine">GitHub'da açın</a>
+        <a class="btn btn-ghost" href="https://github.com/MihrimatriX/photon-engine/blob/main/docs/architecture.md">Mimariyi okuyun</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>PhotonEngine 0.1.0. C++20, Windows.</span>
+    <nav aria-label="Belgeler">
+      <a href="https://github.com/MihrimatriX/photon-engine#readme">README</a>
+      <a href="https://github.com/MihrimatriX/photon-engine/blob/main/docs/architecture.md">Mimari</a>
+      <a href="https://github.com/MihrimatriX/photon-engine/blob/main/docs/ROADMAP.md">Yol haritası</a>
+      <a href="https://github.com/MihrimatriX/photon-engine/blob/main/docs/THIRD_PARTY.md">Üçüncü taraf lisansları</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+  // Kütüphane panelinden kırpılan küreler: img/mat/NN.jpg, panel sırasıyla
+  var MATERIALS = ['Beyaz Parlak Plastik', 'Siyah Parlak Plastik', 'Kırmızı Plastik', 'Turuncu Plastik', 'Sarı Plastik', 'Mavi Plastik',
+    'Yumuşak Dokunuş', 'Mat Beyaz Plastik', 'Krom', 'Fırçalanmış Alüminyum', 'Paslanmaz Çelik', 'Altın', 'Bakır', 'Pirinç', 'Titanyum',
+    'Siyah Eloksal', 'Tabanca Metali', 'Şeffaf Cam', 'Buzlu Cam', 'Füme Cam', 'Yeşil Şişe Camı', 'Su', 'Elmas', 'Kırmızı Araç Boyası',
+    'Piyano Siyahı', 'İnci Beyazı', 'Metalik Mavi', 'Mavi Kumaş', 'Keten', 'Bordo Kadife', 'Ahşap', 'Kırmızı Deri'];
+  function src(i) { return 'img/mat/' + (i < 10 ? '0' : '') + i + '.jpg'; }
+
+  var track = document.getElementById('marquee');
+  var chips = MATERIALS.map(function (name, i) {
+    return '<span class="chip"><img src="' + src(i) + '" alt="" width="64" height="60" loading="lazy"><span>' + name + '</span></span>';
+  }).join('');
+  track.innerHTML = chips + '<span aria-hidden="true" style="display:contents">' + chips + '</span>'; // kesintisiz döngü için iki kopya
+
+  var spheres = document.getElementById('spheres');
+  [8, 11, 23, 18, 12, 26, 29, 22].forEach(function (i) {
+    spheres.insertAdjacentHTML('beforeend', '<img src="' + src(i) + '" alt="' + MATERIALS[i] + '" title="' + MATERIALS[i] + '" width="64" height="60" loading="lazy">');
+  });
+
+  // Önce/sonra kaydırıcısı
+  var compare = document.getElementById('compare');
+  compare.querySelector('input').addEventListener('input', function (e) {
+    compare.style.setProperty('--cut', e.target.value + '%');
+  });
+
+  // Akordeon: dokunmatik ekranda dokunulan dilim açılır
+  var slices = document.querySelectorAll('.slice');
+  slices.forEach(function (s) {
+    s.addEventListener('click', function () {
+      slices.forEach(function (o) { o.classList.toggle('is-open', o === s); });
+    });
+  });
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script>
+  // Hareket yalnız GSAP yüklendiyse ve kullanıcı hareket azaltmayı seçmediyse çalışır;
+  // aksi halde sayfa tamamen statik ve eksiksiz görünür.
+  (function () {
+    if (!window.gsap || !window.ScrollTrigger) {
+      document.querySelector('.noisy').remove();
+      return;
+    }
+    gsap.registerPlugin(ScrollTrigger);
+    var mm = gsap.matchMedia();
+
+    mm.add('(prefers-reduced-motion: reduce)', function () {
+      gsap.set('.noisy', { autoAlpha: 0 });
+    });
+
+    mm.add('(prefers-reduced-motion: no-preference)', function () {
+      // Açılış: 32 örneklik ham kare, son render'a yakınsar
+      gsap.timeline({ delay: 0.5 })
+        .to('.noisy', { autoAlpha: 0, duration: 2.4, ease: 'power2.inOut' })
+        .from('.shot .frame', { scale: 1.04, duration: 2.6, ease: 'power3.out' }, 0);
+
+      // Görseller küçük başlar, görünür alana girdikçe büyür, çıkarken kararır
+      // Mobilde akordeon dört ekran boyu uzun; okunurken kararmasın diye yalnız geniş ekranda
+      var targets = '.reveal, .card .media' + (window.matchMedia('(min-width: 900px)').matches ? ', .accordion' : '');
+      gsap.utils.toArray(targets).forEach(function (el) {
+        gsap.fromTo(el, { scale: 0.86, opacity: 0.5 }, {
+          scale: 1, opacity: 1, ease: 'none',
+          scrollTrigger: { trigger: el, start: 'top bottom', end: 'top 55%', scrub: true }
+        });
+        gsap.to(el, {
+          opacity: 0.2, ease: 'none', immediateRender: false,
+          scrollTrigger: { trigger: el, start: 'bottom 30%', end: 'bottom top', scrub: true }
+        });
+      });
+
+      // Yol haritası kartları: alttan gelen kart üsttekini örter, üstteki geri çekilir
+      var cards = gsap.utils.toArray('.phase-card');
+      cards.forEach(function (card, i) {
+        var next = cards[i + 1];
+        if (!next) return;
+        gsap.to(card, {
+          scale: 0.94, filter: 'brightness(0.7)', ease: 'none',
+          scrollTrigger: { trigger: next, start: 'top 75%', end: 'top 20%', scrub: true }
+        });
+      });
+    });
+  })();
+</script>
+</body>
+</html>

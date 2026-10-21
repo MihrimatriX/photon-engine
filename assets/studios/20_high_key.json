@@ -1,0 +1,14 @@
+{
+  "id": "high_key",
+  "name": "Beyaz Fon (high-key)",
+  "description": "Aydınlık, yumuşak gölgeli katalog çekimi",
+  "environment": "photo_studio_01",
+  "rotation": 0,
+  "intensity": 1.2,
+  "exposure": 0.3,
+  "lights": [
+    { "type": "area", "name": "Sol softbox", "azimuth": 55, "elevation": 30, "distance": 3.0, "size": 2.4, "intensity": 2.5 },
+    { "type": "area", "name": "Sağ softbox", "azimuth": -55, "elevation": 30, "distance": 3.0, "size": 2.4, "intensity": 2.5 },
+    { "type": "area", "name": "Tepe", "azimuth": 0, "elevation": 85, "distance": 2.8, "size": 2.0, "intensity": 2.0 }
+  ]
+}

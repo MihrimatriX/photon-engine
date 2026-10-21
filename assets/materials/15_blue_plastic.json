@@ -1,0 +1,10 @@
+{
+  "id": "blue_plastic",
+  "name": "Mavi Plastik",
+  "category": "Plastik",
+  "type": "generic",
+  "baseColor": [0.04, 0.16, 0.55],
+  "roughness": 0.3,
+  "metallic": 0,
+  "specular": 0.5
+}

@@ -1,0 +1,10 @@
+{
+  "id": "matte_white_plastic",
+  "name": "Mat Beyaz Plastik",
+  "category": "Plastik",
+  "type": "generic",
+  "baseColor": [0.8, 0.8, 0.78],
+  "roughness": 0.75,
+  "metallic": 0,
+  "specular": 0.4
+}

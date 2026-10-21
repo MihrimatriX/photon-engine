@@ -1,0 +1,13 @@
+{
+  "id": "wood_table",
+  "name": "Ahşap (masa)",
+  "category": "Dokulu",
+  "type": "generic",
+  "baseColor": [1.0, 1.0, 1.0],
+  "roughness": 0.5,
+  "metallic": 0,
+  "specular": 0.5,
+  "maps": { "albedo": "wood_table_001_diff_1k.jpg", "normal": "wood_table_001_nor_gl_1k.jpg", "roughness": "wood_table_001_rough_1k.jpg" },
+  "mapping": "box",
+  "texScale": 1.5
+}

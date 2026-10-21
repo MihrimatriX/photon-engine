@@ -1,0 +1,10 @@
+{
+  "id": "outdoor_sun",
+  "name": "Dış Mekân (güneşli)",
+  "description": "Açık gökyüzü ve güneş: keskin gölgeler",
+  "environment": "sunflowers_puresky",
+  "rotation": 0,
+  "intensity": 1.0,
+  "exposure": -0.5,
+  "lights": []
+}

@@ -1,0 +1,10 @@
+{
+  "id": "titanium",
+  "name": "Titanyum",
+  "category": "Metal",
+  "type": "generic",
+  "baseColor": [0.54, 0.5, 0.45],
+  "roughness": 0.3,
+  "metallic": 1,
+  "specular": 0.5
+}

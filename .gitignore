@@ -1,0 +1,73 @@
+# ──────────────────────────────────────────────
+# Build directories
+# ──────────────────────────────────────────────
+build/
+build-*/
+cmake-build-*/
+vcpkg_installed/
+out/
+x64/
+Debug/
+Release/
+
+# ──────────────────────────────────────────────
+# IDE / Editor
+# ──────────────────────────────────────────────
+.vs/
+.vscode/settings.json
+*.user
+.cache/
+.idea/
+*.swp
+*.swo
+*~
+
+# ──────────────────────────────────────────────
+# Tooling
+# ──────────────────────────────────────────────
+compile_commands.json
+
+# ──────────────────────────────────────────────
+# Compiled objects & binaries
+# ──────────────────────────────────────────────
+*.exe
+*.dll
+*.so
+*.dylib
+*.o
+*.obj
+# Sample and test meshes are source, not build output.
+!assets/**/*.obj
+!tests/**/*.obj
+!bench/**/*.obj
+*.pdb
+*.ilk
+*.lib
+*.a
+
+# ──────────────────────────────────────────────
+# Render output
+# ──────────────────────────────────────────────
+output.png
+output.exr
+
+# Local onboarding flag
+assets/.onboarded
+imgui.ini
+photon_ui.ini*
+
+# CTest / run leftovers
+Testing/
+app_stdout.txt
+app_stderr.txt
+build-*.log
+
+# Agent worktrees and downloaded archives
+.claude/
+third_party_dl/
+# OIDN / Embree prebuilt packages (scripts/fetch_deps.ps1)
+third_party/oidn/
+third_party/embree/
+
+# Paket çıktısı (scripts/package.ps1)
+dist/

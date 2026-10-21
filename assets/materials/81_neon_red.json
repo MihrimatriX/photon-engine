@@ -1,0 +1,11 @@
+{
+  "id": "neon_red",
+  "name": "Kırmızı Neon",
+  "category": "Işık",
+  "type": "generic",
+  "baseColor": [1.0, 0.08, 0.06],
+  "roughness": 0.4,
+  "metallic": 0,
+  "specular": 0.5,
+  "emissive": 10.0
+}

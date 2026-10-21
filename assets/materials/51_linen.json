@@ -1,0 +1,11 @@
+{
+  "id": "linen",
+  "name": "Keten",
+  "category": "Kumaş",
+  "type": "generic",
+  "baseColor": [0.72, 0.67, 0.57],
+  "roughness": 0.9,
+  "metallic": 0,
+  "specular": 0.2,
+  "sheen": 0.7
+}

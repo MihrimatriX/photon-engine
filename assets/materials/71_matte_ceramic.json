@@ -1,0 +1,10 @@
+{
+  "id": "matte_ceramic",
+  "name": "Mat Seramik",
+  "category": "Seramik",
+  "type": "generic",
+  "baseColor": [0.62, 0.6, 0.56],
+  "roughness": 0.7,
+  "metallic": 0,
+  "specular": 0.4
+}

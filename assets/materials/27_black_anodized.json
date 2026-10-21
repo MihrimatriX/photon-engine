@@ -1,0 +1,10 @@
+{
+  "id": "black_anodized",
+  "name": "Siyah Eloksal",
+  "category": "Metal",
+  "type": "generic",
+  "baseColor": [0.06, 0.06, 0.065],
+  "roughness": 0.35,
+  "metallic": 1,
+  "specular": 0.5
+}

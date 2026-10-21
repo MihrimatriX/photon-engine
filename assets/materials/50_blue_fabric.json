@@ -1,0 +1,11 @@
+{
+  "id": "blue_fabric",
+  "name": "Mavi Kumaş",
+  "category": "Kumaş",
+  "type": "generic",
+  "baseColor": [0.12, 0.2, 0.45],
+  "roughness": 0.85,
+  "metallic": 0,
+  "specular": 0.3,
+  "sheen": 0.8
+}

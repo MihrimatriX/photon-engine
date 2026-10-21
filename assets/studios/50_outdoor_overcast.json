@@ -1,0 +1,10 @@
+{
+  "id": "outdoor_overcast",
+  "name": "Dış Mekân (bulutlu)",
+  "description": "Yalnız gökyüzü: yumuşak, doğal ışık",
+  "environment": "kloppenheim_06",
+  "rotation": 0,
+  "intensity": 1.0,
+  "exposure": 0,
+  "lights": []
+}

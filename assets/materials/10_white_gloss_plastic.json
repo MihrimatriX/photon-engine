@@ -1,0 +1,10 @@
+{
+  "id": "white_gloss_plastic",
+  "name": "Beyaz Parlak Plastik",
+  "category": "Plastik",
+  "type": "generic",
+  "baseColor": [0.86, 0.86, 0.85],
+  "roughness": 0.18,
+  "metallic": 0,
+  "specular": 0.5
+}

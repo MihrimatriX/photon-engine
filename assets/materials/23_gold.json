@@ -1,0 +1,10 @@
+{
+  "id": "gold",
+  "name": "Altın",
+  "category": "Metal",
+  "type": "generic",
+  "baseColor": [1.0, 0.78, 0.34],
+  "roughness": 0.12,
+  "metallic": 1,
+  "specular": 0.5
+}
