@@ -2,6 +2,7 @@
 #include "lights/area_light.h"
 #include "geometry/mesh.h"
 #include "core/math/constants.h"
+#include "core/math/frame.h"
 #include "core/sampling/sampling.h"
 #include <algorithm>
 #include <cmath>
@@ -19,11 +20,116 @@ float areaSolidAnglePdf(float distSq, float cosAbs, float area) {
     return distSq / (area * cosAbs);
 }
 
+/// Bu katı açının altında küresel dikdörtgen formülleri float'ta kararsızlaşır (açıların
+/// toplamı − 2π iptali); o zaman alan örneklemesi zaten iyidir (ışık küçük ve uzak).
+constexpr float kMinSolidAngle = 1e-3f;
+
+float safeAsin(float x) { return std::asin(std::clamp(x, -1.0f, 1.0f)); }
+
+/// İki birim vektör arasındaki açı, küçük açılarda da hassas (PBRT-v4 AngleBetween).
+float angleBetween(const Vec3f& a, const Vec3f& b) {
+    if (a.dot(b) < 0.0f) return PI - 2.0f * safeAsin((a + b).length() * 0.5f);
+    return 2.0f * safeAsin((b - a).length() * 0.5f);
+}
+
+/// Ureña, Fajardo, King 2013 "An Area-Preserving Parametrization for Spherical
+/// Rectangles". Dikdörtgen, alıcıyı orijin alan yerel çerçevede z = z0 < 0 düzlemindedir;
+/// köşelerden geçen dört büyük çember düzleminin normalleri n0..n3, iç açıları g0..g3.
+/// Küresel dörtgenin katı açısı Ω = g0 + g1 + g2 + g3 − 2π (Girard teoremi).
+struct SphericalRect {
+    Frame frame;
+    float x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0;
+    float b0 = 0, b1 = 0, g2g3 = 0;
+    float solidAngle = 0.0f;
+};
+
+SphericalRect setupSphericalRect(const Vec3f& ref, const Vec3f& corner, const Vec3f& ex, const Vec3f& ey) {
+    SphericalRect r;
+    const float exl = ex.length(), eyl = ey.length();
+    const Vec3f x = ex / exl, y = ey / eyl;
+    Vec3f z = x.cross(y);
+    const Vec3f d = corner - ref;
+    r.z0 = d.dot(z);
+    if (r.z0 > 0.0f) { // z dikdörtgenden uzağa baksın
+        z = -z;
+        r.z0 = -r.z0;
+    }
+    r.frame = Frame(x, y, z);
+    r.x0 = d.dot(x);
+    r.y0 = d.dot(y);
+    r.x1 = r.x0 + exl;
+    r.y1 = r.y0 + eyl;
+    if (r.z0 > -1e-7f) return r; // alıcı ışığın düzleminde
+    const Vec3f v00(r.x0, r.y0, r.z0), v01(r.x0, r.y1, r.z0), v10(r.x1, r.y0, r.z0), v11(r.x1, r.y1, r.z0);
+    const Vec3f n0 = v00.cross(v10).normalized();
+    const Vec3f n1 = v10.cross(v11).normalized();
+    const Vec3f n2 = v11.cross(v01).normalized();
+    const Vec3f n3 = v01.cross(v00).normalized();
+    const float g0 = angleBetween(-n0, n1), g1 = angleBetween(-n1, n2);
+    const float g2 = angleBetween(-n2, n3), g3 = angleBetween(-n3, n0);
+    r.solidAngle = g0 + g1 + g2 + g3 - TWO_PI;
+    r.b0 = n0.z;
+    r.b1 = n2.z;
+    r.g2g3 = g2 + g3;
+    return r;
+}
+
+/// Katı açıda düzgün nokta: önce u0 ile x kesiti (alan korunumlu), sonra u1 ile y.
+Vec3f sampleSphericalRect(const SphericalRect& r, const Vec2f& u) {
+    // φu = u·Ω + k, k = 2π − g2 − g3 (makale); 2π periyodu atılınca u·Ω − (g2 + g3).
+    const float au = u.x * r.solidAngle - r.g2g3;
+    const float fu = (std::cos(au) * r.b0 - r.b1) / std::sin(au);
+    float cu = std::copysign(1.0f, fu) / std::sqrt(fu * fu + r.b0 * r.b0);
+    cu = std::clamp(cu, -0.9999999f, 0.9999999f);
+    float xu = -(cu * r.z0) / std::sqrt(std::max(0.0f, 1.0f - cu * cu));
+    xu = std::clamp(xu, r.x0, r.x1);
+    const float dd = std::sqrt(xu * xu + r.z0 * r.z0);
+    const float h0 = r.y0 / std::sqrt(dd * dd + r.y0 * r.y0);
+    const float h1 = r.y1 / std::sqrt(dd * dd + r.y1 * r.y1);
+    const float hv = h0 + u.y * (h1 - h0);
+    const float hv2 = hv * hv;
+    const float yv = hv2 < 1.0f - 1e-6f ? hv * dd / std::sqrt(1.0f - hv2) : r.y1;
+    return r.frame.toWorld(Vec3f(xu, std::clamp(yv, r.y0, r.y1), r.z0));
+}
+
 } // namespace
+
+float AreaLight::solidAngle(const Vec3f& ref) const {
+    if (!m_rectangle) return 0.0f;
+    return std::max(0.0f, setupSphericalRect(ref, m_position, m_u, m_v).solidAngle);
+}
+
+float AreaLight::importance(const Vec3f& p, const Vec3f& n) const {
+    const Vec3f c = m_position + (m_u + m_v) * 0.5f;
+    const Vec3f d = c - p;
+    const float dist2 = d.lengthSquared();
+    const float lum = std::max(0.0f, m_radiance.luminance());
+    if (!(dist2 > 0.0f)) return lum * TWO_PI;
+    const Vec3f w = d / std::sqrt(dist2);
+    // Görülen katı açı ~ A·cosθl/r² (büyük, yakın ışıkta 2π ile sınırlı). Kenardan bakışta
+    // bile büyük bir softbox'ın bir kısmı görünür: cosθl'ye taban.
+    const float cosL = std::max(std::abs(w.dot(m_normal)), 0.2f);
+    const float omega = std::min(m_area * cosL / dist2, TWO_PI);
+    return lum * omega * receiverCosine(n, w);
+}
 
 LightSample AreaLight::sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const {
     LightSample ls;
-    
+
+    if (m_rectangle) {
+        const SphericalRect r = setupSphericalRect(si.point, m_position, m_u, m_v);
+        if (r.solidAngle >= kMinSolidAngle) {
+            const Vec3f toLight = sampleSphericalRect(r, sample);
+            const float dist = toLight.length();
+            if (!(dist > 0.0f)) return ls;
+            ls.distance = dist;
+            ls.wi = toLight / dist;
+            ls.Li = m_radiance;
+            ls.pdf = 1.0f / r.solidAngle; // katı açıda düzgün
+            return ls;
+        }
+    }
+
     // Sample point on the light source rectangle
     // p = köşe + s·u + t·v, (s, t) ∈ [0,1)² düzgün → dikdörtgende alan-düzgün dağılım (p_A = 1/A).
     Vec3f pLight = m_position + m_u * sample.x + m_v * sample.y;
@@ -75,6 +181,11 @@ float AreaLight::pdfLi(const Vec3f& ref, const Vec3f& pLight) const {
     const float eps = 1e-3f;
     if (s < -eps || t < -eps || s > 1.0f + eps || t > 1.0f + eps) return 0.0f;
 
+    if (m_rectangle) {
+        const float omega = setupSphericalRect(ref, m_position, m_u, m_v).solidAngle;
+        if (omega >= kMinSolidAngle) return 1.0f / omega;
+    }
+
     Vec3f toLight = pLight - ref;
     float distSq = toLight.lengthSquared();
     if (distSq <= 0.0f) return 0.0f;
@@ -96,11 +207,36 @@ MeshLight::MeshLight(const TriangleMesh* mesh, const Color3f& radiance)
     size_t n = m_mesh->numTriangles();
     m_cdf.resize(n);
     float sum = 0.0f;
+    Vec3f centroid(0.0f);
     for (size_t i = 0; i < n; ++i) {
-        sum += m_mesh->triangleArea(i);
+        const float a = m_mesh->triangleArea(i);
+        sum += a;
         m_cdf[i] = sum;
+        Vec3f p0, p1, p2;
+        m_mesh->triangleVertices(i, p0, p1, p2);
+        centroid += (p0 + p1 + p2) * (a / 3.0f);
     }
     m_area = sum;
+    m_center = sum > 0.0f ? centroid / sum : centroid;
+}
+
+float MeshLight::importance(const Vec3f& p, const Vec3f& n) const {
+    const Vec3f d = m_center - p;
+    const float dist2 = d.lengthSquared();
+    const float lum = std::max(0.0f, m_radiance.luminance());
+    if (!(dist2 > 0.0f)) return lum * TWO_PI;
+    // Eğri yayıcı (ampul, şerit): ortalama |cosθl| ≈ 0.5.
+    const float omega = std::min(m_area * 0.5f / dist2, TWO_PI);
+    return lum * omega * receiverCosine(n, d / std::sqrt(dist2));
+}
+
+float MeshLight::pdfLiHit(const Vec3f& ref, const SurfaceInteraction& hit) const {
+    if (m_area <= 0.0f) return 0.0f;
+    const Vec3f toLight = hit.point - ref;
+    const float distSq = toLight.lengthSquared();
+    if (distSq <= 0.0f) return 0.0f;
+    const Vec3f ng = hit.ng.lengthSquared() > 0.0f ? hit.ng.normalized() : hit.normal;
+    return areaSolidAnglePdf(distSq, std::abs((toLight / std::sqrt(distSq)).dot(ng)), m_area);
 }
 
 LightSample MeshLight::sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const {

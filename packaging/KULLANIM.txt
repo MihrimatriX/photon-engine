@@ -37,6 +37,9 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
      --threads 8                 iş parçacığı sayısı
      --no-denoise                yapay zekâ gürültü gidermeyi kapat
      --stats rapor.json          süre ve hız istatistiği
+     --noise 0.02                uyarlamalı örnekleme: temizlenen pikseller erken durur
+     --clamp 10                  dolaylı ışıktaki parlak noktaları (firefly) kes
+     --time 120                  süre sınırı (saniye); dolunca o ana kadarki görüntü kaydedilir
 
   Örnekler (PowerShell, paket klasöründe):
      .\photon_render.exe ornekler\vitrin.photon --out vitrin.png --res 1920x1080 --spp 128
@@ -78,7 +81,27 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
   "Tel kafes bindir": Render ya da Kil görüntüsünün üstüne üçgen ağını çizer.
   Son render (Ctrl+P) her zaman gerçek malzemelerle alınır.
 
-7) KISAYOLLAR (uygulamada F1)
+7) GERÇEKÇİLİK ARAÇLARI (0.2)
+----------------------------
+  Malzeme sekmesi:
+   - Yüzey altı saçılımı (SSS): mum, yeşim, ten, sabun, süt. "Ölçek" nesnenin boyutuna göre
+     ayarlanır (metre); ışığın içeride ne kadar gittiğini belirler.
+   - Cam > Hacim: "Renk" + "Mesafe" ile kalınlığa göre koyulaşan gerçek renkli cam/sıvı;
+     "Bulanıklık" ile süt, opal. Cam > Dispersiyon: Abbe sayısı (elmas ateşi).
+   - Cam > İnce duvar: pencere camı, ampul, sabun köpüğü (film kalınlığıyla gökkuşağı renkleri).
+   - Metal: "Kenar tonu"; İnce film (ısıl renkli titanyum, sedef); Metalik pullar (araç boyası).
+   - Yuvarlatılmış kenarlar: CAD modellerindeki keskin kenarları yumuşatır (1–5 mm).
+  Ortam sekmesi:
+   - "Fiziksel gök": güneş yüksekliği/yönü ya da konum + tarih + saat; pus, güneş boyutu.
+   - Zemin > Gölge yakalayıcı: ürün beyaz fonda (ya da şeffaf PNG'de) yalnız gölgesiyle.
+  Işıklar sekmesi:
+   - Alan ışığı > "Kameraya görünür" (kapalıyken softbox yalnız yansımalarda görünür).
+   - Spot ışık: koni açısı, kenar yumuşaklığı, IES profili (assets\ies\ örnekleri).
+  Kamera sekmesi: alan derinliğinde "Diyafram kanatları" (altıgen/sekizgen bokeh).
+  Görüntü sekmesi: bloom, yıldız parlaması, beyaz dengesi, kontrast, doygunluk, vinyet,
+   renk sapması; uyarlamalı örnekleme (gürültü eşiği) ve parlama sınırı.
+
+8) KISAYOLLAR (uygulamada F1)
 -----------------------------
   Sol fare: döndür   Orta/sağ fare: kaydır   Tekerlek: yakınlaş   Çift tık: döndürme merkezi
   F: seçime odaklan   Shift+A: tümünü kadrajla   1/2/3/4: ön/yan/üst/dörtte üç

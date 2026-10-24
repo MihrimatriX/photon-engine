@@ -24,11 +24,7 @@ namespace {
 // değişir ve küçük resim yeniden render edilir. Sürüm numarası motor değiştikçe artar.
 std::string materialHash(const MaterialPreset& p, const std::string& studio) {
     std::ostringstream ss;
-    ss << "v3|" << studio << '|' << static_cast<int>(p.kind) << '|' << p.baseColor.r << ',' << p.baseColor.g << ','
-       << p.baseColor.b << '|' << p.metallic << '|' << p.roughness << '|' << p.specular << '|' << p.clearCoat << '|'
-       << p.clearCoatRoughness << '|' << p.anisotropy << '|' << p.sheen << '|' << p.diffuseTransmission << '|'
-       << p.emissive << '|' << p.ior << '|' << p.albedoMap << '|' << p.normalMap << '|' << p.roughnessMap
-       << '|' << p.boxMapping << '|' << p.texScale;
+    ss << "v4|" << studio << '|' << presetSignature(p);
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%016llx",
                   static_cast<unsigned long long>(std::hash<std::string>{}(ss.str())));
@@ -121,6 +117,21 @@ void ThumbnailBaker::requestEnvironment(const std::string& key, const std::strin
     {
         std::lock_guard<std::mutex> lk(m_mutex);
         // Ortamlar önce: hızlılar ve kütüphanenin ilk sekmesinde görünürler.
+        m_jobs.push_front(j);
+        ++m_pending;
+    }
+    m_cv.notify_one();
+}
+
+void ThumbnailBaker::requestSky(const std::string& key, const SkyParams& params) {
+    Job j;
+    j.key = key;
+    j.isMaterial = false;
+    j.isSky = true;
+    j.sky = params;
+    j.sky.width = 256;
+    {
+        std::lock_guard<std::mutex> lk(m_mutex);
         m_jobs.push_front(j);
         ++m_pending;
     }
@@ -229,7 +240,8 @@ ThumbnailBaker::Result ThumbnailBaker::bakeEnvironment(const Job& job) {
     Result r;
     r.key = job.key;
     std::shared_ptr<const Image> src;
-    if (!job.hdrPath.empty() && m_envCache) src = m_envCache->get(job.hdrPath);
+    if (job.isSky) src = buildPhysicalSky(job.sky).image;
+    else if (!job.hdrPath.empty() && m_envCache) src = m_envCache->get(job.hdrPath);
     if (!src) src = makeProceduralSky(job.zenith, job.horizon);
     const int W = 224, H = 112;
     Image small(W, H);

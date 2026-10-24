@@ -12,6 +12,9 @@
 #include "core/math/aabb.h"
 #include "lights/light.h"
 #include "lights/environment_light.h"
+#include "lights/sky_model.h"
+#include "core/image/imager.h"
+#include <nlohmann/json_fwd.hpp>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -21,7 +24,7 @@
 namespace photon {
 
 struct LightDesc {
-    enum class Type { Area, Directional, Point };
+    enum class Type { Area, Directional, Point, Spot };
     Type type = Type::Area;
     std::string name = "Işık";
     bool enabled = true;
@@ -34,9 +37,18 @@ struct LightDesc {
     float height = 1.0f;
     float azimuthDeg = 45.0f;          ///< Yönlü: ışığın GELDİĞİ yön (yatay açı)
     float elevationDeg = 45.0f;        ///< Yönlü: ufkun üstündeki açı
+    /// Alan: kamera dörtgeni doğrudan görsün mü? Ürün çekiminde softbox'lar genelde
+    /// görünmez; yansımalarda ve aydınlatmada her durumda vardır.
+    bool visibleToCamera = false;
+    float coneAngleDeg = 45.0f;        ///< Spot: koninin tam açısı (≥ 180 = yalnız IES)
+    float coneBlend = 0.15f;           ///< Spot: kenar yumuşaklığı (0 keskin, 1 tam yumuşak)
+    std::string iesPath;               ///< Spot: IES fotometrik profili (boş = yok)
 };
 
 struct EnvironmentDesc {
+    /// Image: HDRI dosyası ya da prosedürel stüdyo gradyanı. Sky: fiziksel gök + güneş.
+    enum class Kind { Image, Sky };
+    Kind kind = Kind::Image;
     std::string hdrPath;                   ///< Boş = prosedürel stüdyo gökyüzü
     Color3f zenith{0.75f, 0.8f, 0.95f};
     Color3f horizon{0.55f, 0.55f, 0.58f};
@@ -46,8 +58,29 @@ struct EnvironmentDesc {
     bool groundEnabled = true;
     Color3f groundColor{0.42f};
     float groundRoughness = 0.55f;
-    bool groundShadowOnly = false;         ///< ponytail: ileride gölge yakalayıcı
+    /// Gölge yakalayıcı: kamera zemini görmez, onun yerine arka planı görür; zemine düşen
+    /// gölgeler arka planın üstüne karartma olarak (şeffaf arka planda alfa olarak) biner.
+    /// Ürünü bir fotoğrafa ya da web sayfasına yerleştirmek için (KeyShot "ground shadows").
+    bool groundShadowOnly = false;
+
+    // ── Fiziksel gök (kind = Sky) ──
+    SkyParams sky;
+    /// Konum ve saatten güneş konumu (true) ya da elle yükseklik/azimut (false).
+    bool skyFromLocation = false;
+    float latitude = 41.01f;               ///< İstanbul
+    float longitude = 28.98f;
+    int dayOfYear = 172;                   ///< 21 Haziran
+    float hour = 14.0f;                    ///< yerel saat
+    float utcOffset = 3.0f;
+    float northOffsetDeg = 0.0f;           ///< sahnenin kuzeyi −Z'den bu kadar döndürülmüş
 };
+
+/// Konum/saat seçiliyse güneşin yükseklik ve sahne azimutunu hesaplayıp sky'a yazar.
+void resolveSunPosition(EnvironmentDesc& env);
+
+/// Görüntüleyici ayarları ↔ proje dosyasının "render.imager" nesnesi.
+nlohmann::json imagerToJson(const ImagerSettings& s);
+ImagerSettings imagerFromJson(const nlohmann::json& j);
 
 /// LightDesc listesinden render ışıkları (yalnız etkin olanlar).
 std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& descs);
@@ -63,10 +96,13 @@ class EnvironmentCache {
 public:
     /// Dosyayı yükler (ya da önbellekten verir). Başarısızsa nullptr.
     std::shared_ptr<const Image> get(const std::string& path);
+    /// Fiziksel gök (aynı parametrelerle yeniden hesaplanmaz; son birkaç sonuç tutulur).
+    std::shared_ptr<const SkyResult> sky(const SkyParams& params);
     void clear();
 private:
     std::mutex m_mutex;
     std::map<std::string, std::shared_ptr<const Image>> m_images;
+    std::vector<std::pair<std::string, std::shared_ptr<const SkyResult>>> m_skies;
 };
 
 /// Tanımdan ortam ışığı.

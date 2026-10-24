@@ -44,6 +44,11 @@ public:
     Color3f resolvedPixel(int x, int y) const;
     int sampleCount(int x, int y) const;
 
+    /// Pikselin göreli standart hatası: sqrt(var/n) / (ortalama + 0.01), parlaklık üzerinden.
+    /// Uyarlamalı örneklemenin "yeterince temiz mi" ölçüsü (Octane'nin gürültü eşiği gibi).
+    /// n < 2 iken çok büyük döner.
+    float relativeError(int x, int y) const;
+
     /// The averaged image.
     Image resolve() const;
 
@@ -56,6 +61,7 @@ private:
     int m_height = 0;
     std::vector<float> m_sum;        // w * h * 3
     std::vector<uint32_t> m_count;   // w * h
+    std::vector<float> m_sumSq;      // w * h, parlaklık² toplamı (varyans için)
     std::atomic<uint64_t> m_rejected{0};
 
     size_t flatIndex(int x, int y) const {

@@ -3,8 +3,17 @@
   "name": "Paslanmaz Çelik",
   "category": "Metal",
   "type": "generic",
-  "baseColor": [0.67, 0.64, 0.6],
+  "baseColor": [
+    0.58,
+    0.56,
+    0.53
+  ],
   "roughness": 0.14,
   "metallic": 1,
-  "specular": 0.5
+  "specular": 0.5,
+  "edgeTint": [
+    0.79,
+    0.8,
+    0.83
+  ]
 }

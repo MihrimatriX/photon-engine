@@ -1,0 +1,313 @@
+{
+ "format": "photon-project",
+ "version": 2,
+ "camera": {
+  "target": [
+   0.0,
+   0.5,
+   0.0
+  ],
+  "radius": 3.2142857142857135,
+  "theta": 1.28,
+  "phi": 1.5707963267948966,
+  "fov": 30.0,
+  "orthographic": false,
+  "aperture": 0.0
+ },
+ "render": {
+  "denoise": true,
+  "exposure": 0.0,
+  "maxBounces": 12,
+  "toneMap": 5
+ },
+ "environment": {
+  "background": {
+   "mode": "color",
+   "color": [
+    0.92,
+    0.92,
+    0.92
+   ]
+  },
+  "ground": {
+   "enabled": true,
+   "color": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "roughness": 0.6,
+   "shadowCatcher": true
+  },
+  "hdr": "../../assets/environments/studio_small_09_1k.hdr",
+  "intensity": 1.0,
+  "rotation": 0.0,
+  "horizon": [
+   0.55,
+   0.55,
+   0.58
+  ],
+  "zenith": [
+   0.75,
+   0.8,
+   0.95
+  ],
+  "kind": "sky",
+  "sky": {
+   "elevation": 14.0,
+   "azimuth": 130.0,
+   "turbidity": 3.0,
+   "ozone": 1.0,
+   "groundAlbedo": 0.3,
+   "sunSize": 1.2,
+   "sunStrength": 3.0,
+   "fromLocation": false
+  }
+ },
+ "lights": [],
+ "materials": [
+  {
+   "type": "disney",
+   "baseColor": [
+    0.32,
+    0.0,
+    0.01
+   ],
+   "metallic": 0,
+   "roughness": 0.35,
+   "specular": 0.5,
+   "clearCoat": 1.0,
+   "clearCoatRoughness": 0.02,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "flakes": {
+    "density": 0.6,
+    "size": 0.001,
+    "roughness": 0.25,
+    "color": [
+     1.0,
+     0.2,
+     0.15
+    ]
+   }
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.552,
+    0.555,
+    0.589
+   ],
+   "metallic": 1,
+   "roughness": 0.03,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "edgeTint": [
+    0.746,
+    0.745,
+    0.799
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.3,
+    0.68,
+    0.4
+   ],
+   "metallic": 0,
+   "roughness": 0.12,
+   "specular": 0.5,
+   "clearCoat": 0.4,
+   "clearCoatRoughness": 0.05,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "subsurface": {
+    "weight": 1.0,
+    "radius": [
+     0.45,
+     1.0,
+     0.6
+    ],
+    "scale": 0.05,
+    "anisotropy": 0.2
+   }
+  }
+ ],
+ "nodes": [
+  {
+   "name": "Kırmızı küre",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1,
+    0,
+    0,
+    -1.2,
+    0,
+    1,
+    0,
+    0.5,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 0,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Krom küre",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1,
+    0,
+    0,
+    0.0,
+    0,
+    1,
+    0,
+    0.5,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 1,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Yeşim küre",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1,
+    0,
+    0,
+    1.2,
+    0,
+    1,
+    0,
+    0.5,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 2,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  }
+ ]
+}

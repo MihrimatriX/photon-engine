@@ -34,6 +34,11 @@ public:
 
     Color3f evalPdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si, float& pdfOut) const override;
 
+    /// Lob seçimi @p uc ile, yön @p u ile. Yüzey altı lobu seçilirse subsurface = true döner.
+    bool sampleFull(const Vec3f& wo, const SurfaceInteraction& si, float uc, const Vec2f& u,
+                    BSDFSample& out) const override;
+    bool subsurfaceCoeffs(const SurfaceInteraction& si, SubsurfaceCoeffs& out) const override;
+
     const Color3f& baseColor() const { return m_baseColor; }
     float metallic() const { return m_metallic; }
     float roughness() const { return m_roughness; }
@@ -52,6 +57,46 @@ public:
     /// Thin-surface diffuse transmission. Burley random-walk SSS does not fit this BRDF.
     void setDiffuseTransmission(float v) { m_diffuseTransmission = std::clamp(v, 0.0f, 1.0f); }
     void setEmission(const Color3f& e) { m_emission = e; }
+
+    /// Yüzey altı saçılımı (Blender 4 Principled ile aynı anlam): difüz lobun bu oranı
+    /// cismin İÇİNDE rastgele yürüyüşle taşınır (mum, yeşim, deri, sabun, süt, meyve).
+    /// Renk taban rengidir; yarıçap kanal başına ortalama serbest yol (radius · scale,
+    /// sahne birimi). Kırmızı ışık deride en uzağa gider: varsayılan (1, 0.2, 0.1).
+    void setSubsurface(float v) { m_subsurface = std::clamp(v, 0.0f, 1.0f); }
+    void setSubsurfaceRadius(const Color3f& r) { m_subsurfaceRadius = r.clamp(1e-4f, 1e4f); }
+    void setSubsurfaceScale(float s) { m_subsurfaceScale = std::max(s, 1e-6f); }
+    void setSubsurfaceAnisotropy(float g) { m_subsurfaceAnisotropy = std::clamp(g, -0.9f, 0.9f); }
+    float subsurface() const { return m_subsurface; }
+    const Color3f& subsurfaceRadius() const { return m_subsurfaceRadius; }
+    float subsurfaceScale() const { return m_subsurfaceScale; }
+    float subsurfaceAnisotropy() const { return m_subsurfaceAnisotropy; }
+
+    /// Metal kenar tonu (F82-tint, OpenPBR "specular_color"): sıyırma açısında yansımanın
+    /// rengi. Beyaz = Schlick; altın/bakırda gerçek ölçülmüş metallerin kenar renkleri.
+    void setEdgeTint(const Color3f& c) { m_edgeTint = c.clamp(0.0f, 1.0f); }
+    const Color3f& edgeTint() const { return m_edgeTint; }
+
+    /// İnce film girişimi (sabun köpüğü, yağ tabakası, ısıl renk almış titanyum, mercek
+    /// kaplaması): kalınlık nm cinsinden (0 = kapalı), filmin kırılma indisi.
+    void setThinFilm(float thicknessNm, float ior) {
+        m_thinFilmThickness = std::clamp(thicknessNm, 0.0f, 2000.0f);
+        m_thinFilmIor = std::clamp(ior, 1.0f, 3.0f);
+    }
+    float thinFilmThickness() const { return m_thinFilmThickness; }
+    float thinFilmIor() const { return m_thinFilmIor; }
+
+    /// Metalik boya pulları (araç boyası): yoğunluk (0 = yok, 1 = her yer pul), pul boyu
+    /// (sahne birimi), yön dağınıklığı (0 = hepsi yüzeye paralel) ve pul rengi.
+    void setFlakes(float density, float size, float roughness, const Color3f& color) {
+        m_flakeDensity = std::clamp(density, 0.0f, 1.0f);
+        m_flakeSize = std::max(size, 1e-6f);
+        m_flakeRoughness = std::clamp(roughness, 0.0f, 1.0f);
+        m_flakeColor = color.clamp(0.0f, 1.0f);
+    }
+    float flakeDensity() const { return m_flakeDensity; }
+    float flakeSize() const { return m_flakeSize; }
+    float flakeRoughness() const { return m_flakeRoughness; }
+    const Color3f& flakeColor() const { return m_flakeColor; }
 
     /// Doku koordinatı kaynağı. Box: UV'si olmayan modeller için dünya uzayında
     /// üç eksenden izdüşüm (yüzey normalinin baskın eksenine göre).
@@ -88,6 +133,13 @@ public:
         float anisotropy = 0.0f;
         float sheen = 0.0f;
         float diffuseTransmission = 0.0f;
+        float subsurface = 0.0f;
+        Color3f edgeTint{1.0f};
+        float thinFilmThickness = 0.0f;
+        float thinFilmIor = 1.4f;
+        bool inFlake = false;         ///< nokta bir metalik pulun üstünde mi
+        Vec3f flakeNormal{0, 1, 0};   ///< o pulun eğik normali
+        Color3f flakeColor{0.9f};
         Vec3f normal{0, 1, 0};
         Vec3f tangent{1, 0, 0};
     };
@@ -105,6 +157,17 @@ private:
     float m_anisotropy = 0.0f;
     float m_sheen = 0.0f;
     float m_diffuseTransmission = 0.0f;
+    float m_subsurface = 0.0f;
+    Color3f m_subsurfaceRadius{1.0f, 0.2f, 0.1f};
+    float m_subsurfaceScale = 0.05f;
+    float m_subsurfaceAnisotropy = 0.0f;
+    Color3f m_edgeTint{1.0f};
+    float m_thinFilmThickness = 0.0f;
+    float m_thinFilmIor = 1.4f;
+    float m_flakeDensity = 0.0f;
+    float m_flakeSize = 0.004f;
+    float m_flakeRoughness = 0.3f;
+    Color3f m_flakeColor{0.9f};
     Color3f m_emission = Color3f::black();
     std::string m_albedoMap;
     std::string m_normalMap;

@@ -18,6 +18,7 @@ public:
     LightSample sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const override;
     bool isDelta() const override { return true; }
     Color3f power() const override;
+    float importance(const Vec3f& p, const Vec3f& n) const override;
 
 private:
     Vec3f m_position;

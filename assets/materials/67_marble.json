@@ -1,0 +1,26 @@
+{
+  "category": "Yarı Saydam",
+  "type": "generic",
+  "metallic": 0,
+  "specular": 0.5,
+  "id": "marble",
+  "name": "Beyaz Mermer",
+  "baseColor": [
+    0.9,
+    0.89,
+    0.86
+  ],
+  "roughness": 0.15,
+  "clearCoat": 0.3,
+  "clearCoatRoughness": 0.06,
+  "subsurface": {
+    "weight": 0.8,
+    "radius": [
+      0.9,
+      0.85,
+      0.8
+    ],
+    "scale": 0.015,
+    "anisotropy": 0.0
+  }
+}

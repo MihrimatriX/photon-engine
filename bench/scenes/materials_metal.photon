@@ -1,0 +1,688 @@
+{
+ "format": "photon-project",
+ "version": 2,
+ "camera": {
+  "target": [
+   0.0,
+   0.5,
+   0.0
+  ],
+  "radius": 7.232142857142856,
+  "theta": 1.28,
+  "phi": 1.5707963267948966,
+  "fov": 30.0,
+  "orthographic": false,
+  "aperture": 0.0
+ },
+ "render": {
+  "denoise": true,
+  "exposure": 0.0,
+  "maxBounces": 12,
+  "toneMap": 5
+ },
+ "environment": {
+  "background": {
+   "color": [
+    0.18,
+    0.18,
+    0.18
+   ],
+   "mode": "environment"
+  },
+  "ground": {
+   "color": [
+    0.42,
+    0.42,
+    0.42
+   ],
+   "enabled": true,
+   "roughness": 0.55
+  },
+  "hdr": "../../assets/environments/studio_small_09_1k.hdr",
+  "intensity": 0.8,
+  "rotation": 0.0,
+  "horizon": [
+   0.55,
+   0.55,
+   0.58
+  ],
+  "zenith": [
+   0.75,
+   0.8,
+   0.95
+  ]
+ },
+ "lights": [
+  {
+   "type": "area",
+   "name": "Ana ışık",
+   "enabled": true,
+   "color": [
+    1.0,
+    0.97,
+    0.92
+   ],
+   "intensity": 7.0,
+   "position": [
+    -2.418538293629554,
+    4.855323321746496,
+    4.189031204617326
+   ],
+   "target": [
+    0.0,
+    0.5,
+    0.0
+   ],
+   "width": 3.254464285714285,
+   "height": 3.254464285714285,
+   "azimuth": 120,
+   "elevation": 42
+  },
+  {
+   "type": "area",
+   "name": "Dolgu",
+   "enabled": true,
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 1.5,
+   "position": [
+    5.098241396533103,
+    3.862079207240743,
+    5.098241396533102
+   ],
+   "target": [
+    0.0,
+    0.5,
+    0.0
+   ],
+   "width": 4.3392857142857135,
+   "height": 4.3392857142857135,
+   "azimuth": 45,
+   "elevation": 25
+  },
+  {
+   "type": "area",
+   "name": "Kontur",
+   "enabled": true,
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 9.0,
+   "position": [
+    -0.8229846455397747,
+    3.818549381745337,
+    -4.667377858074249
+   ],
+   "target": [
+    0.0,
+    0.5,
+    0.0
+   ],
+   "width": 2.1696428571428568,
+   "height": 2.1696428571428568,
+   "azimuth": 260,
+   "elevation": 35
+  }
+ ],
+ "materials": [
+  {
+   "type": "disney",
+   "baseColor": [
+    0.552,
+    0.555,
+    0.589
+   ],
+   "metallic": 1,
+   "roughness": 0.03,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "edgeTint": [
+    0.746,
+    0.745,
+    0.799
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.941,
+    0.786,
+    0.396
+   ],
+   "metallic": 1,
+   "roughness": 0.25,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "edgeTint": [
+    0.987,
+    1.0,
+    0.973
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.943,
+    0.625,
+    0.54
+   ],
+   "metallic": 1,
+   "roughness": 0.45,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "edgeTint": [
+    0.978,
+    0.953,
+    0.947
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.605,
+    0.582,
+    0.542
+   ],
+   "metallic": 1,
+   "roughness": 0.12,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "edgeTint": [
+    0.77,
+    0.788,
+    0.829
+   ],
+   "thinFilm": {
+    "thickness": 330,
+    "ior": 2.4
+   }
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.28,
+    0.29,
+    0.3
+   ],
+   "metallic": 0,
+   "roughness": 0.45,
+   "specular": 0.5,
+   "clearCoat": 1.0,
+   "clearCoatRoughness": 0.02,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "flakes": {
+    "density": 0.7,
+    "size": 0.006,
+    "roughness": 0.3,
+    "color": [
+     0.92,
+     0.92,
+     0.93
+    ]
+   }
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.72,
+    0.73,
+    0.76
+   ],
+   "metallic": 0,
+   "roughness": 0.3,
+   "specular": 0.5,
+   "clearCoat": 1.0,
+   "clearCoatRoughness": 0.02,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "thinFilm": {
+    "thickness": 380,
+    "ior": 2.3
+   }
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.32,
+    0.0,
+    0.01
+   ],
+   "metallic": 0,
+   "roughness": 0.35,
+   "specular": 0.5,
+   "clearCoat": 1.0,
+   "clearCoatRoughness": 0.02,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "flakes": {
+    "density": 0.6,
+    "size": 0.006,
+    "roughness": 0.25,
+    "color": [
+     1.0,
+     0.2,
+     0.15
+    ]
+   }
+  }
+ ],
+ "nodes": [
+  {
+   "name": "Krom",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1,
+    0,
+    0,
+    -3.4499999999999997,
+    0,
+    1,
+    0,
+    0.5,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 0,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Altın",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1,
+    0,
+    0,
+    -2.3,
+    0,
+    1,
+    0,
+    0.5,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 1,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Bakır",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1,
+    0,
+    0,
+    -1.15,
+    0,
+    1,
+    0,
+    0.5,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 2,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Isıl renkli titanyum",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1,
+    0,
+    0,
+    0.0,
+    0,
+    1,
+    0,
+    0.5,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 3,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Gümüş metalik boya",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1,
+    0,
+    0,
+    1.15,
+    0,
+    1,
+    0,
+    0.5,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 4,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Sedef",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1,
+    0,
+    0,
+    2.3000000000000003,
+    0,
+    1,
+    0,
+    0.5,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 5,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Şeker kırmızı",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1,
+    0,
+    0,
+    3.4499999999999997,
+    0,
+    1,
+    0,
+    0.5,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 6,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -3,8 +3,17 @@
   "name": "Bakır",
   "category": "Metal",
   "type": "generic",
-  "baseColor": [0.95, 0.64, 0.54],
+  "baseColor": [
+    0.943,
+    0.625,
+    0.54
+  ],
   "roughness": 0.18,
   "metallic": 1,
-  "specular": 0.5
+  "specular": 0.5,
+  "edgeTint": [
+    0.978,
+    0.953,
+    0.947
+  ]
 }

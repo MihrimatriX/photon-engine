@@ -3,8 +3,17 @@
   "name": "Krom",
   "category": "Metal",
   "type": "generic",
-  "baseColor": [0.95, 0.95, 0.96],
+  "baseColor": [
+    0.552,
+    0.555,
+    0.589
+  ],
   "roughness": 0.03,
   "metallic": 1,
-  "specular": 0.5
+  "specular": 0.5,
+  "edgeTint": [
+    0.746,
+    0.745,
+    0.799
+  ]
 }

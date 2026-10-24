@@ -1,5 +1,6 @@
 // render_controller.cpp — Viewport render thread'inin döngüsü ve yayınlama mantığı.
 #include "app/render_controller.h"
+#include <cstring>
 #include "camera/perspective_camera.h"
 #include "camera/thin_lens_camera.h"
 #include "camera/orthographic_camera.h"
@@ -25,9 +26,12 @@ std::unique_ptr<Camera> makeCamera(const CameraParams& p, float aspect) {
     const Vec3f up(0, 1, 0);
     if (p.orthographic)
         return std::make_unique<OrthographicCamera>(p.eye, p.target, up, p.orthoHeight, aspect);
-    if (p.apertureRadius > 0.0f)
-        return std::make_unique<ThinLensCamera>(p.eye, p.target, up, p.fovDeg, aspect, p.apertureRadius,
-                                                std::max(1e-3f, p.focusDistance));
+    if (p.apertureRadius > 0.0f) {
+        auto cam = std::make_unique<ThinLensCamera>(p.eye, p.target, up, p.fovDeg, aspect, p.apertureRadius,
+                                                    std::max(1e-3f, p.focusDistance));
+        cam->setApertureShape(p.apertureBlades, p.bladeRotationDeg);
+        return cam;
+    }
     return std::make_unique<PerspectiveCamera>(p.eye, p.target, up, p.fovDeg, aspect);
 }
 
@@ -92,7 +96,8 @@ void RenderController::setSettings(const RenderSettings& rs) {
         std::lock_guard<std::mutex> lk(m_mutex);
         changed = rs.maxBounces != m_settings.maxBounces || rs.aoStrength != m_settings.aoStrength ||
                   rs.shadowQuality != m_settings.shadowQuality ||
-                  rs.adaptiveSampling != m_settings.adaptiveSampling;
+                  rs.adaptiveSampling != m_settings.adaptiveSampling ||
+                  rs.noiseThreshold != m_settings.noiseThreshold || rs.clampIndirect != m_settings.clampIndirect;
         m_settings = rs;
     }
     if (changed) restart(true);
@@ -104,6 +109,16 @@ void RenderController::setDisplay(ToneMapOperator tmo, float exposureEV) {
         if (tmo == m_tmo && exposureEV == m_exposure) return;
         m_tmo = tmo;
         m_exposure = exposureEV;
+        m_retonemap = true;
+    }
+    m_cv.notify_all();
+}
+
+void RenderController::setImager(const ImagerSettings& imager) {
+    {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        if (std::memcmp(&imager, &m_imager, sizeof(ImagerSettings)) == 0) return;
+        m_imager = imager;
         m_retonemap = true;
     }
     m_cv.notify_all();
@@ -185,16 +200,26 @@ void RenderController::lastImages(std::shared_ptr<const Image>& hdr, std::shared
 
 // HDR → ekran: pozlama, ton eğrisi, sRGB kodlama, titreşimli (dither) 8 bit.
 // Satırlar paralel işlenir; 1 MP görüntü birkaç milisaniye sürer.
-void RenderController::publish(const Image& hdr, const Image* alpha, bool denoised) {
+void RenderController::publish(const Image& hdrIn, const Image* alpha, bool denoised) {
     ToneMapOperator tmo;
     float exposure;
     bool transparent;
+    ImagerSettings imager;
     {
         std::lock_guard<std::mutex> lk(m_mutex);
         tmo = m_tmo;
         exposure = m_exposure;
         transparent = m_transparent;
+        imager = m_imager;
     }
+    // Görüntüleyici HDR'nin kopyasına uygulanır (ham görüntü birikim ve dışa aktarım için kalır).
+    Image imaged;
+    const bool useImager = !imager.isIdentity();
+    if (useImager) {
+        imaged = hdrIn;
+        applyImager(imaged, imager, exposure);
+    }
+    const Image& hdr = useImager ? imaged : hdrIn;
     DisplayFrame frame;
     frame.width = hdr.width();
     frame.height = hdr.height();

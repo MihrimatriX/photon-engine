@@ -1,0 +1,19 @@
+{
+  "baseColor": [
+    0.97,
+    0.96,
+    0.92
+  ],
+  "edgeTint": [
+    0.984,
+    0.988,
+    0.998
+  ],
+  "metallic": 1,
+  "id": "silver",
+  "name": "Gümüş (ayna)",
+  "category": "Metal",
+  "type": "generic",
+  "roughness": 0.02,
+  "specular": 0.5
+}

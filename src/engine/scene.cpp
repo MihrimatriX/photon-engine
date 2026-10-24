@@ -14,6 +14,7 @@ void Scene::addShape(std::shared_ptr<Shape> shape) {
     auto mesh = std::dynamic_pointer_cast<TriangleMesh>(shape);
     m_shapes.push_back(std::move(shape));
     if (!mesh || !mesh->material()) return;
+    if (mesh->material()->transmitsShadows()) m_shadowTransmitters = true;
 
     // Emisyonlu mesh (ör. LED panel malzemesi) → ışık örneklemesine de girer.
     SurfaceInteraction si;
@@ -21,12 +22,14 @@ void Scene::addShape(std::shared_ptr<Shape> shape) {
     if (emission.isBlack()) return;
     // Alan ışığı dörtgenleri mesh değil Triangle olduğu için iki kez kaydedilmez.
     auto light = std::make_shared<MeshLight>(mesh.get(), emission);
+    m_emitterOfShape[mesh.get()] = static_cast<int>(m_lightPtrs.size());
     m_lights.push_back(light);
     m_lightPtrs.push_back(light.get());
 }
 
 void Scene::addLight(std::shared_ptr<Light> light) {
     if (!light) return;
+    const int index = static_cast<int>(m_lightPtrs.size());
     m_lights.push_back(light);
     m_lightPtrs.push_back(light.get());
 
@@ -49,8 +52,12 @@ void Scene::addLight(std::shared_ptr<Light> light) {
     const Vec2f uv2(1.0f, 1.0f);
     const Vec2f uv3(0.0f, 1.0f);
     const Material* m = mat.get();
-    addShape(std::make_shared<Triangle>(p0, p1, p2, n, n, n, uv0, uv1, uv2, m));
-    addShape(std::make_shared<Triangle>(p0, p2, p3, n, n, n, uv0, uv2, uv3, m));
+    for (auto tri : {std::make_shared<Triangle>(p0, p1, p2, n, n, n, uv0, uv1, uv2, m),
+                     std::make_shared<Triangle>(p0, p2, p3, n, n, n, uv0, uv2, uv3, m)}) {
+        m_emitterOfShape[tri.get()] = index;
+        if (!area->visibleToCamera()) m_cameraInvisible.insert(tri.get());
+        addShape(tri);
+    }
 }
 
 void Scene::setEnvironment(std::shared_ptr<EnvironmentLight> envLight) {
@@ -58,7 +65,9 @@ void Scene::setEnvironment(std::shared_ptr<EnvironmentLight> envLight) {
 }
 
 void Scene::retainMaterial(std::shared_ptr<const Material> material) {
-    if (material) m_materials.push_back(std::move(material));
+    if (!material) return;
+    if (material->transmitsShadows()) m_shadowTransmitters = true;
+    m_materials.push_back(std::move(material));
 }
 
 namespace {
@@ -90,6 +99,10 @@ void Scene::reset() {
     m_emissiveMaterials.clear();
     m_materials.clear();
     m_shapeOwner.clear();
+    m_emitterOfShape.clear();
+    m_cameraInvisible.clear();
+    m_shadowCatcher = nullptr;
+    m_shadowTransmitters = false;
     m_background = Background{};
 }
 

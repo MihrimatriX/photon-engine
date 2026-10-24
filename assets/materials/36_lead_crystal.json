@@ -1,0 +1,16 @@
+{
+  "category": "Cam",
+  "type": "glass",
+  "baseColor": [
+    1,
+    1,
+    1
+  ],
+  "roughness": 0,
+  "metallic": 0,
+  "specular": 0.5,
+  "id": "lead_crystal",
+  "name": "Kurşun Kristal (dispersiyonlu)",
+  "ior": 1.62,
+  "abbe": 34
+}

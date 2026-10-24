@@ -4,6 +4,7 @@ add_library(photon_materials STATIC
     mirror.cpp
     dielectric.cpp
     disney.cpp
+    microfacet.cpp
 )
 
 target_link_libraries(photon_materials PUBLIC photon_core photon_geometry)

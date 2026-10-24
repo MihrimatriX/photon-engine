@@ -436,6 +436,14 @@ void Application::applyMaterialPreset(uint64_t nodeUid, const MaterialPreset& pr
 // HDRI dosyası önce arka planda önbelleğe yüklenir; sahne ancak sonra derlenir
 // (aksi hâlde büyük bir HDR'nin okunması UI'yi bir saniye dondururdu).
 void Application::applyEnvironment(const EnvAsset& env) {
+    if (env.sky) {
+        // Gök ~0.1 s'de hesaplanır; önbelleğe arka planda alınır.
+        runAsync("Gökyüzü hesaplanıyor: " + env.name, [this, env]() -> std::function<void()> {
+            m_s.envCache.sky(env.skyParams);
+            return [this, env] { applyEnvironmentNow(env); };
+        });
+        return;
+    }
     if (!env.path.empty()) {
         runAsync("Ortam yükleniyor: " + env.name, [this, env]() -> std::function<void()> {
             m_s.envCache.get(env.path);
@@ -448,9 +456,16 @@ void Application::applyEnvironment(const EnvAsset& env) {
 
 void Application::applyEnvironmentNow(const EnvAsset& env) {
     pushUndo();
-    m_s.environment.hdrPath = env.path;
-    m_s.environment.zenith = env.zenith;
-    m_s.environment.horizon = env.horizon;
+    if (env.sky) {
+        m_s.environment.kind = EnvironmentDesc::Kind::Sky;
+        m_s.environment.sky = env.skyParams;
+        m_s.environment.skyFromLocation = false;
+    } else {
+        m_s.environment.kind = EnvironmentDesc::Kind::Image;
+        m_s.environment.hdrPath = env.path;
+        m_s.environment.zenith = env.zenith;
+        m_s.environment.horizon = env.horizon;
+    }
     markDocumentChanged();
     setStatus("Ortam: " + env.name);
 }
@@ -462,6 +477,7 @@ void Application::applyStudio(const StudioPreset& studio) {
     if (!studio.environment.empty()) {
         for (const auto& e : m_s.environments) {
             if (e.id == studio.environment || ui::fileName(e.path) == studio.environment) {
+                m_s.environment.kind = EnvironmentDesc::Kind::Image;
                 m_s.environment.hdrPath = e.path;
                 m_s.environment.zenith = e.zenith;
                 m_s.environment.horizon = e.horizon;
@@ -488,10 +504,13 @@ void Application::addLight(LightDesc::Type type) {
     rig.distance = 2.2f;
     rig.size = 0.8f;
     rig.intensity = type == LightDesc::Type::Area ? 8.0f : type == LightDesc::Type::Directional ? 3.0f : 20.0f;
-    rig.name = type == LightDesc::Type::Area ? "Alan ışığı" : type == LightDesc::Type::Directional ? "Güneş" : "Nokta ışık";
+    rig.name = type == LightDesc::Type::Area ? "Alan ışığı"
+             : type == LightDesc::Type::Directional ? "Güneş"
+             : type == LightDesc::Type::Spot ? "Spot ışık" : "Nokta ışık";
+    if (type == LightDesc::Type::Spot) rig.elevationDeg = 60.0f; // yukarıdan konuya
     tmp.lights.push_back(rig);
     LightDesc d = placeStudioLights(tmp, box, m_s.camera.phi * RAD_TO_DEG).front();
-    if (type == LightDesc::Type::Point) {
+    if (type == LightDesc::Type::Point || type == LightDesc::Type::Spot) {
         // Nokta ışık yoğunluğu mesafenin karesiyle düşer; sahne ölçeğine göre ayarla.
         const float r = std::max(1e-3f, (box.pMax - box.pMin).length() * 0.5f);
         d.intensity *= r * r;
@@ -765,6 +784,8 @@ CameraParams Application::cameraParams() const {
     p.orthoHeight = 2.0f * std::tan(c.fov * DEG_TO_RAD * 0.5f) * std::max(c.radius, 1e-3f);
     p.apertureRadius = c.aperture;
     p.focusDistance = effectiveFocusDistance(c);
+    p.apertureBlades = c.apertureBlades;
+    p.bladeRotationDeg = c.bladeRotationDeg;
     return p;
 }
 
@@ -791,7 +812,8 @@ json cameraJson(const OrbitCamera& c) {
     return {{"target", {c.target[0], c.target[1], c.target[2]}}, {"radius", c.radius}, {"theta", c.theta},
             {"phi", c.phi}, {"fov", c.fov}, {"focalLengthMm", c.focalLengthMm}, {"orthographic", c.orthographic},
             {"aperture", c.aperture}, {"fStop", c.fStop}, {"focusDistance", c.focusDistance},
-            {"focusExplicit", c.focusExplicit}};
+            {"focusExplicit", c.focusExplicit}, {"apertureBlades", c.apertureBlades},
+            {"bladeRotation", c.bladeRotationDeg}};
 }
 
 void readCamera(const json& j, OrbitCamera& c) {
@@ -807,6 +829,8 @@ void readCamera(const json& j, OrbitCamera& c) {
     c.fStop = j.value("fStop", c.fStop);
     c.focusDistance = j.value("focusDistance", c.focusDistance);
     c.focusExplicit = j.value("focusExplicit", c.focusExplicit);
+    c.apertureBlades = j.value("apertureBlades", c.apertureBlades);
+    c.bladeRotationDeg = j.value("bladeRotation", c.bladeRotationDeg);
 }
 
 } // namespace
@@ -820,6 +844,8 @@ void Application::saveProject() {
     d.camera = cameraJson(m_s.camera);
     d.render = {{"toneMap", static_cast<int>(m_s.settings.tmo)}, {"exposure", m_s.settings.exposure},
                 {"maxBounces", m_s.settings.maxBounces}, {"denoise", m_s.denoise},
+                {"imager", imagerToJson(m_s.imager)}, {"clampIndirect", m_s.settings.clampIndirect},
+                {"adaptive", m_s.settings.adaptiveSampling}, {"noiseThreshold", m_s.settings.noiseThreshold},
                 {"output", {{"width", m_s.output.width}, {"height", m_s.output.height},
                             {"spp", m_s.output.spp}, {"format", m_s.output.format}}}};
     {
@@ -867,6 +893,10 @@ bool Application::openProject(const std::string& path) {
     m_s.settings.tmo = static_cast<ToneMapOperator>(d.render.value("toneMap", static_cast<int>(m_s.settings.tmo)));
     m_s.settings.exposure = d.render.value("exposure", m_s.settings.exposure);
     m_s.settings.maxBounces = d.render.value("maxBounces", m_s.settings.maxBounces);
+    m_s.imager = imagerFromJson(d.render.value("imager", json::object()));
+    m_s.settings.clampIndirect = d.render.value("clampIndirect", 0.0f);
+    m_s.settings.adaptiveSampling = d.render.value("adaptive", m_s.settings.adaptiveSampling);
+    m_s.settings.noiseThreshold = d.render.value("noiseThreshold", m_s.settings.noiseThreshold);
     m_s.denoise = d.render.value("denoise", m_s.denoise);
     if (auto o = d.render.find("output"); o != d.render.end() && o->is_object()) {
         m_s.output.width = o->value("width", m_s.output.width);
@@ -917,11 +947,13 @@ void Application::exportViewport() {
     std::string ext = pathToUtf8(pathFromUtf8(path).extension());
     std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     bool ok = false;
+    Image shown = *hdr;
+    applyImager(shown, m_s.imager, m_s.settings.exposure);
     if (ext == ".exr") ok = saveImageEXR(*hdr, path);
-    else if (ext == ".jpg" || ext == ".jpeg") ok = saveImageJPG(*hdr, path, m_s.settings.tmo, m_s.settings.exposure);
+    else if (ext == ".jpg" || ext == ".jpeg") ok = saveImageJPG(shown, path, m_s.settings.tmo, m_s.settings.exposure);
     else if (m_s.environment.background.mode == Background::Mode::Transparent && alpha)
-        ok = saveImagePNGAlpha(*hdr, *alpha, path, m_s.settings.tmo, m_s.settings.exposure);
-    else ok = saveImagePNG(*hdr, path, m_s.settings.tmo, m_s.settings.exposure);
+        ok = saveImagePNGAlpha(shown, *alpha, path, m_s.settings.tmo, m_s.settings.exposure);
+    else ok = saveImagePNG(shown, path, m_s.settings.tmo, m_s.settings.exposure);
     setStatus(ok ? "Kaydedildi: " + path : "Kaydedilemedi: " + path, !ok);
 }
 
