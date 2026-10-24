@@ -228,10 +228,13 @@ if(PHOTON_BUILD_APP)
             ${imgui_fc_SOURCE_DIR}/imgui_widgets.cpp
             ${imgui_fc_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
             ${imgui_fc_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+            ${imgui_fc_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
         )
+        # misc/cpp: InputText(std::string*) — vcpkg's imgui port ships it too.
         target_include_directories(imgui_app SYSTEM PUBLIC
             ${imgui_fc_SOURCE_DIR}
             ${imgui_fc_SOURCE_DIR}/backends
+            ${imgui_fc_SOURCE_DIR}/misc/cpp
         )
         target_link_libraries(imgui_app PUBLIC glfw)
         add_library(imgui::imgui ALIAS imgui_app)
@@ -243,12 +246,19 @@ if(PHOTON_BUILD_APP)
         FetchContent_Declare(
             imguizmo_fc
             GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo.git
-            GIT_TAG        1.91.3
+            # Pinned 2026-10-24 from branch master ("1.91.3" is vcpkg's port
+            # version, not a git tag: the fallback failed to clone).
+            GIT_TAG        105e4fde45e4e74aae8973d98750820ef7aca7e2
             SOURCE_SUBDIR  photon-headers-only
         )
         FetchContent_MakeAvailable(imguizmo_fc)
-        add_library(imguizmo_app STATIC ${imguizmo_fc_SOURCE_DIR}/ImGuizmo.cpp)
-        target_include_directories(imguizmo_app SYSTEM PUBLIC ${imguizmo_fc_SOURCE_DIR})
+        # Newer upstream moved the sources under src/.
+        set(_imguizmo_dir ${imguizmo_fc_SOURCE_DIR})
+        if(EXISTS ${imguizmo_fc_SOURCE_DIR}/src/ImGuizmo.cpp)
+            set(_imguizmo_dir ${imguizmo_fc_SOURCE_DIR}/src)
+        endif()
+        add_library(imguizmo_app STATIC ${_imguizmo_dir}/ImGuizmo.cpp)
+        target_include_directories(imguizmo_app SYSTEM PUBLIC ${_imguizmo_dir})
         target_link_libraries(imguizmo_app PUBLIC imgui::imgui)
         add_library(imguizmo::imguizmo ALIAS imguizmo_app)
     endif()
