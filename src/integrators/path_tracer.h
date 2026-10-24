@@ -50,7 +50,12 @@ public:
                                      const SubsurfaceCoeffs& coeffs, Sampler& sampler, Color3f& throughput,
                                      SurfaceInteraction& exitSi);
 
+    /// Dolaylı katkıları (ışık ikinci ve sonraki köşelerden bulunduysa) en büyük bileşeni
+    /// @p limit olacak şekilde kırpar. 0 = kapalı. Yanlıdır ama kostik parlamaları söndürür.
+    void setClampIndirect(float limit) { m_clampIndirect = limit > 0.0f ? limit : 0.0f; }
+
 private:
+    float m_clampIndirect = 0.0f;
     int m_maxDepth;
     int m_russianRouletteDepth;
     float m_aoStrength;

@@ -404,6 +404,7 @@ void Application::frame(float dt) {
     // Kamera ve ekran ayarlarını render thread'ine ilet (değişmediyse etkisiz).
     m_s.viewport.setCamera(cameraParams(), true);
     m_s.viewport.setDisplay(m_s.settings.tmo, m_s.settings.exposure);
+    m_s.viewport.setImager(m_s.imager);
     m_s.viewport.setSettings(m_s.settings);
     m_s.viewport.setDenoise(m_s.denoise);
     m_s.viewport.setTargetSpp(m_s.previewSpp);

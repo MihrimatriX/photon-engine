@@ -1,0 +1,1280 @@
+{
+ "format": "photon-project",
+ "version": 2,
+ "camera": {
+  "target": [
+   0.0,
+   0.5,
+   1.4
+  ],
+  "radius": 4.2,
+  "theta": 1.45,
+  "phi": 1.5707963267948966,
+  "fov": 32.0,
+  "orthographic": false,
+  "aperture": 0.09,
+  "focusExplicit": true,
+  "focusDistance": 4.0,
+  "apertureBlades": 6,
+  "bladeRotation": 15.0
+ },
+ "render": {
+  "denoise": true,
+  "exposure": 0.0,
+  "maxBounces": 12,
+  "toneMap": 5,
+  "imager": {
+   "bloom": 0.35,
+   "bloomRadius": 0.03,
+   "bloomThreshold": 1.5,
+   "glare": 0.3,
+   "glareBlades": 6,
+   "glareAngle": 15.0,
+   "glareLength": 0.12,
+   "vignette": 0.35,
+   "whiteBalance": 6500.0,
+   "contrast": 1.1,
+   "saturation": 1.05
+  }
+ },
+ "environment": {
+  "background": {
+   "color": [
+    0.18,
+    0.18,
+    0.18
+   ],
+   "mode": "environment"
+  },
+  "ground": {
+   "enabled": true,
+   "color": [
+    0.15,
+    0.15,
+    0.16
+   ],
+   "roughness": 0.25
+  },
+  "hdr": "../../assets/environments/studio_small_09_1k.hdr",
+  "intensity": 0.15,
+  "rotation": 0.0,
+  "horizon": [
+   0.55,
+   0.55,
+   0.58
+  ],
+  "zenith": [
+   0.75,
+   0.8,
+   0.95
+  ]
+ },
+ "lights": [
+  {
+   "type": "area",
+   "name": "Ana ışık",
+   "enabled": true,
+   "color": [
+    1.0,
+    0.97,
+    0.92
+   ],
+   "intensity": 4.0,
+   "position": [
+    -2.2653930970197975,
+    4.579538212962071,
+    3.9237759431541024
+   ],
+   "target": [
+    0.0,
+    0.5,
+    0.0
+   ],
+   "width": 3.0483870967741935,
+   "height": 3.0483870967741935,
+   "azimuth": 120,
+   "elevation": 42
+  }
+ ],
+ "materials": [
+  {
+   "type": "disney",
+   "baseColor": [
+    0.552,
+    0.555,
+    0.589
+   ],
+   "metallic": 1,
+   "roughness": 0.03,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "edgeTint": [
+    0.746,
+    0.745,
+    0.799
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.941,
+    0.786,
+    0.396
+   ],
+   "metallic": 1,
+   "roughness": 0.12,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "edgeTint": [
+    0.987,
+    1.0,
+    0.973
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    1.0,
+    0.25,
+    0.1
+   ],
+   "metallic": 0.0,
+   "roughness": 0.4,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    12.0,
+    3.0,
+    1.2000000000000002
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.2,
+    0.6,
+    1.0
+   ],
+   "metallic": 0.0,
+   "roughness": 0.4,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    2.4000000000000004,
+    7.199999999999999,
+    12.0
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    1.0,
+    0.85,
+    0.4
+   ],
+   "metallic": 0.0,
+   "roughness": 0.4,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    12.0,
+    10.2,
+    4.800000000000001
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.8,
+    0.2,
+    1.0
+   ],
+   "metallic": 0.0,
+   "roughness": 0.4,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    9.600000000000001,
+    2.4000000000000004,
+    12.0
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.3,
+    1.0,
+    0.5
+   ],
+   "metallic": 0.0,
+   "roughness": 0.4,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    3.5999999999999996,
+    12.0,
+    6.0
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "name": "Krom",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1.0,
+    0,
+    0,
+    -0.35,
+    0,
+    1.0,
+    0,
+    0.5,
+    0,
+    0,
+    1.0,
+    1.2,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 0,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Altın",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.7,
+    0,
+    0,
+    0.55,
+    0,
+    0.7,
+    0,
+    0.35,
+    0,
+    0,
+    0.7,
+    1.9,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 1,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 0",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    -1.761672351668376,
+    0,
+    0.12,
+    0,
+    0.7827173565584062,
+    0,
+    0,
+    0.12,
+    -7.047196580880438,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 2,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 1",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    -4.275637133324572,
+    0,
+    0.12,
+    0,
+    2.0148224137814053,
+    0,
+    0,
+    0.12,
+    -7.902933249262244,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 3,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 2",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    -4.4200107522529315,
+    0,
+    0.12,
+    0,
+    1.9237943462061449,
+    0,
+    0,
+    0.12,
+    -8.887513024674046,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 4,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 3",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    -0.6635431633761417,
+    0,
+    0.12,
+    0,
+    0.5235373554387805,
+    0,
+    0,
+    0.12,
+    -8.727860959968405,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 5,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 4",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    -0.7548081085748599,
+    0,
+    0.12,
+    0,
+    2.945926798950522,
+    0,
+    0,
+    0.12,
+    -8.628594116551064,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 6,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 5",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    -2.7676103539298547,
+    0,
+    0.12,
+    0,
+    2.307786311697886,
+    0,
+    0,
+    0.12,
+    -6.156873172628983,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 2,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 6",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    0.7710294861749869,
+    0,
+    0.12,
+    0,
+    1.5693775188824965,
+    0,
+    0,
+    0.12,
+    -6.07123468322124,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 3,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 7",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    -4.534173193822437,
+    0,
+    0.12,
+    0,
+    3.0470990689557746,
+    0,
+    0,
+    0.12,
+    -8.13117214100497,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 4,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 8",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    -3.5574491664256245,
+    0,
+    0.12,
+    0,
+    0.6769351618507788,
+    0,
+    0,
+    0.12,
+    -8.074554527694197,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 5,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 9",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    3.1612635912003135,
+    0,
+    0.12,
+    0,
+    0.8783244157565999,
+    0,
+    0,
+    0.12,
+    -7.255199509012601,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 6,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 10",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    1.3891346892618408,
+    0,
+    0.12,
+    0,
+    1.49167213672234,
+    0,
+    0,
+    0.12,
+    -7.3567666028713266,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 2,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 11",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    -4.372110250266768,
+    0,
+    0.12,
+    0,
+    0.4907237438919445,
+    0,
+    0,
+    0.12,
+    -8.38212386154202,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 3,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 12",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    1.8039997318178589,
+    0,
+    0.12,
+    0,
+    1.6682953781420893,
+    0,
+    0,
+    0.12,
+    -8.057558488869626,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 4,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 13",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    0.8556186350763877,
+    0,
+    0.12,
+    0,
+    1.7501900043864813,
+    0,
+    0,
+    0.12,
+    -8.100699009408952,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 5,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 14",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    2.943794815224912,
+    0,
+    0.12,
+    0,
+    2.536782187934628,
+    0,
+    0,
+    0.12,
+    -8.267710467833542,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 6,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 15",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    0.7442371025867098,
+    0,
+    0.12,
+    0,
+    1.9806288121966447,
+    0,
+    0,
+    0.12,
+    -6.374587513279714,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 2,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 16",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    2.294452894392176,
+    0,
+    0.12,
+    0,
+    1.221400847648597,
+    0,
+    0,
+    0.12,
+    -6.059475457522254,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 3,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Işık 17",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    -3.819342217450379,
+    0,
+    0.12,
+    0,
+    1.6379930297127272,
+    0,
+    0,
+    0.12,
+    -6.728577211304252,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 4,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  }
+ ]
+}

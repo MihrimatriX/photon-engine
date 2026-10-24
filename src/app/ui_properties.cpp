@@ -904,6 +904,12 @@ void Application::drawCameraProps() {
                 ui::Prop("f-durağı", "Küçük sayı = büyük açıklık = daha çok bulanıklık");
                 if (ui::SliderF("##fs", &c.fStop, 0.7f, 32.0f, "f/%.1f", ImGuiSliderFlags_Logarithmic))
                     c.aperture = apertureFromFStop(c.focalLengthMm, c.fStop);
+                ui::Prop("Diyafram kanatları", "0 = yuvarlak bokeh; 5–9 kanat çokgen bokeh verir");
+                ui::SliderI("##blades", &c.apertureBlades, 0, 12);
+                if (c.apertureBlades >= 3) {
+                    ui::Prop("Kanat açısı");
+                    ui::SliderF("##brot", &c.bladeRotationDeg, 0.0f, 360.0f / static_cast<float>(c.apertureBlades), "%.0f°");
+                }
                 ui::Prop("Odak mesafesi");
                 float fd = effectiveFocusDistance(c);
                 if (ImGui::DragFloat("##fd", &fd, std::max(1e-3f, fd * 0.005f), 1e-3f, 1e6f, "%.3f")) {
@@ -1000,12 +1006,72 @@ void Application::drawImageProps() {
             ui::EndProps();
         }
     }
-    if (ui::Section(ICON_GAUGE, "Işık taşıma", false)) {
+    ImagerSettings& im = m_s.imager;
+    if (ui::Section(ICON_SPARKLES, "Parlama (bloom ve yıldız)", im.bloomIntensity > 0.0f || im.glareIntensity > 0.0f)) {
+        if (ui::BeginProps("bloom")) {
+            ui::Prop("Bloom", "Parlak noktaların mercekte saçılan halesi (ışık kaynakları, güneş yansıması)");
+            ui::SliderF("##bl", &im.bloomIntensity, 0.0f, 1.0f, "%.2f");
+            if (im.bloomIntensity > 0.0f) {
+                ui::Prop("Yarıçap");
+                ui::SliderF("##blr", &im.bloomRadius, 0.005f, 0.2f, "%.3f", ImGuiSliderFlags_Logarithmic);
+                ui::Prop("Eşik", "Bu parlaklığın üstü parlar (1 = beyaz)");
+                ui::SliderF("##blt", &im.bloomThreshold, 0.0f, 10.0f, "%.2f");
+            }
+            ui::Prop("Yıldız", "Diyafram kanatlarının ışın demetleri (glare)");
+            ui::SliderF("##gl", &im.glareIntensity, 0.0f, 1.0f, "%.2f");
+            if (im.glareIntensity > 0.0f) {
+                ui::Prop("Işın sayısı");
+                ui::SliderI("##glb", &im.glareBlades, 2, 16);
+                ui::Prop("Açı");
+                ui::SliderF("##gla", &im.glareAngleDeg, 0.0f, 180.0f, "%.0f°");
+                ui::Prop("Uzunluk");
+                ui::SliderF("##gll", &im.glareLength, 0.01f, 0.5f, "%.2f");
+            }
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_PALETTE, "Renk", im.whiteBalanceK != 6500.0f || im.saturation != 1.0f || im.contrast != 1.0f)) {
+        if (ui::BeginProps("color")) {
+            ui::Prop("Beyaz dengesi", "Sahne ışığının renk sıcaklığı: düşük değer sıcak ışığı nötrler (görüntü soğur)");
+            ui::SliderF("##wb", &im.whiteBalanceK, 2000.0f, 12000.0f, "%.0f K");
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) im.whiteBalanceK = 6500.0f;
+            ui::Prop("Ton", "Yeşil (−) ↔ macenta (+)");
+            ui::SliderF("##tint", &im.tint, -1.0f, 1.0f, "%+.2f");
+            ui::Prop("Doygunluk");
+            ui::SliderF("##sat", &im.saturation, 0.0f, 2.0f, "%.2f");
+            ui::Prop("Kontrast", "Orta gri etrafında: gölgeleri koyulaştırır, ışıkları açar");
+            ui::SliderF("##con", &im.contrast, 0.5f, 2.0f, "%.2f");
+            ui::EndProps();
+        }
+        if (ui::GhostButton("Sıfırla")) {
+            im.whiteBalanceK = 6500.0f;
+            im.tint = 0.0f;
+            im.saturation = im.contrast = 1.0f;
+        }
+    }
+    if (ui::Section(ICON_APERTURE, "Lens efektleri", im.vignette > 0.0f || im.chromaticAberration > 0.0f)) {
+        if (ui::BeginProps("lensfx")) {
+            ui::Prop("Vinyet", "Köşelerin kararması");
+            ui::SliderF("##vig", &im.vignette, 0.0f, 1.0f, "%.2f");
+            ui::Prop("Renk sapması", "Köşelerde kırmızı/mavi kanal kayması (ucuz objektif hissi)");
+            ui::SliderF("##ca", &im.chromaticAberration, 0.0f, 5.0f, "%.2f");
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_GAUGE, "Işık taşıma ve kalite", false)) {
         if (ui::BeginProps("lt")) {
             ui::Prop("Sekme sayısı", "Işının en çok kaç kez yansıyacağı. Cam ve iç mekân için yüksek tutun.");
             ui::SliderI("##mb", &m_s.settings.maxBounces, 1, 32);
-            ui::Prop("Uyarlamalı örnekleme", "Düz bölgelerde örnek atlar (deneysel)");
+            ui::Prop("Uyarlamalı örnekleme", "Temizlenen pikseller örneklemeyi bırakır; bütçe gürültülü yerlere gider");
             ui::Toggle("ad", &m_s.settings.adaptiveSampling);
+            if (m_s.settings.adaptiveSampling) {
+                ui::Prop("Gürültü eşiği", "Göreli standart hata hedefi: 0.01 çok temiz, 0.05 hızlı");
+                ui::SliderF("##nt", &m_s.settings.noiseThreshold, 0.002f, 0.2f, "%.3f", ImGuiSliderFlags_Logarithmic);
+            }
+            ui::Prop("Parlama sınırı", "Dolaylı ışıktaki tekil parlak noktaları (firefly) keser. 0 = kapalı "
+                                       "(fiziksel olarak doğru); 5–20 arası kostik gürültüsünü bastırır");
+            ui::SliderF("##clamp", &m_s.settings.clampIndirect, 0.0f, 100.0f, m_s.settings.clampIndirect > 0.0f ? "%.1f" : "kapalı",
+                        ImGuiSliderFlags_Logarithmic);
             ui::EndProps();
         }
     }

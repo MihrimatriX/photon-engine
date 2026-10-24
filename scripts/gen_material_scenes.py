@@ -170,3 +170,26 @@ for i, (ies, x) in enumerate([("dar_spot.ies", -2.2), ("downlight_yarasa_kanadi.
 ies_scene["lights"] = spots
 ies_scene["camera"].update({"radius": 6.5, "theta": 1.35})
 write("spot_ies.photon", ies_scene)
+
+# 5) Alan derinliği + çokgen bokeh + görüntüleyici (bloom ve yıldız parlaması).
+neon = [disney(c, roughness=0.4, emission=[v * 12.0 for v in c]) for c in
+        [(1.0, 0.25, 0.1), (0.2, 0.6, 1.0), (1.0, 0.85, 0.4), (0.8, 0.2, 1.0), (0.3, 1.0, 0.5)]]
+bokeh = scene([preset("20_chrome.json"), preset("23_gold.json")] + neon,
+              ["Krom", "Altın"] + ["Işık " + str(i) for i in range(len(neon))])
+bokeh["nodes"] = [node("Krom", "sphere.obj", trs(-0.35, 0.5, 1.2), 0), node("Altın", "sphere.obj", trs(0.55, 0.35, 1.9, 0.7), 1)]
+import random
+random.seed(7)
+for i in range(18):
+    m = 2 + (i % len(neon))
+    bokeh["nodes"].append(node("Işık " + str(i), "sphere.obj",
+                               trs(random.uniform(-5, 5), random.uniform(0.3, 3.5), random.uniform(-9, -6), 0.12), m))
+bokeh["lights"] = bokeh["lights"][:1]
+bokeh["lights"][0]["intensity"] = 4.0
+bokeh["environment"].update({"intensity": 0.15, "ground": {"enabled": True, "color": [0.15, 0.15, 0.16], "roughness": 0.25}})
+bokeh["camera"] = {"target": [0.0, 0.5, 1.4], "radius": 4.2, "theta": 1.45, "phi": math.pi / 2, "fov": 32.0,
+                   "orthographic": False, "aperture": 0.09, "focusExplicit": True, "focusDistance": 4.0,
+                   "apertureBlades": 6, "bladeRotation": 15.0}
+bokeh["render"]["imager"] = {"bloom": 0.35, "bloomRadius": 0.03, "bloomThreshold": 1.5, "glare": 0.3,
+                             "glareBlades": 6, "glareAngle": 15.0, "glareLength": 0.12, "vignette": 0.35,
+                             "whiteBalance": 6500.0, "contrast": 1.1, "saturation": 1.05}
+write("bokeh_imager.photon", bokeh)
