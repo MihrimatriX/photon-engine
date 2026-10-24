@@ -26,20 +26,6 @@ Vec3f offsetRayOrigin(const Vec3f& p, const Vec3f& n, const Vec3f& dir) {
     return p + n * (dir.dot(n) > 0.0f ? 1e-4f : -1e-4f);
 }
 
-float areaLightSolidAnglePdf(const std::vector<const Light*>& lights,
-                             const Vec3f& ref, const Vec3f& pLight) {
-    for (const Light* light : lights) {
-        if (const auto* area = dynamic_cast<const AreaLight*>(light)) {
-            float pdf = area->pdfLi(ref, pLight);
-            if (pdf > 0.0f) return pdf;
-        } else if (const auto* mesh = dynamic_cast<const MeshLight*>(light)) {
-            float pdf = mesh->pdfLi(ref, pLight);
-            if (pdf > 0.0f) return pdf;
-        }
-    }
-    return 0.0f;
-}
-
 float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sampler,
                float strength, int samples) {
     if (strength <= 0.0f || samples <= 0) return 1.0f;
@@ -150,6 +136,55 @@ bool russianRoulette(Color3f& throughput, Sampler& sampler) {
     return true;
 }
 
+/// Bir köşede ışık seçme dağılımı. Her ışığın o noktaya tahmini katkısı (Light::importance)
+/// ile orantılı + %15 düzgün taban: tahmin kötüyse (gölge, parlak yüzey) bile hiçbir ışık
+/// aç kalmaz ve tahminci yansız kalır. Sıra: lights() sonra ortam. 32'den çok ışıkta
+/// (yayıcı mesh kalabalığı) O(N) maliyet yerine düzgün seçime dönülür.
+struct LightPicker {
+    static constexpr int kMaxAdaptive = 33;
+    float pmfs[kMaxAdaptive]{};
+    int count = 0;
+    bool uniform = true;
+
+    void build(const std::vector<const Light*>& lights, const EnvironmentLight* env, const Vec3f& p, const Vec3f& n) {
+        count = static_cast<int>(lights.size()) + (env ? 1 : 0);
+        uniform = count <= 1 || count > kMaxAdaptive;
+        if (uniform) return;
+        float sum = 0.0f;
+        for (int i = 0; i < count; ++i) {
+            const Light* l = i < static_cast<int>(lights.size()) ? lights[static_cast<size_t>(i)] : env;
+            const float w = l->importance(p, n);
+            pmfs[i] = (w > 0.0f && std::isfinite(w)) ? w : 0.0f;
+            sum += pmfs[i];
+        }
+        if (!(sum > 0.0f) || !std::isfinite(sum)) {
+            uniform = true;
+            return;
+        }
+        const float a = 0.85f / sum, b = 0.15f / static_cast<float>(count);
+        for (int i = 0; i < count; ++i) pmfs[i] = pmfs[i] * a + b;
+    }
+
+    float pmf(int i) const { return uniform ? 1.0f / static_cast<float>(count) : pmfs[i]; }
+
+    int sample(float u, float& pmfOut) const {
+        if (uniform) {
+            pmfOut = 1.0f / static_cast<float>(count);
+            return std::min(static_cast<int>(u * static_cast<float>(count)), count - 1);
+        }
+        float acc = 0.0f;
+        for (int i = 0; i < count - 1; ++i) {
+            acc += pmfs[i];
+            if (u < acc) {
+                pmfOut = pmfs[i];
+                return i;
+            }
+        }
+        pmfOut = pmfs[count - 1];
+        return count - 1;
+    }
+};
+
 } // namespace
 
 bool PathTracer::randomWalkSubsurface(const Scene& scene, const SurfaceInteraction& entry, const Vec3f& dir,
@@ -229,9 +264,11 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
     const auto& lights = scene.lights();
     const int explicitLights = static_cast<int>(lights.size());
     const int lightCount = explicitLights + (env ? 1 : 0);
-    // Düzgün ışık seçimi: her ışığın seçilme olasılığı 1/lightCount.
-    const float lightPmf = lightCount > 0 ? 1.0f / static_cast<float>(lightCount) : 0.0f;
+    // Işık seçimi köşeye özeldir (bkz. LightPicker); MIS'te bir önceki köşenin dağılımı lazım,
+    // bu yüzden picker yalnız NEE yapılan köşede yeniden kurulur ve sonraki isabete kadar kalır.
+    LightPicker picker;
     const int shadowSamples = m_shadowQuality;
+    bool cameraRay = true; // birincil ışın ya da yalnız delta kırılmalarla devamı
 
     // Tek bir NaN/Inf katkı ilerleyen (progressive) pikseli kalıcı olarak bozar;
     // böyle bir katkıyı atlarız (bulgu lighting-10). Sonlu değerler aynen eklenir.
@@ -247,7 +284,14 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             wo = isect.normal; // Lambert çıkışı: wo yalnız yarıküre testi için
         } else {
             isect = SurfaceInteraction{};
+            const Vec3f segmentStart = currentRay.origin;
             hit = scene.intersect(currentRay, isect);
+            // Kameraya görünmez ışık dörtgenleri: kamera ışını içinden geçip devam eder.
+            for (int skip = 0; hit && cameraRay && skip < 8 && scene.cameraInvisible(isect); ++skip) {
+                currentRay = Ray(isect.point, currentRay.direction);
+                isect = SurfaceInteraction{};
+                hit = scene.intersect(currentRay, isect);
+            }
             if (firstSegment && primary) {
                 primary->hit = hit;
                 if (hit) primary->isect = isect;
@@ -257,13 +301,14 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             // Işın bir cismin içinde ilerliyorsa: soğurma ve (varsa) saçılma.
             if (const Medium* med = media.current()) {
                 const float dirLen = currentRay.direction.length();
-                const float segment = hit ? isect.t * dirLen : INFINITY_F;
+                const float segment = hit ? (isect.point - segmentStart).length() : INFINITY_F;
                 if (med->scatters()) {
                     float t = 0.0f;
                     if (sampleFreeFlight(med->sigmaT(), med->sigmaS, segment, hit, throughput, sampler, throughput, t)) {
                         if (++mediumEvents > kMaxMediumEvents || !throughput.isFinite()) break;
                         const Vec3f d = currentRay.direction / dirLen;
-                        currentRay = Ray(currentRay.origin + d * t, sampleHenyeyGreenstein(d, med->g, sampler.get2D()));
+                        currentRay = Ray(segmentStart + d * t, sampleHenyeyGreenstein(d, med->g, sampler.get2D()));
+                        cameraRay = false;
                         specularBounce = true; // içeride NEE yok → bulunan yayım tam ağırlık
                         if (mediumEvents > 8 && !russianRoulette(throughput, sampler)) break;
                         continue;
@@ -289,11 +334,48 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                     float weight = 1.0f;
                     if (!specularBounce) {
                         // BSDF örneği ortama kaçtı: NEE'nin aynı yönü bulma pdf'i ile MIS.
-                        float lightPdf = lightPmf * env->pdfLi(currentRay.direction, lastNormal);
+                        float lightPdf = picker.pmf(explicitLights) * env->pdfLi(currentRay.direction, lastNormal);
                         weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                     }
                     accumulate(throughput * Le * weight);
                 }
+                break;
+            }
+
+            // Gölge yakalayıcı: kamera zemin yerine arka planı görür, üzerine zemine düşen
+            // gölgenin oranı biner. Oran = örneklenen doğrudan ışığın görünen payı (Cycles'ın
+            // "shadow catcher"ı gibi oran tahmini). Dolaylı ışınlar zemini normal yüzey görür:
+            // nesneler zeminden sekme ışığı alır ve onu yansıtır.
+            if (cameraRay && scene.isShadowCatcher(isect)) {
+                const Background& bgd = scene.background();
+                Color3f bg;
+                if (bgd.mode == Background::Mode::Color) bg = bgd.color;
+                else if (bgd.mode == Background::Mode::Environment && env) bg = env->eval(currentRay.direction);
+                float visible = 0.0f, total = 0.0f;
+                if (lightCount > 0) {
+                    picker.build(lights, env, isect.point, isect.normal);
+                    const int n = 4 * shadowSamples;
+                    for (int k = 0; k < n; ++k) {
+                        float pmf = 0.0f;
+                        const int li = picker.sample(sampler.get1D(), pmf);
+                        const LightSample ls = li < explicitLights ? lights[static_cast<size_t>(li)]->sampleLi(isect, sampler.get2D())
+                                                                   : env->sampleLi(isect, sampler.get2D());
+                        const float cosT = ls.wi.dot(isect.normal);
+                        if (!ls.isValid() || cosT <= 0.0f) continue;
+                        const float c = ls.Li.luminance() * cosT / (pmf * ls.pdf);
+                        if (!(c > 0.0f) || !std::isfinite(c)) continue;
+                        total += c;
+                        const Ray shadow(offsetRayOrigin(isect.point, isect.normal, ls.wi), ls.wi, 1e-4f,
+                                         std::isfinite(ls.distance) && ls.distance < INFINITY_F ? ls.distance * (1.0f - 1e-4f) : 1e30f);
+                        if (!scene.intersectAny(shadow)) visible += c;
+                    }
+                }
+                const float ratio = total > 0.0f ? std::clamp(visible / total, 0.0f, 1.0f) : 1.0f;
+                if (primary && depth == 0) {
+                    primary->catcherAlpha = 1.0f - ratio;
+                    primary->catcherBackground = bg;
+                }
+                accumulate(throughput * bg * ratio);
                 break;
             }
 
@@ -304,7 +386,9 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                     if (!specularBounce) {
                         // Diffuse/glossy hit of an emissive quad: complement of NEE's weight.
                         // Kayıtlı ışık değilse (lightPdf = 0) NEE onu bulamaz → ağırlık 1.
-                        float lightPdf = lightPmf * areaLightSolidAnglePdf(lights, lastPoint, isect.point);
+                        const int li = scene.emitterIndex(isect);
+                        float lightPdf = li >= 0 ? picker.pmf(li) * lights[static_cast<size_t>(li)]->pdfLiHit(lastPoint, isect)
+                                                 : 0.0f;
                         if (lightPdf > 0.0f && lastBsdfPdf > 0.0f) {
                             weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                         }
@@ -334,8 +418,10 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
 
         const bool isSpecular = isect.material->isDelta();
         if (lightCount > 0 && !isSpecular) {
+            picker.build(lights, env, isect.point, isect.normal);
             for (int s = 0; s < shadowSamples; ++s) {
-                int lightIndex = std::min(static_cast<int>(sampler.get1D() * lightCount), lightCount - 1);
+                float lightPmf = 0.0f;
+                const int lightIndex = picker.sample(sampler.get1D(), lightPmf);
                 LightSample ls;
                 bool fromEnv = false;
 
@@ -412,6 +498,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             exitSi.material = &subsurfaceExitMaterial();
             isect = exitSi;
             pendingExit = true;
+            cameraRay = false;
             continue;
         }
 
@@ -427,6 +514,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
         lastNormal = isect.normal;
         lastPoint = isect.point;
         specularBounce = bs.delta;
+        cameraRay = cameraRay && bs.delta && wi.dot(isect.normal) < 0.0f; // yalnız delta kırılma
 
         // Hacim sınırından geçiş: wo ve wi geometrik normalin farklı taraflarındaysa ışın
         // kırıldı. Dışarıdan geldiyse cismin ortamına gir, içeriden geldiyse çık.

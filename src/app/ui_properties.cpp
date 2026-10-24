@@ -532,15 +532,18 @@ void Application::drawEnvironmentProps() {
 
     // Etkin HDRI'ın önizlemesi.
     {
-        std::string key, name = "Prosedürel gökyüzü";
+        std::string key, name = e.kind == EnvironmentDesc::Kind::Sky ? "Fiziksel gök" : "Prosedürel gökyüzü";
         for (const auto& a : m_s.environments) {
-            if ((!e.hdrPath.empty() && a.path == e.hdrPath) ||
-                (e.hdrPath.empty() && a.path.empty() && a.zenith.r == e.zenith.r && a.horizon.r == e.horizon.r)) {
+            if (a.sky != (e.kind == EnvironmentDesc::Kind::Sky)) continue;
+            if ((a.sky && a.skyParams.turbidity == e.sky.turbidity &&
+                 a.skyParams.sunElevationDeg == e.sky.sunElevationDeg) ||
+                (!a.sky && !e.hdrPath.empty() && a.path == e.hdrPath) ||
+                (!a.sky && e.hdrPath.empty() && a.path.empty() && a.zenith.r == e.zenith.r && a.horizon.r == e.horizon.r)) {
                 key = "env:" + a.id;
                 name = a.name;
             }
         }
-        if (key.empty() && !e.hdrPath.empty()) name = ui::fileName(e.hdrPath);
+        if (key.empty() && !e.hdrPath.empty() && e.kind == EnvironmentDesc::Kind::Image) name = ui::fileName(e.hdrPath);
         const float wImg = ImGui::GetContentRegionAvail().x;
         ui::ThumbCard("envprev", key.empty() ? 0 : m_s.thumbs.texture(key), name.c_str(), ImVec2(wImg, wImg * 0.42f),
                       false, ImVec4(e.horizon.r, e.horizon.g, e.horizon.b, 1));
@@ -548,23 +551,97 @@ void Application::drawEnvironmentProps() {
         ui::Tooltip("Ortamı değiştirmek için Kütüphane → Ortam");
     }
     ImGui::Spacing();
+    {
+        int kind = e.kind == EnvironmentDesc::Kind::Sky ? 1 : 0;
+        const char* kinds[] = {"HDRI / stüdyo", "Fiziksel gök"};
+        if (ui::Segmented("envkind", &kind, kinds, 2)) {
+            pushUndo();
+            e.kind = kind == 1 ? EnvironmentDesc::Kind::Sky : EnvironmentDesc::Kind::Image;
+            changed = true;
+        }
+    }
+    if (e.kind == EnvironmentDesc::Kind::Sky && ui::Section(ICON_SUN, "Güneş ve gök")) {
+        if (ui::BeginProps("sky")) {
+            ui::Prop("Konum ve saat", "Güneşin yerini tarih, saat ve coğrafi konumdan hesapla");
+            bool loc = e.skyFromLocation;
+            if (ui::Toggle("skyloc", &loc)) {
+                pushUndo();
+                e.skyFromLocation = loc;
+                changed = true;
+            }
+            auto skySlider = [&](const char* label, const char* id, float& v, float lo, float hi, const char* fmt,
+                                 const char* tip = nullptr, ImGuiSliderFlags flags = 0) {
+                ui::Prop(label, tip);
+                if (ui::SliderF(id, &v, lo, hi, fmt, flags)) {
+                    undoPoint(*this, ImGui::GetID(id));
+                    changed = interactive = true;
+                }
+            };
+            if (e.skyFromLocation) {
+                skySlider("Enlem", "##lat", e.latitude, -89.0f, 89.0f, "%.2f°", "Kuzey +, güney − (İstanbul 41.0)");
+                skySlider("Boylam", "##lon", e.longitude, -180.0f, 180.0f, "%.2f°", "Doğu +, batı − (İstanbul 29.0)");
+                ui::Prop("Gün", "Yılın günü (1 = 1 Ocak, 172 = 21 Haziran)");
+                static const char* kMonths[] = {"Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"};
+                static const int kStart[] = {1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366};
+                int m = 0;
+                while (m < 11 && e.dayOfYear >= kStart[m + 1]) ++m;
+                char dayLabel[32];
+                std::snprintf(dayLabel, sizeof(dayLabel), "%d %s", e.dayOfYear - kStart[m] + 1, kMonths[m]);
+                int day = e.dayOfYear;
+                if (ImGui::SliderInt("##doy", &day, 1, 365, dayLabel)) {
+                    undoPoint(*this, ImGui::GetID("doy"));
+                    e.dayOfYear = day;
+                    changed = interactive = true;
+                }
+                ui::Prop("Saat");
+                char hourLabel[16];
+                const int hh = static_cast<int>(e.hour), mm = static_cast<int>((e.hour - static_cast<float>(hh)) * 60.0f);
+                std::snprintf(hourLabel, sizeof(hourLabel), "%02d:%02d", hh, mm);
+                if (ui::SliderF("##hour", &e.hour, 0.0f, 23.99f, hourLabel)) {
+                    undoPoint(*this, ImGui::GetID("hour"));
+                    changed = interactive = true;
+                }
+                skySlider("UTC farkı", "##utc", e.utcOffset, -12.0f, 14.0f, "%+.1f sa");
+                skySlider("Kuzey yönü", "##north", e.northOffsetDeg, -180.0f, 180.0f, "%.0f°",
+                          "Sahnenin kuzeyini döndürür (varsayılan: kuzey −Z)");
+                EnvironmentDesc tmp = e;
+                resolveSunPosition(tmp);
+                ui::Prop("Güneş");
+                ImGui::TextColored(pal.textDim, "yükseklik %.1f°  yön %.0f°", tmp.sky.sunElevationDeg, tmp.sky.sunAzimuthDeg);
+            } else {
+                skySlider("Yükseklik", "##sel", e.sky.sunElevationDeg, -5.0f, 90.0f, "%.1f°",
+                          "Güneşin ufuktan açısı: küçük değerler uzun gölge ve kızıl ışık verir");
+                skySlider("Yön", "##saz", e.sky.sunAzimuthDeg, -180.0f, 180.0f, "%.0f°");
+            }
+            skySlider("Pus", "##turb", e.sky.turbidity, 1.0f, 10.0f, "%.1f",
+                      "Atmosferdeki toz/nem: 2 berrak, 5+ puslu (güneş çevresinde geniş hale)");
+            skySlider("Güneş boyutu", "##ssz", e.sky.sunSizeDeg, 0.1f, 10.0f, "%.2f°",
+                      "Gerçek güneş 0.53°. Büyütmek gölgeleri yumuşatır", ImGuiSliderFlags_Logarithmic);
+            skySlider("Güneş gücü", "##sstr", e.sky.sunStrength, 0.0f, 30.0f, "%.2f", nullptr, ImGuiSliderFlags_Logarithmic);
+            skySlider("Ozon", "##oz", e.sky.ozone, 0.0f, 3.0f, "%.2f", "Alacakaranlıkta gökyüzünün maviliği");
+            skySlider("Yer yansıtması", "##galb", e.sky.groundAlbedo, 0.0f, 1.0f, "%.2f");
+            ui::EndProps();
+        }
+    }
     if (ui::Section(ICON_GLOBE, "Aydınlatma")) {
         if (ui::BeginProps("env")) {
-            ui::Prop("Parlaklık", "HDRI'ın ışık katkısı (çarpan)");
+            ui::Prop("Parlaklık", "Ortamın (HDRI ya da gök + güneş) ışık katkısı (çarpan)");
             float inten = e.intensity;
             if (ui::SliderF("##ei", &inten, 0.0f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) {
                 undoPoint(*this, ImGui::GetID("ei"));
                 e.intensity = inten;
                 changed = interactive = true;
             }
-            ui::Prop("Döndürme", "Işığın geldiği yönü değiştirir (yansımaları da kaydırır)");
-            float rot = e.rotationDeg;
-            if (ui::SliderF("##er", &rot, -180.0f, 180.0f, "%.0f°")) {
-                undoPoint(*this, ImGui::GetID("er"));
-                e.rotationDeg = rot;
-                changed = interactive = true;
+            if (e.kind == EnvironmentDesc::Kind::Image) {
+                ui::Prop("Döndürme", "Işığın geldiği yönü değiştirir (yansımaları da kaydırır)");
+                float rot = e.rotationDeg;
+                if (ui::SliderF("##er", &rot, -180.0f, 180.0f, "%.0f°")) {
+                    undoPoint(*this, ImGui::GetID("er"));
+                    e.rotationDeg = rot;
+                    changed = interactive = true;
+                }
             }
-            if (e.hdrPath.empty()) {
+            if (e.kind == EnvironmentDesc::Kind::Image && e.hdrPath.empty()) {
                 ui::Prop("Gökyüzü");
                 if (colorEdit("##zen", e.zenith)) { undoPoint(*this, ImGui::GetID("zen")); changed = interactive = true; }
                 ui::Prop("Ufuk");
@@ -614,17 +691,26 @@ void Application::drawEnvironmentProps() {
                     e.groundRoughness = r;
                     changed = interactive = true;
                 }
+                ui::Prop("Gölge yakalayıcı", "Kamera zemini değil arka planı görür; yalnız gölgeler arka planın "
+                                             "üstüne biner. Şeffaf arka planla gölgeli PNG (kompozisyon için)");
+                bool sc = e.groundShadowOnly;
+                if (ui::Toggle("gsc", &sc)) {
+                    pushUndo();
+                    e.groundShadowOnly = sc;
+                    changed = true;
+                }
             }
             ui::EndProps();
         }
-        ui::Hint("Zemin, sahnedeki modellerin altına otomatik yerleşir ve gölgeleri taşır.");
+        ui::Hint(e.groundShadowOnly ? "Gölge yakalayıcı açık: yansımalar ve sekme ışığı için zemin hâlâ vardır."
+                                    : "Zemin, sahnedeki modellerin altına otomatik yerleşir ve gölgeleri taşır.");
     }
     if (changed) markDocumentChanged(interactive);
 }
 
 void Application::drawLightProps() {
     const ui::Palette& pal = ui::palette();
-    const float bw = (ImGui::GetContentRegionAvail().x - 8.0f) / 3.0f;
+    const float bw = (ImGui::GetContentRegionAvail().x - 12.0f) / 4.0f;
     if (ui::GhostButton(ICON_LAMP_CEILING " Alan", ImVec2(bw, 0))) addLight(LightDesc::Type::Area);
     ui::Tooltip("Softbox: yumuşak gölgeli dikdörtgen ışık");
     ImGui::SameLine(0, 4);
@@ -632,6 +718,9 @@ void Application::drawLightProps() {
     ui::Tooltip("Sonsuz uzaktaki yönlü ışık: keskin gölgeler");
     ImGui::SameLine(0, 4);
     if (ui::GhostButton(ICON_LIGHTBULB " Nokta", ImVec2(bw, 0))) addLight(LightDesc::Type::Point);
+    ImGui::SameLine(0, 4);
+    if (ui::GhostButton(ICON_FLASHLIGHT " Spot", ImVec2(bw, 0))) addLight(LightDesc::Type::Spot);
+    ui::Tooltip("Koni içinde ışıyan spot; IES dosyasıyla gerçek armatür dağılımı");
     ImGui::Spacing();
 
     if (m_s.lights.empty()) {
@@ -643,7 +732,8 @@ void Application::drawLightProps() {
     for (int i = 0; i < static_cast<int>(m_s.lights.size()); ++i) {
         const LightDesc& l = m_s.lights[static_cast<size_t>(i)];
         const char* icon = l.type == LightDesc::Type::Area ? ICON_LAMP_CEILING
-                         : l.type == LightDesc::Type::Directional ? ICON_SUN : ICON_LIGHTBULB;
+                         : l.type == LightDesc::Type::Directional ? ICON_SUN
+                         : l.type == LightDesc::Type::Spot ? ICON_FLASHLIGHT : ICON_LIGHTBULB;
         char label[160];
         std::snprintf(label, sizeof(label), "%s  %s##l%d", icon, l.name.c_str(), i);
         if (ImGui::Selectable(label, m_s.selKind == SelectionKind::Light && m_s.selLight == i)) selectLight(i);
@@ -674,7 +764,7 @@ void Application::drawLightProps() {
         if (colorEdit("##lc", l.color)) { undoPoint(*this, ImGui::GetID("lc")); changed = true; }
         ui::Prop("Güç");
         float inten = l.intensity;
-        const float maxI = l.type == LightDesc::Type::Point ? 1e5f : 200.0f;
+        const float maxI = (l.type == LightDesc::Type::Point || l.type == LightDesc::Type::Spot) ? 1e5f : 200.0f;
         if (ui::SliderF("##li", &inten, 0.0f, maxI, "%.2f", ImGuiSliderFlags_Logarithmic)) {
             undoPoint(*this, ImGui::GetID("li"));
             l.intensity = inten;
@@ -703,7 +793,45 @@ void Application::drawLightProps() {
                 l.position = l.target + Vec3f(std::cos(e2) * std::cos(a), std::sin(e2), std::cos(e2) * std::sin(a)) * dist;
                 changed = true;
             }
+            if (l.type == LightDesc::Type::Spot) {
+                ui::Prop("Koni açısı", "Huzmenin tam açısı. 180° = koni yok, yalnız IES dağılımı");
+                if (ui::SliderF("##cone", &l.coneAngleDeg, 1.0f, 180.0f, "%.0f°")) { undoPoint(*this, ImGui::GetID("cone")); changed = true; }
+                ui::Prop("Kenar yumuşaklığı");
+                if (ui::SliderF("##blend", &l.coneBlend, 0.0f, 1.0f, "%.2f")) { undoPoint(*this, ImGui::GetID("blend")); changed = true; }
+                ui::Prop("IES profili", "Üreticinin yayımladığı .ies dosyası: armatürün gerçek ışık dağılımı");
+                ImGui::PushID("ies");
+                const float clearW = l.iesPath.empty() ? 0.0f : ImGui::GetFrameHeight() + 4.0f;
+                const std::string text = l.iesPath.empty() ? std::string(ICON_PLUS "  IES seç…")
+                                                           : std::string(ICON_FLASHLIGHT "  ") + ui::fileName(l.iesPath);
+                if (ImGui::Button(text.c_str(), ImVec2(ImGui::GetContentRegionAvail().x - clearW, 0))) {
+                    std::string path = l.iesPath;
+                    FileDialogFilter f[] = {{"IES profilleri", "*.ies;*.IES"}};
+                    if (showFileDialog(path, FileDialogMode::Open, "IES profili", f, 1)) {
+                        pushUndo();
+                        l.iesPath = path;
+                        changed = true;
+                    }
+                }
+                if (!l.iesPath.empty()) {
+                    ui::Tooltip(l.iesPath.c_str());
+                    ImGui::SameLine(0, 4);
+                    if (ui::IconButton(ICON_X, "Profili kaldır")) {
+                        pushUndo();
+                        l.iesPath.clear();
+                        changed = true;
+                    }
+                }
+                ImGui::PopID();
+            }
             if (l.type == LightDesc::Type::Area) {
+                ui::Prop("Kameraya görünür", "Kapalıyken softbox doğrudan bakışta görünmez; yansımalarda ve "
+                                             "aydınlatmada yine vardır (ürün çekimi için önerilir)");
+                bool vis = l.visibleToCamera;
+                if (ui::Toggle("lvis", &vis)) {
+                    pushUndo();
+                    l.visibleToCamera = vis;
+                    changed = true;
+                }
                 ui::Prop("Genişlik");
                 if (ImGui::DragFloat("##w", &l.width, std::max(1e-3f, l.width * 0.01f), 1e-3f, 1e5f, "%.3f")) { undoPoint(*this, ImGui::GetID("w")); changed = true; }
                 ui::Prop("Yükseklik ");
@@ -713,7 +841,7 @@ void Application::drawLightProps() {
         ui::EndProps();
     }
     ImGui::Spacing();
-    if (l.type == LightDesc::Type::Area) {
+    if (l.type == LightDesc::Type::Area || l.type == LightDesc::Type::Spot) {
         if (ui::GhostButton(ICON_CROSSHAIR "  Seçili parçaya yönelt")) {
             if (SceneNode* n = selectedNode()) {
                 pushUndo();

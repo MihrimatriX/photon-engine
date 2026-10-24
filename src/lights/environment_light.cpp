@@ -2,6 +2,7 @@
 #include "lights/environment_light.h"
 #include "core/math/utils.h"
 #include "core/sampling/sampling.h"
+#include "core/math/frame.h"
 
 #include <algorithm>
 #include <cmath>
@@ -9,13 +10,6 @@
 namespace photon {
 namespace {
 
-// directionToEquirect'in tersi: (u, v) → birim yön.
-Vec3f equirectToDirection(float u, float v, float rotation) {
-    float theta = v * PI;
-    float a = u * TWO_PI - PI - rotation;
-    float st = std::sin(theta);
-    return Vec3f(st * std::cos(a), std::cos(theta), -st * std::sin(a));
-}
 
 struct CdfPick {
     int index = 0;
@@ -64,6 +58,7 @@ Color3f sampleEquirect(const Image& img, float u, float v) {
 EnvironmentLight::EnvironmentLight(std::shared_ptr<const Image> envMap, float rotation, float intensity)
     : m_envMap(std::move(envMap)), m_rotation(rotation), m_intensity(intensity) {
     buildDistribution();
+    m_meanLuminance = std::max(0.0f, power().luminance() / (4.0f * PI));
 }
 
 // Önem örnekleme dağılımı. Equirect görüntüde her satır θ enlemine karşılık
@@ -124,9 +119,50 @@ void EnvironmentLight::buildDistribution() {
 // Işık örnekleme: iki rastgele sayıyla önce satır, sonra sütun seçilir.
 // Görüntü uzayındaki pdf (u,v başına) katı açıya çevrilirken Jakobiyen
 // dω = 2π·π·sin(θ) du dv kullanılır: pdf_ω = pdf_uv / (2π² sin θ).
-LightSample EnvironmentLight::sampleLi(const SurfaceInteraction&, const Vec2f& sample) const {
+void EnvironmentLight::setSun(const Vec3f& direction, float cosMax, const Color3f& radiance) {
+    m_sunDir = direction.normalized();
+    m_sunCosMax = std::clamp(cosMax, -0.999f, 0.9999999f);
+    m_sunRadiance = radiance * m_intensity;
+    const float omega = TWO_PI * (1.0f - m_sunCosMax);
+    const float sunPower = std::max(0.0f, m_sunRadiance.luminance()) * omega;
+    const float skyPower = 4.0f * PI * m_meanLuminance;
+    if (!(sunPower > 0.0f)) {
+        m_sunPdfWeight = 0.0f;
+        return;
+    }
+    // Güce orantılı, ama ikisi de aç kalmasın (gölgede gök, açıkta güneş önemli).
+    m_sunPdfWeight = std::clamp(sunPower / (sunPower + skyPower), 0.15f, 0.85f);
+    if (m_funcInt <= 0.0f) m_sunPdfWeight = 1.0f;
+}
+
+float EnvironmentLight::importance(const Vec3f& /*p*/, const Vec3f& n) const {
+    float imp = PI * m_meanLuminance;
+    if (m_sunPdfWeight > 0.0f)
+        imp += std::max(0.0f, m_sunRadiance.luminance()) * TWO_PI * (1.0f - m_sunCosMax) * receiverCosine(n, m_sunDir);
+    return imp;
+}
+
+LightSample EnvironmentLight::sampleLi(const SurfaceInteraction& si, const Vec2f& sampleIn) const {
     LightSample ls;
     ls.distance = INFINITY_F;
+    Vec2f sample = sampleIn;
+    if (m_sunPdfWeight > 0.0f) {
+        if (sample.x < m_sunPdfWeight) {
+            // Güneş konisinde düzgün yön (cosθ ∈ [cosMax, 1] düzgün).
+            const float ux = std::min(sample.x / m_sunPdfWeight, 0.99999994f);
+            const float cosT = 1.0f - ux * (1.0f - m_sunCosMax);
+            const float sinT = std::sqrt(std::max(0.0f, 1.0f - cosT * cosT));
+            const float phi = TWO_PI * sample.y;
+            const Frame f(m_sunDir);
+            ls.wi = f.toWorld(Vec3f(sinT * std::cos(phi), sinT * std::sin(phi), cosT)).normalized();
+            ls.Li = eval(ls.wi);
+            ls.pdf = pdfLi(ls.wi);
+            return ls;
+        }
+        if (m_sunPdfWeight >= 1.0f) return ls;
+        sample.x = std::min((sample.x - m_sunPdfWeight) / (1.0f - m_sunPdfWeight), 0.99999994f);
+    }
+    (void)si;
 
     if (m_marginalCdf.empty() || m_funcInt <= 0.0f || m_width <= 0) {
         ls.wi = uniformSampleSphere(sample);
@@ -141,9 +177,10 @@ LightSample EnvironmentLight::sampleLi(const SurfaceInteraction&, const Vec2f& s
 
     float theta = row.coord * PI;
     float sinTheta = std::max(std::sin(theta), 1e-6f);
-    ls.wi = equirectToDirection(col.coord, row.coord, m_rotation).normalized();
+    ls.wi = equirectDirection(col.coord, row.coord, m_rotation).normalized();
     ls.pdf = (row.pdf * col.pdf) * static_cast<float>(m_width * m_height) / (TWO_PI * PI * sinTheta);
     ls.Li = eval(ls.wi);
+    if (m_sunPdfWeight > 0.0f) ls.pdf = pdfLi(ls.wi); // karışım pdf'i (güneş + görüntü)
     return ls;
 }
 
@@ -164,20 +201,30 @@ float EnvironmentLight::solidAnglePdf(const Vec3f& wi) const {
     return (f / m_funcInt) * static_cast<float>(m_width * m_height) / (TWO_PI * PI * sinTheta);
 }
 
-float EnvironmentLight::pdfLi(const Vec3f& wi) const {
+float EnvironmentLight::imagePdf(const Vec3f& wi) const {
     return solidAnglePdf(wi);
+}
+
+float EnvironmentLight::pdfLi(const Vec3f& wi) const {
+    if (m_sunPdfWeight <= 0.0f) return solidAnglePdf(wi);
+    float pdf = 0.0f;
+    if (wi.normalized().dot(m_sunDir) >= m_sunCosMax) pdf += m_sunPdfWeight / (TWO_PI * (1.0f - m_sunCosMax));
+    if (m_sunPdfWeight < 1.0f) pdf += (1.0f - m_sunPdfWeight) * solidAnglePdf(wi);
+    return pdf;
 }
 
 float EnvironmentLight::pdfLi(const Vec3f& wi, const Vec3f&) const {
-    return solidAnglePdf(wi);
+    return pdfLi(wi);
 }
 
 Color3f EnvironmentLight::eval(const Vec3f& direction) const {
+    Color3f sun;
+    if (m_sunPdfWeight > 0.0f && direction.normalized().dot(m_sunDir) >= m_sunCosMax) sun = m_sunRadiance;
     if (!m_envMap || m_envMap->width() <= 0) {
-        return Color3f(0.5f) * m_intensity;
+        return Color3f(0.5f) * m_intensity + sun;
     }
     Vec2f uv = directionToEquirect(direction, m_rotation);
-    return sampleEquirect(*m_envMap, uv.x, uv.y) * m_intensity;
+    return sampleEquirect(*m_envMap, uv.x, uv.y) * m_intensity + sun;
 }
 
 Color3f EnvironmentLight::power() const {

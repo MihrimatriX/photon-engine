@@ -6,6 +6,7 @@
 /// @brief Distant directional light source (like the sun) in PhotonEngine.
 
 #include "lights/light.h"
+#include <algorithm>
 
 namespace photon {
 
@@ -20,6 +21,9 @@ public:
     LightSample sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const override;
     bool isDelta() const override { return true; }
     Color3f power() const override;
+    float importance(const Vec3f& /*p*/, const Vec3f& n) const override {
+        return std::max(0.0f, m_irradiance.luminance()) * receiverCosine(n, -m_direction);
+    }
 
     /// Direction light travels toward (sampleLi returns the opposite).
     const Vec3f& direction() const { return m_direction; }

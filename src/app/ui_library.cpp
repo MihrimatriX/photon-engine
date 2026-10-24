@@ -164,8 +164,12 @@ void Application::drawLibraryEnvironments() {
     grid.begin(120.0f, spacing);
     for (const auto& e : m_s.environments) {
         if (!matches(e.name, m_s.librarySearch)) continue;
-        const bool active = m_s.environment.hdrPath == e.path &&
-                            (!e.path.empty() || (m_s.environment.zenith.r == e.zenith.r && m_s.environment.horizon.r == e.horizon.r));
+        const bool isSky = m_s.environment.kind == EnvironmentDesc::Kind::Sky;
+        const bool active = e.sky ? (isSky && m_s.environment.sky.sunElevationDeg == e.skyParams.sunElevationDeg &&
+                                     m_s.environment.sky.turbidity == e.skyParams.turbidity)
+                                  : (!isSky && m_s.environment.hdrPath == e.path &&
+                                     (!e.path.empty() || (m_s.environment.zenith.r == e.zenith.r &&
+                                                          m_s.environment.horizon.r == e.horizon.r)));
         if (ui::ThumbCard(e.id.c_str(), m_s.thumbs.texture("env:" + e.id), e.name.c_str(),
                           ImVec2(grid.cell, grid.cell * 0.5f), active, ImVec4(e.horizon.r, e.horizon.g, e.horizon.b, 1)))
             applyEnvironment(e);
@@ -177,7 +181,8 @@ void Application::drawLibraryEnvironments() {
         grid.next(spacing);
     }
     ImGui::NewLine();
-    ui::Hint("HDRI'lar: Poly Haven (CC0). Kendi .hdr/.exr dosyanızı pencereye sürükleyebilirsiniz.");
+    ui::Hint("HDRI'lar: Poly Haven (CC0). Kendi .hdr/.exr dosyanızı pencereye sürükleyebilirsiniz. Fiziksel gök: "
+             "güneşi ve saati Özellikler → Ortam'dan ayarlayın.");
 }
 
 void Application::drawLibraryStudios() {

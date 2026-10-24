@@ -191,9 +191,34 @@ void Application::scanEnvironments() {
         m_s.environments.push_back(a);
     }
     // Prosedürel gökyüzleri (dosya gerektirmez).
-    m_s.environments.push_back({"proc_studio", "Stüdyo Gri (prosedürel)", "", Color3f(0.75f, 0.78f, 0.85f), Color3f(0.55f, 0.55f, 0.57f)});
-    m_s.environments.push_back({"proc_warm", "Sıcak Gün Batımı (prosedürel)", "", Color3f(0.35f, 0.42f, 0.65f), Color3f(1.0f, 0.62f, 0.38f)});
-    m_s.environments.push_back({"proc_dark", "Karanlık Stüdyo (prosedürel)", "", Color3f(0.05f, 0.05f, 0.06f), Color3f(0.12f, 0.12f, 0.13f)});
+    auto addProcedural = [&](const char* id, const char* name, const Color3f& zenith, const Color3f& horizon) {
+        EnvAsset a;
+        a.id = id;
+        a.name = name;
+        a.zenith = zenith;
+        a.horizon = horizon;
+        m_s.environments.push_back(a);
+    };
+    addProcedural("proc_studio", "Stüdyo Gri (prosedürel)", Color3f(0.75f, 0.78f, 0.85f), Color3f(0.55f, 0.55f, 0.57f));
+    addProcedural("proc_warm", "Sıcak Gün Batımı (prosedürel)", Color3f(0.35f, 0.42f, 0.65f), Color3f(1.0f, 0.62f, 0.38f));
+    addProcedural("proc_dark", "Karanlık Stüdyo (prosedürel)", Color3f(0.05f, 0.05f, 0.06f), Color3f(0.12f, 0.12f, 0.13f));
+    // Fiziksel gök hazırları (Nishita): güneş yüksekliği, yönü ve pus.
+    auto addSky = [&](const char* id, const char* name, float el, float az, float turbidity) {
+        EnvAsset a;
+        a.id = id;
+        a.name = name;
+        a.sky = true;
+        a.skyParams.sunElevationDeg = el;
+        a.skyParams.sunAzimuthDeg = az;
+        a.skyParams.turbidity = turbidity;
+        a.horizon = Color3f(0.6f, 0.7f, 0.9f);
+        m_s.environments.push_back(a);
+    };
+    addSky("sky_noon", "Öğle güneşi (fiziksel gök)", 62.0f, 60.0f, 2.2f);
+    addSky("sky_morning", "Sabah (fiziksel gök)", 18.0f, -30.0f, 2.5f);
+    addSky("sky_golden", "Altın saat (fiziksel gök)", 6.0f, 140.0f, 3.0f);
+    addSky("sky_sunset", "Gün batımı (fiziksel gök)", 1.0f, 150.0f, 3.5f);
+    addSky("sky_hazy", "Puslu gün (fiziksel gök)", 40.0f, 80.0f, 7.0f);
 }
 
 void Application::scanFolderAssets() {
@@ -226,7 +251,10 @@ void Application::loadAssets() {
     for (const auto& e : m_s.environments)
         if (e.id == "studio_small_09") studioHdr = e.path;
     m_s.thumbs.start(pathToUtf8(pathFromUtf8(m_s.userDir) / "thumbs"), studioHdr, &m_s.envCache);
-    for (const auto& e : m_s.environments) m_s.thumbs.requestEnvironment("env:" + e.id, e.path, e.zenith, e.horizon);
+    for (const auto& e : m_s.environments) {
+        if (e.sky) m_s.thumbs.requestSky("env:" + e.id, e.skyParams);
+        else m_s.thumbs.requestEnvironment("env:" + e.id, e.path, e.zenith, e.horizon);
+    }
     for (const auto& p : m_s.materials.presets()) m_s.thumbs.requestMaterial("mat:" + p.id, p);
 }
 

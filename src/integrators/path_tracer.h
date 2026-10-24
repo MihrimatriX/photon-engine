@@ -26,6 +26,10 @@ public:
     struct PrimaryHit {
         bool hit = false;
         SurfaceInteraction isect;
+        /// Kamera ışını gölge yakalayıcıya çarptıysa ≥ 0: gölgenin opaklığı (1 − görünürlük).
+        /// Şeffaf arka planda alfa budur; renk kanalı arka plan × görünürlüktür.
+        float catcherAlpha = -1.0f;
+        Color3f catcherBackground; ///< yakalayıcının yerine görünen arka plan (AOV albedo)
     };
 
     Color3f Li(const Ray& ray, const Scene& scene, Sampler& sampler) const override {

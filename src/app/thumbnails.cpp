@@ -123,6 +123,21 @@ void ThumbnailBaker::requestEnvironment(const std::string& key, const std::strin
     m_cv.notify_one();
 }
 
+void ThumbnailBaker::requestSky(const std::string& key, const SkyParams& params) {
+    Job j;
+    j.key = key;
+    j.isMaterial = false;
+    j.isSky = true;
+    j.sky = params;
+    j.sky.width = 256;
+    {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        m_jobs.push_front(j);
+        ++m_pending;
+    }
+    m_cv.notify_one();
+}
+
 bool ThumbnailBaker::uploadReady() {
     std::vector<Result> done;
     {
@@ -225,7 +240,8 @@ ThumbnailBaker::Result ThumbnailBaker::bakeEnvironment(const Job& job) {
     Result r;
     r.key = job.key;
     std::shared_ptr<const Image> src;
-    if (!job.hdrPath.empty() && m_envCache) src = m_envCache->get(job.hdrPath);
+    if (job.isSky) src = buildPhysicalSky(job.sky).image;
+    else if (!job.hdrPath.empty() && m_envCache) src = m_envCache->get(job.hdrPath);
     if (!src) src = makeProceduralSky(job.zenith, job.horizon);
     const int W = 224, H = 112;
     Image small(W, H);

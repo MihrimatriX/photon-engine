@@ -83,7 +83,13 @@ PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& int
     }
     PathTracer::PrimaryHit primary;
     out.L = integrator.Li(ray, scene, sampler, &primary);
-    if (primary.hit) {
+    if (primary.catcherAlpha >= 0.0f) {
+        // Gölge yakalayıcı: kapsama = gölgenin opaklığı; albedo = görünen arka plan.
+        out.albedo = clamp01(primary.catcherBackground);
+        const Vec3f n = primary.isect.normal;
+        out.normal = Color3f(n.x, n.y, n.z);
+        out.alpha = bg.mode == Background::Mode::Transparent ? primary.catcherAlpha : 1.0f;
+    } else if (primary.hit) {
         out.albedo = clamp01(primaryAlbedo(primary.isect));
         const Vec3f n = primary.isect.normal;
         out.normal = Color3f(n.x, n.y, n.z);

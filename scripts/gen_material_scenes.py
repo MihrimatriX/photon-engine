@@ -128,3 +128,45 @@ metals = [
                              flakes={"density": 0.6, "size": 0.006, "roughness": 0.25, "color": [1.0, 0.2, 0.15]})),
 ]
 write("materials_metal.photon", scene([m for _, m in metals], [n for n, _ in metals], spacing=1.15))
+
+
+def node(name, model, xf, material):
+    return {"name": name, "type": "group", "visible": True, "source": "../../assets/models/" + model, "xf": xf,
+            "children": [{"name": "Parça 1", "type": "mesh", "visible": True, "sourceIndex": 0, "material": material,
+                          "xf": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]}]}
+
+
+def trs(tx, ty, tz, sx=1.0, sy=None, sz=None):
+    sy = sx if sy is None else sy
+    sz = sx if sz is None else sz
+    return [sx, 0, 0, tx, 0, sy, 0, ty, 0, 0, sz, tz, 0, 0, 0, 1]
+
+
+# 3) Fiziksel gök + gölge yakalayıcı: beyaz zemin üstünde ürün (e-ticaret çekimi), altın saat.
+sky_scene = scene([preset("47_candy_red.json"), preset("20_chrome.json"), preset("63_jade.json")],
+                  ["Kırmızı küre", "Krom küre", "Yeşim küre"], spacing=1.2)
+sky_scene["lights"] = []
+sky_scene["environment"].update({
+    "kind": "sky", "intensity": 1.0,
+    "sky": {"elevation": 14.0, "azimuth": 130.0, "turbidity": 3.0, "ozone": 1.0, "groundAlbedo": 0.3,
+            "sunSize": 1.2, "sunStrength": 3.0, "fromLocation": False},
+    "background": {"mode": "color", "color": [0.92, 0.92, 0.92]},
+    "ground": {"enabled": True, "color": [0.8, 0.8, 0.8], "roughness": 0.6, "shadowCatcher": True}})
+write("sky_shadow_catcher.photon", sky_scene)
+
+# 4) Spot ve IES: karanlık oda, arka duvar, üç IES profili.
+wall_mat = disney((0.75, 0.74, 0.72), roughness=0.8)
+ies_scene = scene([wall_mat, preset("23_gold.json"), preset("62_wax.json")], ["Duvar", "Altın küre", "Mum küre"])
+ies_scene["nodes"] = [node("Duvar", "cube.obj", trs(0, 0, -1.6, 7.0, 3.2, 0.1), 0),
+                      node("Altın küre", "sphere.obj", trs(-0.8, 0.5, 0.0), 1),
+                      node("Mum küre", "sphere.obj", trs(0.8, 0.5, 0.0), 2)]
+ies_scene["environment"].update({"intensity": 0.02, "ground": {"enabled": True, "color": [0.3, 0.3, 0.3], "roughness": 0.5}})
+spots = []
+for i, (ies, x) in enumerate([("dar_spot.ies", -2.2), ("downlight_yarasa_kanadi.ies", 0.0), ("duvar_yelpaze.ies", 2.2)]):
+    spots.append({"type": "spot", "name": "Spot " + str(i + 1), "enabled": True, "color": [1.0, 0.86, 0.7],
+                  "intensity": 14.0, "position": [x, 3.0, -1.3], "target": [x, 0.0, -1.52],
+                  "width": 1, "height": 1, "azimuth": 0, "elevation": 0, "coneAngle": 180.0, "coneBlend": 0.0,
+                  "ies": "../../assets/ies/" + ies})
+ies_scene["lights"] = spots
+ies_scene["camera"].update({"radius": 6.5, "theta": 1.35})
+write("spot_ies.photon", ies_scene)

@@ -43,6 +43,7 @@ const char* lightIcon(LightDesc::Type t) {
         case LightDesc::Type::Area: return ICON_LAMP_CEILING;
         case LightDesc::Type::Directional: return ICON_SUN;
         case LightDesc::Type::Point: return ICON_LIGHTBULB;
+        case LightDesc::Type::Spot: return ICON_FLASHLIGHT;
     }
     return ICON_LIGHTBULB;
 }
@@ -135,6 +136,7 @@ void Application::drawSceneTree() {
         if (ImGui::MenuItem(ICON_LAMP_CEILING "  Alan ışığı")) addLight(LightDesc::Type::Area);
         if (ImGui::MenuItem(ICON_SUN "  Güneş")) addLight(LightDesc::Type::Directional);
         if (ImGui::MenuItem(ICON_LIGHTBULB "  Nokta ışık")) addLight(LightDesc::Type::Point);
+        if (ImGui::MenuItem(ICON_FLASHLIGHT "  Spot / IES")) addLight(LightDesc::Type::Spot);
         ImGui::EndPopup();
     }
 
@@ -390,7 +392,9 @@ void Application::drawSceneTree() {
     ImGui::SeparatorText("Ortam");
     {
         const bool sel = m_s.rightTab == 2 && m_s.selKind != SelectionKind::Node && m_s.selKind != SelectionKind::Light;
-        std::string envName = m_s.environment.hdrPath.empty() ? "Prosedürel gökyüzü" : ui::fileName(m_s.environment.hdrPath);
+        std::string envName = m_s.environment.kind == EnvironmentDesc::Kind::Sky ? "Fiziksel gök"
+                            : m_s.environment.hdrPath.empty()                  ? "Prosedürel gökyüzü"
+                                                                                : ui::fileName(m_s.environment.hdrPath);
         if (ImGui::Selectable((std::string(ICON_GLOBE "  ") + envName).c_str(), sel)) {
             clearSelection();
             m_s.rightTab = 2;
