@@ -75,12 +75,64 @@ sürüklemeleri tek adımda birleşir (`undoPoint`).
 
 ## 5. Işık taşıma (integrators/path_tracer.cpp)
 
-- Her köşede: ışık örneklemesi (NEE, ışık seçimi düzgün, MIS ağırlığında seçim olasılığı dahil) +
-  BSDF örneklemesi; ikisi güç sezgiseliyle birleşir.
-- Delta yüzeyler (`Material::isDelta()`): ayna ve pürüzsüz camda NEE yapılmaz.
-- Rus ruleti: throughput'un en büyük bileşenine göre.
-- Ortam ışığı: luminance × sin θ dağılımından 2B CDF ile önem örneklemesi.
+Tek bir `PathTracer::Li` döngüsü; her yineleme bir doğru parçası + bir yüzey köşesidir.
+
+```
+ kesişim ─► (kameraya görünmez ışık? içinden geç)
+   │
+   ├─ ortam yığınının tepesinde bir Medium varsa: Beer–Lambert / serbest uçuş
+   │     saçılma olduysa ─► HG faz yönü, 'continue' (sekme sayılmaz)
+   ├─ ıskaladı: arka plan / ortam (+ güneş konisi), MIS
+   ├─ gölge yakalayıcı + kamera ışını: arka plan × görünen ışık oranı, dur
+   ├─ yayıcı: MIS (önceki köşenin LightPicker'ı + Light::pdfLiHit, O(1))
+   ├─ ilk dispersiyonlu yüzey: λ seç, throughput ×= w(λ)/pdf
+   ├─ yuvarlatılmış kenar: gölgelendirme normali komşu yüzeylerle harmanlanır
+   ├─ NEE (delta değilse): LightPicker.build(p, n) → ışık seç → sampleLi → gölge
+   │     (ince duvarlı camda renkli geçirgenlik) → f·Li·|cos|/pdf × MIS
+   └─ BSDF: Material::sampleFull →
+         subsurface  → rastgele yürüyüş, çıkışta beyaz Lambert köşesi (NEE dahil)
+         passThrough → ince duvar: MIS durumu korunur, sekme sayılmaz
+         normal      → throughput, hacim sınırıysa ortam yığınına gir/çık, Rus ruleti
+```
+
+- **Malzeme sözleşmesi** (`materials/material.h`): `sampleFull` → `BSDFSample {wi, f, pdf, delta,
+  subsurface, passThrough, weight}`; `isVolumeBoundary`/`interiorMedium` (hacim), `isDispersive`,
+  `subsurfaceCoeffs`, `transmitsShadows`/`shadowTransmittance`, `roundEdgeRadius`.
+- **Ortamlar:** `Medium {σa, σs, g}` homojen. Renkli σt'de kanal throughput'a orantılı seçilir,
+  pdf kanalların karışımıdır (spektral MIS, PBRT-v4 §14.2). İçeride NEE yapılmaz: ışıklar kırıcı
+  sınırın dışındadır; saçılmadan sonra bulunan yayım tam ağırlık alır.
+- **SSS:** Chiang 2016 ters çevirmesi (A, d → α, σt), anizotropide benzerlik ilkesi; yürüyüş
+  `randomWalkSubsurface` (en çok 256 adım, 8. adımdan sonra Rus ruleti).
+- **Dispersiyon:** `core/color/spectral.*`: Wyman–Sloan–Shirley CIE eğrileri → doğrusal sRGB,
+  negatifler kırpılır, kanallar beyaza normalize; λ, r+g+b'ye orantılı tablodan seçilir.
+- **Işık seçimi:** `LightPicker` her köşede `Light::importance(p, n)` (kaba ışınım tahmini) ile
+  %85 orantılı + %15 düzgün karışım kurar; 33'ten çok ışıkta düzgün seçime döner. Aynı dağılım
+  bir sonraki isabette MIS için kullanılır.
+- **Alan ışığı:** `AreaLight::sampleLi` küresel dikdörtgen (Ureña 2013); Ω < 1e-3 sr'de alan örneklemesi.
+- **Ortam ışığı:** luminance × sin θ dağılımından 2B CDF + isteğe bağlı güneş konisi (karışım pdf'i).
+- **Delta yüzeyler** (`Material::isDelta()`): ayna ve pürüzsüz camda NEE yapılmaz.
+- **Rus ruleti:** throughput'un en büyük bileşenine göre. **Parlama sınırı** (isteğe bağlı) yalnız
+  ikinci ve sonraki delta-olmayan köşeden bulunan ışığa uygulanır.
 - Örnekleyici: Owen karıştırmalı Sobol (samplers/sobol_sampler.*).
+
+## 5b. Malzeme modeli (materials/)
+
+- `DisneyMaterial`: Burley difüz, VNDF örneklemeli anizotrop GGX, sheen, vernik, ince yüzey geçirgenliği,
+  SSS lobu, **F82 kenar tonu** ve **ince film** (`fresnel.h`: karmaşık Fresnel, Gulbrandsen, Airy),
+  **Turquin 2019 çoklu saçılma telafisi** (`microfacet.cpp`: 32×32 E(μ, α) tablosu), **pullar**
+  (3B Voronoi hücreleri; pulda taban yerine dar GGX lobu).
+- `Dielectric`: delta/pürüzlü cam (PBRT-v4 DielectricBxDF), iç ortam (soğurma + saçılma), Abbe
+  dispersiyonu, ince duvar (+ film).
+- Parametreler `MaterialPreset` ile taşınır; preset dosyaları ve proje dosyası aynı JSON anahtarlarını
+  kullanır (`presetAdvancedToJson/FromJson`), küçük resim önbelleği `presetSignature` ile anahtarlanır.
+
+## 5c. Ortam ve gök (lights/)
+
+- `sky_model.*`: Nishita tek saçılma (Rayleigh + Mie + ozon çadır profili), 512×256 equirect; güneş
+  diski ayrı döner (atmosfer geçirgenliğiyle renklenir). NOAA güneş konumu. `EnvironmentCache::sky`
+  son 4 sonucu tutar.
+- `EnvironmentDesc::Kind::Sky` → `buildEnvironment` gök görüntüsü + `EnvironmentLight::setSun`.
+- `spot_light.*` + `ies.*`: koni düşüşü (smoothstep) ve IES LM-63 profili (simetri katlama).
 
 ## 6. Kesişim
 
@@ -91,9 +143,15 @@ sürüklemeleri tek adımda birleşir (`undoPoint`).
 
 ## 7. Renk hattı
 
-Sahne doğrusal Rec.709. `Film` (toplam + sayı) → `resolve()` ortalama → (OIDN) → pozlama (2^EV) →
-ton eğrisi (PBR Nötr / AgX / ACES / ...) → sRGB OETF → titreşimli 8 bit. EXR çıktısı ton eşlenmemiş
-doğrusal radyanstır. Şeffaf arka planda renk önceden çarpılmış biriktiği için PNG'ye yazarken alfaya bölünür.
+Sahne doğrusal Rec.709. `Film` (toplam + sayı + parlaklık²) → `resolve()` ortalama → (OIDN) →
+**görüntüleyici** (`core/image/imager.*`: renk sapması → bloom → glare → beyaz dengesi → kontrast /
+doygunluk → vinyet) → pozlama (2^EV) → ton eğrisi (PBR Nötr / AgX / ACES / ...) → sRGB OETF →
+titreşimli 8 bit. EXR çıktısı ton eşlenmemiş ve görüntüleyicisiz doğrusal radyanstır. Şeffaf arka
+planda renk önceden çarpılmış biriktiği için PNG'ye yazarken alfaya bölünür; gölge yakalayıcıda
+alfa gölgenin opaklığıdır.
+
+Uyarlamalı örnekleme `Film::relativeError` (sqrt(var/n) / (ortalama + 0.01)) ile karar verir: son
+render'da piksel başına her 8 örnekte, ilerlemeli pass'lerde 3×3 komşulukla.
 
 ## 8. Uygulama dosyaları (src/app)
 

@@ -70,7 +70,7 @@ def scene(materials, names, spacing=1.25, hdr="studio_small_09_1k.hdr", env_inte
                       "xf": xf, "children": [{"name": "Parça 1", "type": "mesh", "visible": True, "sourceIndex": 0,
                                               "material": i, "xf": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]}]})
     target = [0.0, 0.5, 0.0]
-    radius = max(3.2, (width / 2 + 0.45) / 0.62)  # ~2.5:1 kadrajda sıra tam sığar
+    radius = max(3.2, (width / 2 + 0.6) / 0.56)  # ~2.4:1 kadrajda sıra kenarlara değmeden sığar
     lights = [area("Ana ışık", 120, 42, radius * 0.9, radius * 0.45, 7.0, target, (1.0, 0.97, 0.92)),
               area("Dolgu", 45, 25, radius * 1.1, radius * 0.6, 1.5, target),
               area("Kontur", 260, 35, radius * 0.8, radius * 0.3, 9.0, target)]
