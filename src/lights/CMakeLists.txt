@@ -5,6 +5,9 @@ add_library(photon_lights STATIC
     directional_light.cpp
     area_light.cpp
     environment_light.cpp
+    spot_light.cpp
+    ies.cpp
+    sky_model.cpp
 )
 
 target_link_libraries(photon_lights PUBLIC photon_core photon_geometry)

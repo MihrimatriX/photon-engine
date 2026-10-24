@@ -436,6 +436,14 @@ void Application::applyMaterialPreset(uint64_t nodeUid, const MaterialPreset& pr
 // HDRI dosyası önce arka planda önbelleğe yüklenir; sahne ancak sonra derlenir
 // (aksi hâlde büyük bir HDR'nin okunması UI'yi bir saniye dondururdu).
 void Application::applyEnvironment(const EnvAsset& env) {
+    if (env.sky) {
+        // Gök ~0.1 s'de hesaplanır; önbelleğe arka planda alınır.
+        runAsync("Gökyüzü hesaplanıyor: " + env.name, [this, env]() -> std::function<void()> {
+            m_s.envCache.sky(env.skyParams);
+            return [this, env] { applyEnvironmentNow(env); };
+        });
+        return;
+    }
     if (!env.path.empty()) {
         runAsync("Ortam yükleniyor: " + env.name, [this, env]() -> std::function<void()> {
             m_s.envCache.get(env.path);
@@ -448,9 +456,16 @@ void Application::applyEnvironment(const EnvAsset& env) {
 
 void Application::applyEnvironmentNow(const EnvAsset& env) {
     pushUndo();
-    m_s.environment.hdrPath = env.path;
-    m_s.environment.zenith = env.zenith;
-    m_s.environment.horizon = env.horizon;
+    if (env.sky) {
+        m_s.environment.kind = EnvironmentDesc::Kind::Sky;
+        m_s.environment.sky = env.skyParams;
+        m_s.environment.skyFromLocation = false;
+    } else {
+        m_s.environment.kind = EnvironmentDesc::Kind::Image;
+        m_s.environment.hdrPath = env.path;
+        m_s.environment.zenith = env.zenith;
+        m_s.environment.horizon = env.horizon;
+    }
     markDocumentChanged();
     setStatus("Ortam: " + env.name);
 }
@@ -462,6 +477,7 @@ void Application::applyStudio(const StudioPreset& studio) {
     if (!studio.environment.empty()) {
         for (const auto& e : m_s.environments) {
             if (e.id == studio.environment || ui::fileName(e.path) == studio.environment) {
+                m_s.environment.kind = EnvironmentDesc::Kind::Image;
                 m_s.environment.hdrPath = e.path;
                 m_s.environment.zenith = e.zenith;
                 m_s.environment.horizon = e.horizon;
@@ -488,10 +504,13 @@ void Application::addLight(LightDesc::Type type) {
     rig.distance = 2.2f;
     rig.size = 0.8f;
     rig.intensity = type == LightDesc::Type::Area ? 8.0f : type == LightDesc::Type::Directional ? 3.0f : 20.0f;
-    rig.name = type == LightDesc::Type::Area ? "Alan ışığı" : type == LightDesc::Type::Directional ? "Güneş" : "Nokta ışık";
+    rig.name = type == LightDesc::Type::Area ? "Alan ışığı"
+             : type == LightDesc::Type::Directional ? "Güneş"
+             : type == LightDesc::Type::Spot ? "Spot ışık" : "Nokta ışık";
+    if (type == LightDesc::Type::Spot) rig.elevationDeg = 60.0f; // yukarıdan konuya
     tmp.lights.push_back(rig);
     LightDesc d = placeStudioLights(tmp, box, m_s.camera.phi * RAD_TO_DEG).front();
-    if (type == LightDesc::Type::Point) {
+    if (type == LightDesc::Type::Point || type == LightDesc::Type::Spot) {
         // Nokta ışık yoğunluğu mesafenin karesiyle düşer; sahne ölçeğine göre ayarla.
         const float r = std::max(1e-3f, (box.pMax - box.pMin).length() * 0.5f);
         d.intensity *= r * r;

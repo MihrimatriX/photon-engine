@@ -15,6 +15,7 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace photon {
 
@@ -65,6 +66,24 @@ public:
     bool intersectAny(const Ray& ray) const;
 
     const std::vector<const Light*>& lights() const { return m_lightPtrs; }
+
+    /// Kesişim bir ışığın geometrisindeyse (alan ışığı dörtgeni, yayıcı mesh) o ışığın
+    /// lights() içindeki sırası; değilse −1. O(1) karma araması.
+    int emitterIndex(const SurfaceInteraction& isect) const {
+        auto it = m_emitterOfShape.find(isect.hitObject);
+        return it == m_emitterOfShape.end() ? -1 : it->second;
+    }
+
+    /// Gölge yakalayıcı yüzey (otomatik zemin). Kamera onu görmez; gölgesini görür.
+    void setShadowCatcher(const void* shape) { m_shadowCatcher = shape; }
+    bool isShadowCatcher(const SurfaceInteraction& isect) const {
+        return m_shadowCatcher && isect.hitObject == m_shadowCatcher;
+    }
+
+    /// Kamera ışınları bu yüzeyin içinden geçer mi? (kameraya görünmez ışık dörtgeni)
+    bool cameraInvisible(const SurfaceInteraction& isect) const {
+        return !m_cameraInvisible.empty() && m_cameraInvisible.count(isect.hitObject) > 0;
+    }
     const EnvironmentLight* environment() const { return m_environment.get(); }
     size_t shapeCount() const { return m_shapes.size(); }
 
@@ -94,6 +113,9 @@ private:
     // Integrator'ün hızlı erişimi için ham işaretçi önbelleği.
     std::vector<const Light*> m_lightPtrs;
     std::unordered_map<const void*, uint64_t> m_shapeOwner;
+    std::unordered_map<const void*, int> m_emitterOfShape;
+    std::unordered_set<const void*> m_cameraInvisible;
+    const void* m_shadowCatcher = nullptr;
 };
 
 } // namespace photon

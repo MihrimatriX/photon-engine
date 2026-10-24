@@ -35,6 +35,7 @@ public:
     void requestMaterial(const std::string& key, const MaterialPreset& preset, bool force = false);
     void requestEnvironment(const std::string& key, const std::string& hdrPath,
                             const Color3f& zenith, const Color3f& horizon);
+    void requestSky(const std::string& key, const SkyParams& params);
 
     /// Biten işleri GL dokusuna çevirir (UI thread'i). Yeni doku geldiyse true.
     bool uploadReady();
@@ -51,6 +52,8 @@ private:
         MaterialPreset preset;
         std::string hdrPath;
         Color3f zenith, horizon;
+        bool isSky = false;
+        SkyParams sky;
         bool force = false;
     };
     struct Result {

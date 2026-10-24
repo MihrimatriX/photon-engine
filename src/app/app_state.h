@@ -41,6 +41,8 @@ struct EnvAsset {
     std::string path;  ///< Boş = prosedürel
     Color3f zenith{0.75f, 0.8f, 0.95f};
     Color3f horizon{0.55f, 0.55f, 0.58f};
+    bool sky = false;      ///< Fiziksel gök (path ve renkler kullanılmaz)
+    SkyParams skyParams;
 };
 
 /// Son render (dosyaya) ayarları.

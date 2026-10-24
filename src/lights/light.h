@@ -44,6 +44,23 @@ public:
 
     /// @brief Approximate total power emitted by the light source.
     virtual Color3f power() const = 0;
+
+    /// p noktasına (gölgeleme normali n) bu ışıktan gelen ışınımın kaba tahmini; gölge
+    /// hesaba katılmaz. Integratör ışık seçme olasılığını buna orantılı yapar (yakındaki
+    /// güçlü softbox'a çok, arkada kalan kontur ışığına az örnek). Kesinlik gerekmez:
+    /// seçim olasılığına düzgün bir taban eklendiği için tahmin yalnız gürültüyü etkiler.
+    virtual float importance(const Vec3f& /*p*/, const Vec3f& /*n*/) const { return 1.0f; }
+
+    /// Bir BSDF ışını bu ışığın geometrisine @p hit noktasında çarptığında, @p ref'ten
+    /// sampleLi'nin aynı noktayı üretme pdf'i (katı açı). MIS ağırlığı için.
+    virtual float pdfLiHit(const Vec3f& /*ref*/, const SurfaceInteraction& /*hit*/) const { return 0.0f; }
 };
+
+/// Alıcı tarafı kosinüsü: ışık normalin arkasındaysa bile küçük bir pay bırakılır
+/// (geçirgen yüzeyler, büyük ışığın görünen kenarı).
+inline float receiverCosine(const Vec3f& n, const Vec3f& toLight) {
+    const float c = n.dot(toLight);
+    return c > 0.05f ? c : 0.05f;
+}
 
 } // namespace photon

@@ -1,6 +1,8 @@
 // point_light.cpp — Nokta ışığın örneklenmesi ve toplam gücü.
 #include "lights/point_light.h"
 #include "core/math/constants.h"
+#include <algorithm>
+#include <cmath>
 
 namespace photon {
 
@@ -24,6 +26,12 @@ LightSample PointLight::sampleLi(const SurfaceInteraction& si, const Vec2f& /*sa
 Color3f PointLight::power() const {
     // Toplam güç Φ = ∮ I dω = I · 4π (izotropik kaynak, tüm küre).
     return m_intensity * 4.0f * PI;
+}
+
+float PointLight::importance(const Vec3f& p, const Vec3f& n) const {
+    const Vec3f d = m_position - p;
+    const float d2 = std::max(d.lengthSquared(), 1e-6f);
+    return std::max(0.0f, m_intensity.luminance()) * receiverCosine(n, d / std::sqrt(d2)) / d2;
 }
 
 } // namespace photon

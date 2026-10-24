@@ -370,6 +370,32 @@ void Application::drawSelectionOutline(const ImVec2& origin, const ImVec2& size)
                 dl->AddCircle(a, 9.0f, col, 24, 1.5f);
                 dl->AddCircleFilled(a, 3.0f, col);
             }
+        } else if (l.type == LightDesc::Type::Spot) {
+            // Konum noktası + hedefe çizgi + hedefte koninin kesiti (taban çemberi).
+            if (project(vp, l.position, origin, size, a)) {
+                dl->AddCircle(a, 7.0f, col, 16, 1.5f);
+                dl->AddCircleFilled(a, 3.0f, col);
+            }
+            if (project(vp, l.position, origin, size, a) && project(vp, l.target, origin, size, b))
+                dl->AddLine(a, b, ui::col(pal.warning, 0.45f), 1.0f);
+            const Vec3f axis = l.target - l.position;
+            const float len = axis.length();
+            if (len > 1e-6f && l.coneAngleDeg < 179.0f) {
+                const Vec3f n = axis / len;
+                const Vec3f up = std::abs(n.y) > 0.95f ? Vec3f(1, 0, 0) : Vec3f(0, 1, 0);
+                const Vec3f u = up.cross(n).normalized(), v = n.cross(u);
+                const float r = len * std::tan(0.5f * l.coneAngleDeg * DEG_TO_RAD);
+                ImVec2 prev;
+                bool havePrev = false;
+                for (int i = 0; i <= 32; ++i) {
+                    const float t = TWO_PI * static_cast<float>(i) / 32.0f;
+                    ImVec2 q;
+                    const bool ok = project(vp, l.target + (u * std::cos(t) + v * std::sin(t)) * r, origin, size, q);
+                    if (ok && havePrev) dl->AddLine(prev, q, ui::col(pal.warning, 0.6f), 1.0f);
+                    prev = q;
+                    havePrev = ok;
+                }
+            }
         } else {
             // Güneş: sahne merkezinden ışığın geldiği yöne doğru bir ok.
             const AABB box = m_s.graph.worldBounds();

@@ -26,6 +26,7 @@ add_executable(photon_tests
     test_primitives.cpp
     test_media.cpp
     test_metal.cpp
+    test_lights.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE
