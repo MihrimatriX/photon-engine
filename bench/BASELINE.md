@@ -39,4 +39,4 @@ relMSE 0.0024. Düzgün örneklemenin 347 spp'deki beklenen değeri (160 spp öl
 **Yeni sahneler** (`bench/scenes/`, `scripts/gen_material_scenes.py`): `materials_volume` (SSS, renkli
 ve bulanık cam, dispersiyon), `materials_metal` (ölçülmüş metaller, ince film, pullar), `sky_shadow_catcher`,
 `spot_ies`, `bokeh_imager`, `features_misc` (yuvarlatılmış kenar, sabun köpüğü, ince pencere).
-1200×500, 320 spp, `--clamp 20` render'ları `docs/img/v2-*.jpg`.
+1200×500, 320 spp, 12 sekme, gürültü giderme kapalı render'ları `docs/img/v2-*.jpg`. 4 iş parçacığında süreler: `materials_volume` 174 sn, `materials_metal` 162 sn, `features_misc` 205 sn.
