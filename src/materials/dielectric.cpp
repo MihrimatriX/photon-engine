@@ -193,7 +193,8 @@ bool Dielectric::sampleFull(const Vec3f& wo, const SurfaceInteraction& si, float
 }
 
 float Dielectric::iorAt(const SurfaceInteraction& si) const {
-    return (m_abbe > 0.0f && si.wavelength > 0.0f) ? cauchyIor(m_ior, m_abbe, si.wavelength) : m_ior;
+    if (m_abbe <= 0.0f || si.wavelength <= 0.0f) return m_ior;
+    return std::max(1.0001f, cauchyIor(m_ior, m_abbe, si.wavelength));
 }
 
 bool Dielectric::sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& sample,
@@ -218,9 +219,10 @@ bool Dielectric::sampleWithLobe(const Vec3f& woWorld, const SurfaceInteraction& 
         // döner: brdf·|cosθ|/pdf = F/F = 1 (yansıma) veya (1-F)·eta²/(1-F) (kırılma).
         float F = fresnelDielectric(wo.z, 1.0f, ior);
         Vec3f wiLocal(-wo.x, -wo.y, wo.z);
+        Color3f weight; // f·|cos|/pdf ile pdf'in çarpımı (lobun enerji payı)
         if (uc < F) {
             pdf = F;
-            brdf = m_tint * (F / std::abs(wiLocal.z));
+            weight = m_tint * F;
         } else {
             Vec3f n(0.0f, 0.0f, entering ? 1.0f : -1.0f);
             // wo yüzeyden DIŞARI bakar ve n ile aynı taraftadır (core-1 düzeltmesi:
@@ -229,16 +231,21 @@ bool Dielectric::sampleWithLobe(const Vec3f& woWorld, const SurfaceInteraction& 
                 // TIR'de F = 1 olduğundan buraya yalnızca yuvarlama ile düşülür.
                 wiLocal = Vec3f(-wo.x, -wo.y, wo.z);
                 pdf = 1.0f;
-                brdf = m_tint / std::abs(wiLocal.z);
+                weight = m_tint;
             } else {
                 pdf = 1.0f - F;
                 // Radyans ölçeklemesi (materials-4): sınırda L/η² korunur, yani
                 // L(wo) = (1-F)·L(wi)·(η_wo/η_wi)² = (1-F)·L(wi)·eta². Kamera ışını
                 // cama girerken (wo havada) eta = 1/ior → 1/ior² (eskiden ior² idi).
-                brdf = m_tint * ((1.0f - F) * eta * eta / std::abs(wiLocal.z));
+                weight = m_tint * ((1.0f - F) * eta * eta);
             }
         }
         wi = g.frame.toWorld(wiLocal).normalized();
+        // Delta değer, integratörün çarptığı kosinüse (si.normal) göre yazılır: çerçeve
+        // gölgelendirme normalinden geometrik normale düştüğünde (silüet) |wi·n| farklıdır;
+        // yerel cosθ'ya bölmek her böyle sekmede throughput'u |wi·ns|/|wi·ng| kadar şişirirdi
+        // (yumuşak normalli camın içindeki saçan ortamda patlıyordu).
+        brdf = weight / std::max(std::abs(wi.dot(si.normal)), 1e-6f);
         return true;
     }
 

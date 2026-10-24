@@ -88,6 +88,13 @@ PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& int
         out.alpha = bg.mode == Background::Mode::Transparent ? primary.catcherAlpha : 1.0f;
     } else if (primary.hit) {
         out.albedo = clamp01(primaryAlbedo(primary.isect));
+        if (primary.coverage >= 0.0f) {
+            // İnce camın arkasındaki şeffaf fon: kısmi kapsama.
+            out.alpha = primary.coverage;
+            const Vec3f n = primary.isect.normal;
+            out.normal = Color3f(n.x, n.y, n.z);
+            return out;
+        }
         const Vec3f n = primary.isect.normal;
         out.normal = Color3f(n.x, n.y, n.z);
         out.alpha = 1.0f;

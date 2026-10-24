@@ -30,6 +30,9 @@ public:
         /// Şeffaf arka planda alfa budur; renk kanalı arka plan × görünürlüktür.
         float catcherAlpha = -1.0f;
         Color3f catcherBackground; ///< yakalayıcının yerine görünen arka plan (AOV albedo)
+        /// ≥ 0: kamera ışını ince duvarlı camlardan düz geçip şeffaf arka plana ulaştı;
+        /// kapsama (alfa) = camın geçirmediği oran.
+        float coverage = -1.0f;
     };
 
     Color3f Li(const Ray& ray, const Scene& scene, Sampler& sampler) const override {

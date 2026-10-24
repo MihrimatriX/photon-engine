@@ -7,6 +7,8 @@
 
 #include "materials/material.h"
 
+#include <algorithm>
+
 namespace photon {
 
 /// @brief Glass-like dielectric refraction and reflection material.
@@ -68,7 +70,8 @@ public:
 
     // ── Dispersiyon ─────────────────────────────────────────────────────────
     /// Abbe sayısı (0 = dispersiyon yok). Küçüldükçe beyaz ışık daha çok renge ayrılır.
-    void setAbbe(float abbe) { m_abbe = abbe > 0.0f ? abbe : 0.0f; }
+    /// Gerçek camlarda V ≈ 17–95; 10'un altı Cauchy yaklaşımında kırmızıda n < 1 verir.
+    void setAbbe(float abbe) { m_abbe = abbe > 0.0f ? std::max(abbe, 10.0f) : 0.0f; }
     float abbe() const { return m_abbe; }
     bool isDispersive() const override { return m_abbe > 0.0f; }
     /// Bu kesişimde geçerli kırılma indisi (yolun dalga boyuna göre).

@@ -245,3 +245,33 @@ TEST(ShadowCatcher, ShowsBackgroundDarkenedOnlyInShadow) {
     EXPECT_NEAR(dark.first.r, 0.0f, 1e-3f); // tam gölgede: siyah
     EXPECT_NEAR(dark.second, 1.0f, 1e-3f);
 }
+
+// Regresyon: yakın alan ışığının altında gölge yakalayıcı kendi ışığının dörtgenine çarpan
+// gölge ışını yüzünden tamamen kararıyordu (ışık ~1 birimden yakınken).
+TEST(ShadowCatcher, NearAreaLightDoesNotShadowItself) {
+    for (float h : {0.3f, 0.8f, 3.0f}) {
+        Scene scene;
+        DisneyMaterial ground(Color3f(0.5f), 0.0f, 0.5f, 0.5f);
+        auto quad = std::make_shared<TriangleMesh>(
+            std::vector<Vec3f>{{-5, 0, -5}, {5, 0, -5}, {5, 0, 5}, {-5, 0, 5}}, std::vector<Vec3f>{},
+            std::vector<Vec2f>{}, std::vector<uint32_t>{0, 2, 1, 0, 3, 2}, &ground);
+        scene.setShadowCatcher(quad.get());
+        scene.addShape(quad);
+        scene.addLight(std::make_shared<AreaLight>(Vec3f(-0.25f, h, -0.25f), Vec3f(0.5f, 0, 0), Vec3f(0, 0, 0.5f),
+                                                   Color3f(10.0f)));
+        Background bg;
+        bg.mode = Background::Mode::Transparent;
+        scene.setBackground(bg);
+        scene.buildAccelerator();
+        PathTracer pt(4);
+        IndependentSampler sampler(4);
+        float alpha = 0.0f;
+        for (int i = 0; i < 200; ++i) {
+            PathTracer::PrimaryHit ph;
+            pt.Li(Ray(Vec3f(0.05f, h * 0.5f, 2.0f), (Vec3f(0.05f, 0, 0.02f) - Vec3f(0.05f, h * 0.5f, 2.0f)).normalized()),
+                  scene, sampler, &ph);
+            alpha += ph.catcherAlpha;
+        }
+        EXPECT_NEAR(alpha / 200.0f, 0.0f, 0.01f) << "ışık yüksekliği " << h;
+    }
+}
