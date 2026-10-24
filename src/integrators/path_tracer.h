@@ -50,6 +50,10 @@ public:
                                      const SubsurfaceCoeffs& coeffs, Sampler& sampler, Color3f& throughput,
                                      SurfaceInteraction& exitSi);
 
+    /// Test kancası: yuvarlatılmış kenar normali (integratörün ilk köşelerde kullandığı hesap).
+    static Vec3f roundedEdgeNormalForTest(const Scene& scene, const SurfaceInteraction& isect, float radius,
+                                          Sampler& sampler);
+
     /// Dolaylı katkıları (ışık ikinci ve sonraki köşelerden bulunduysa) en büyük bileşeni
     /// @p limit olacak şekilde kırpar. 0 = kapalı. Yanlıdır ama kostik parlamaları söndürür.
     void setClampIndirect(float limit) { m_clampIndirect = limit > 0.0f ? limit : 0.0f; }

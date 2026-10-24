@@ -136,6 +136,64 @@ bool russianRoulette(Color3f& throughput, Sampler& sampler) {
     return true;
 }
 
+/// Gölge ışınının geçirgenliği: ince duvarlı camlar (doğrultu değiştirmeyen yüzeyler)
+/// renkli geçirgenlikle aşılır, başka her yüzey ışığı tamamen keser. Sahnede böyle bir
+/// malzeme yoksa hızlı "herhangi bir isabet" testi kullanılır.
+Color3f shadowTransmittance(const Scene& scene, const Ray& shadow) {
+    if (!scene.hasShadowTransmitters()) return scene.intersectAny(shadow) ? Color3f::black() : Color3f(1.0f);
+    Color3f T(1.0f);
+    Vec3f origin = shadow.origin;
+    const Vec3f dir = shadow.direction;
+    float remaining = shadow.tMax;
+    for (int i = 0; i < 16; ++i) {
+        Ray r(origin, dir, shadow.tMin, remaining);
+        SurfaceInteraction hit;
+        if (!scene.intersect(r, hit)) return T;
+        if (!hit.material || !hit.material->transmitsShadows()) return Color3f::black();
+        T *= hit.material->shadowTransmittance(hit, dir);
+        if (T.isBlack()) return T;
+        origin = hit.point;
+        remaining -= hit.t;
+        if (remaining <= shadow.tMin) return T;
+    }
+    return Color3f::black();
+}
+
+/// Yuvarlatılmış kenar normali (Cycles "Bevel" düğümünün sadeleştirilmiş hali). Nokta
+/// etrafında R yarıçaplı bir diskte örnek noktalar seçilir; her birinden üç eksenden biri
+/// boyunca (normal ya da iki teğet) 2R uzunluğunda kısa ışın atılır. Aynı nesneye R'nin
+/// içinde çarpan ışınların yüzey normalleri ortalanır: düz yüzde sonuç değişmez, kenarın
+/// R yakınında komşu yüzün normali karışır ve keskin kenar yumuşak bir pah gibi parlar.
+Vec3f roundedEdgeNormal(const Scene& scene, const SurfaceInteraction& isect, float radius, Sampler& sampler) {
+    const Vec3f N = isect.normal;
+    const Frame f(N);
+    Vec3f sum = N * 0.25f; // hiç isabet yoksa (ince parça) orijinal normal kalır
+    constexpr int kSamples = 6;
+    for (int i = 0; i < kSamples; ++i) {
+        const float ua = sampler.get1D();
+        const Vec2f d = uniformSampleDisk(sampler.get2D()) * radius;
+        Vec3f axis, s, t;
+        if (ua < 0.5f) { axis = f.n; s = f.s; t = f.t; }
+        else if (ua < 0.75f) { axis = f.s; s = f.t; t = f.n; }
+        else { axis = f.t; s = f.n; t = f.s; }
+        // Eksenin iki yönünü de dene: kenarın hangi tarafta olduğunu bilmiyoruz.
+        for (float sign : {1.0f, -1.0f}) {
+            const Vec3f origin = isect.point + s * d.x + t * d.y + axis * (sign * radius);
+            Ray r(origin, axis * -sign, 0.0f, 2.0f * radius);
+            SurfaceInteraction hit;
+            if (!scene.intersect(r, hit) || hit.hitObject != isect.hitObject) continue;
+            if ((hit.point - isect.point).lengthSquared() > 2.25f * radius * radius) continue;
+            const Vec3f outward = hit.frontFace ? hit.normal : -hit.normal;
+            sum += outward * std::abs(outward.dot(axis)); // eksene dik yüzleri az say (izdüşüm)
+        }
+    }
+    // Ortalama dış normal; çarpılan yüzün ışına bakan tarafına çevrilir.
+    Vec3f n = sum.normalized();
+    const Vec3f outwardN = isect.frontFace ? N : -N;
+    if (n.dot(outwardN) < 0.0f) n = -n;
+    return isect.frontFace ? n : -n;
+}
+
 /// Bir köşede ışık seçme dağılımı. Her ışığın o noktaya tahmini katkısı (Light::importance)
 /// ile orantılı + %15 düzgün taban: tahmin kötüyse (gölge, parlak yüzey) bile hiçbir ışık
 /// aç kalmaz ve tahminci yansız kalır. Sıra: lights() sonra ortam. 32'den çok ışıkta
@@ -186,6 +244,11 @@ struct LightPicker {
 };
 
 } // namespace
+
+Vec3f PathTracer::roundedEdgeNormalForTest(const Scene& scene, const SurfaceInteraction& isect, float radius,
+                                           Sampler& sampler) {
+    return roundedEdgeNormal(scene, isect, radius, sampler);
+}
 
 bool PathTracer::randomWalkSubsurface(const Scene& scene, const SurfaceInteraction& entry, const Vec3f& dir,
                                       const SubsurfaceCoeffs& coeffs, Sampler& sampler, Color3f& throughput,
@@ -278,6 +341,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
     // Delta olmayan (difüz/parlak/yüzey altı) saçılma sayısı: kırpma "doğrudan"ı (ilk böyle
     // köşeden görülen ışık) korur; cam ve ayna zinciri doğrudanlığı bozmaz.
     int diffuseBounces = 0;
+    int passThroughs = 0;
     // Dolaylı katkı: ışığa ikinci ya da sonraki köşeden ulaşan yol (isteğe bağlı kırpma).
     auto accumulateIndirect = [&](const Color3f& c) {
         if (m_clampIndirect > 0.0f) {
@@ -293,6 +357,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
     for (;;) {
         bool hit = true;
         Vec3f wo;
+        const bool pendingExitVertex = pendingExit;
         if (pendingExit) {
             pendingExit = false;
             wo = isect.normal; // Lambert çıkışı: wo yalnız yarıküre testi için
@@ -382,7 +447,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                         total += c;
                         const Ray shadow(offsetRayOrigin(isect.point, isect.normal, ls.wi), ls.wi, 1e-4f,
                                          std::isfinite(ls.distance) && ls.distance < INFINITY_F ? ls.distance * (1.0f - 1e-4f) : 1e30f);
-                        if (!scene.intersectAny(shadow)) visible += c;
+                        visible += c * shadowTransmittance(scene, shadow).luminance();
                     }
                 }
                 const float ratio = total > 0.0f ? std::clamp(visible / total, 0.0f, 1.0f) : 1.0f;
@@ -425,6 +490,14 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             throughput *= w;
         }
         isect.wavelength = lambda;
+
+        // Yuvarlatılmış kenarlar: gölgelendirme normali komşu yüzeylerle harmanlanır (ilk üç
+        // köşede; daha derin sekmelerde görünmez, maliyete değmez). wo'yu arkada bırakan bir
+        // eğim siyah kenar yapacağından o durumda orijinal normal korunur.
+        if (depth <= 2 && isect.material->roundEdgeRadius() > 0.0f && !pendingExitVertex) {
+            const Vec3f n = roundedEdgeNormal(scene, isect, isect.material->roundEdgeRadius(), sampler);
+            if (n.dot(wo) > 0.02f) isect.normal = n;
+        }
 
         // Approximate contact AO (multiplies remaining path; cheap studio polish).
         // m_aoStrength = 0 iken tamamen etkisizdir (örnek de tüketmez).
@@ -469,8 +542,9 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
 
                 if (shadowEnd <= 1e-4f) continue;
                 Ray shadowRay(shadowOrigin, shadowDir, 1e-4f, shadowEnd);
+                const Color3f vis = shadowTransmittance(scene, shadowRay);
 
-                if (!scene.intersectAny(shadowRay)) {
+                if (!vis.isBlack()) {
                     float bsdfPdf = 0.0f;
                     Color3f f = isect.material->evalPdf(wo, ls.wi, isect, bsdfPdf);
                     // |cos|: ışık yüzeyin arkasında olabilir; BSDF geçirgense (kaba cam,
@@ -488,7 +562,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                             weight = powerHeuristic(shadowSamples, lightPdf, 1, bsdfPdf);
                         }
                         // Tahminci: f·Li·|cos| / (n_l · pdf_l), MIS ağırlığıyla.
-                        const Color3f c = throughput * f * ls.Li
+                        const Color3f c = throughput * f * ls.Li * vis
                                           * (cosTheta * weight / (lightPdf * static_cast<float>(shadowSamples)));
                         if (diffuseBounces >= 1) accumulateIndirect(c);
                         else accumulate(c);
@@ -522,6 +596,17 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
 
         if (bs.pdf <= 0.0f || bs.f.isBlack()) {
             break;
+        }
+
+        if (bs.passThrough) {
+            // İnce duvardan düz geçiş: yol bir önceki köşenin MIS durumunu korur (lastPoint,
+            // lastBsdfPdf, specularBounce değişmez). Aynı ışık gölge ışınıyla da (geçirgenlikle)
+            // bulunduğu için iki strateji böylece tutarlı tartılır.
+            throughput *= bs.f * (std::abs(bs.wi.dot(isect.normal)) / bs.pdf);
+            if (!throughput.isFinite()) break;
+            currentRay = Ray(offsetRayOrigin(isect.point, isect.normal, bs.wi), bs.wi);
+            if (++passThroughs > 64) break; // sonsuz cam yığınına karşı sigorta (sekme sayılmaz)
+            continue;
         }
 
         const Vec3f wi = bs.wi;

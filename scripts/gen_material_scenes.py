@@ -41,7 +41,8 @@ def preset(file, **overrides):
         for k in ("clearCoat", "clearCoatRoughness", "anisotropy", "sheen", "diffuseTransmission"):
             if k in p:
                 m[k] = p[k]
-    for k in ("absorption", "scattering", "abbe", "subsurface", "edgeTint", "thinFilm", "flakes"):
+    for k in ("absorption", "scattering", "abbe", "subsurface", "edgeTint", "thinFilm", "flakes", "thinWalled",
+              "roundEdges"):
         if k in p:
             m[k] = p[k]
     m.update(overrides)
@@ -193,3 +194,17 @@ bokeh["render"]["imager"] = {"bloom": 0.35, "bloomRadius": 0.03, "bloomThreshold
                              "glareBlades": 6, "glareAngle": 15.0, "glareLength": 0.12, "vignette": 0.35,
                              "whiteBalance": 6500.0, "contrast": 1.1, "saturation": 1.05}
 write("bokeh_imager.photon", bokeh)
+
+# 6) Yuvarlatılmış kenarlar, ince duvar (pencere) ve sabun köpüğü.
+plastic = preset("10_white_gloss_plastic.json")
+plastic_round = preset("10_white_gloss_plastic.json", roundEdges=0.04)
+misc = scene([plastic, plastic_round, preset("3a_soap_bubble.json"), preset("3b_window_glass.json")],
+             ["Keskin küp", "Yuvarlatılmış küp", "Sabun köpüğü", "Pencere"])
+rot45 = lambda tx, ty, tz, s: [s * 0.7071, 0, s * 0.7071, tx, 0, s, 0, ty, -s * 0.7071, 0, s * 0.7071, tz, 0, 0, 0, 1]
+misc["nodes"] = [node("Keskin küp", "cube.obj", rot45(-1.5, 0.0, 0.0, 0.8), 0),
+                 node("Yuvarlatılmış küp", "cube.obj", rot45(-0.3, 0.0, 0.0, 0.8), 1),
+                 node("Sabun köpüğü", "sphere.obj", trs(0.9, 0.55, 0.2, 1.1), 2),
+                 # Dikey pencere: 12×12'lik zemin düzlemi x ekseni etrafında 90° döndürülüp küçültülür.
+                 node("Pencere", "floor.obj", [0.12, 0, 0, 2.1, 0, 0, -0.12, 0.72, 0, 0.12, 0, -0.4, 0, 0, 0, 1], 3)]
+misc["environment"]["intensity"] = 1.0
+write("features_misc.photon", misc)

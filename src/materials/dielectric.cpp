@@ -8,6 +8,7 @@
 #include "core/math/frame.h"
 #include "core/math/utils.h"
 #include "core/color/spectral.h"
+#include "materials/fresnel.h"
 #include <algorithm>
 #include <cmath>
 
@@ -140,6 +141,55 @@ void Dielectric::rebuildMedium() {
     const Color3f ss = m_scatterColor * m_scatterDensity;
     sa += (Color3f(1.0f) - m_scatterColor) * m_scatterDensity;
     m_medium = Medium{sa, ss, m_scatterAniso};
+}
+
+// İnce duvar:
+//  - Film varsa duvarın kendisi film: hava | film (n, d) | hava, Airy toplamı (sabun köpüğü).
+//  - Yoksa iki yüzlü düz levha, iç yansımalar tutarsız (incoherent) toplanır:
+//      R_levha = R + T²R/(1 − R²) = 2R / (1 + R)        (T = 1 − R)
+Color3f Dielectric::thinWallReflectance(float cosTheta) const {
+    cosTheta = std::clamp(std::abs(cosTheta), 0.0f, 1.0f);
+    if (m_filmThickness > 0.0f) {
+        const cfloat air[3] = {cfloat(1.0f), cfloat(1.0f), cfloat(1.0f)};
+        return thinFilmRGB(cosTheta, m_ior, air, m_filmThickness);
+    }
+    const float R = fresnelDielectric(cosTheta, 1.0f, m_ior);
+    return Color3f(2.0f * R / (1.0f + R));
+}
+
+Color3f Dielectric::shadowTransmittance(const SurfaceInteraction& si, const Vec3f& dir) const {
+    if (!m_thinWalled) return Color3f::black();
+    const Vec3f n = si.ng.lengthSquared() > 0.0f ? si.ng.normalized() : si.normal;
+    return (Color3f(1.0f) - thinWallReflectance(dir.dot(n))) * m_tint;
+}
+
+bool Dielectric::sampleFull(const Vec3f& wo, const SurfaceInteraction& si, float uc, const Vec2f& u,
+                            BSDFSample& out) const {
+    out.subsurface = false;
+    out.passThrough = false;
+    if (!m_thinWalled) {
+        out.delta = isDelta();
+        return sampleWithLobe(wo, si, uc, u, out.wi, out.f, out.pdf);
+    }
+    // İnce duvar: olasılık ortalama R ile yansı, yoksa doğrultu değişmeden geç.
+    out.delta = true;
+    const Vec3f n = si.normal;
+    const float cosO = wo.dot(n);
+    if (cosO == 0.0f) return false;
+    const Color3f R = thinWallReflectance(cosO);
+    const float pr = std::clamp((R.r + R.g + R.b) / 3.0f, 1e-4f, 1.0f - 1e-4f);
+    const float c = std::abs(cosO);
+    if (uc < pr) {
+        out.wi = (n * (2.0f * cosO) - wo).normalized();
+        out.pdf = pr;
+        out.f = m_tint * R / c; // f·|cos|/pdf = tint·R/pr
+    } else {
+        out.wi = -wo;
+        out.pdf = 1.0f - pr;
+        out.f = m_tint * (Color3f(1.0f) - R) / c;
+        out.passThrough = true;
+    }
+    return true;
 }
 
 float Dielectric::iorAt(const SurfaceInteraction& si) const {

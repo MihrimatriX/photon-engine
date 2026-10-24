@@ -74,6 +74,10 @@ public:
         return it == m_emitterOfShape.end() ? -1 : it->second;
     }
 
+    /// Sahnede gölge ışınlarını geçiren (ince duvarlı cam) bir malzeme var mı? Varsa
+    /// integratör gölge testini geçirgenlik toplayan yavaş yoldan yapar.
+    bool hasShadowTransmitters() const { return m_shadowTransmitters; }
+
     /// Gölge yakalayıcı yüzey (otomatik zemin). Kamera onu görmez; gölgesini görür.
     void setShadowCatcher(const void* shape) { m_shadowCatcher = shape; }
     bool isShadowCatcher(const SurfaceInteraction& isect) const {
@@ -116,6 +120,7 @@ private:
     std::unordered_map<const void*, int> m_emitterOfShape;
     std::unordered_set<const void*> m_cameraInvisible;
     const void* m_shadowCatcher = nullptr;
+    bool m_shadowTransmitters = false;
 };
 
 } // namespace photon

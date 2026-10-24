@@ -11,6 +11,7 @@
 #include "geometry/sphere.h"
 #include "integrators/path_tracer.h"
 #include "lights/environment_light.h"
+#include "lights/area_light.h"
 #include "materials/dielectric.h"
 #include "materials/disney.h"
 #include "samplers/independent_sampler.h"
@@ -237,4 +238,75 @@ TEST(Subsurface, LobeIsSampledOnlyThroughSampleFull) {
         }
     }
     EXPECT_GT(sss, n / 10);
+}
+
+// İnce duvarlı cam (zar) kayıpsızdır: R + T = 1. Beyaz fırında Li = 1, film olsa da.
+TEST(ThinWalled, ConservesEnergyInFurnaceWithAndWithoutFilm) {
+    for (float film : {0.0f, 450.0f}) {
+        Scene scene;
+        auto pane = std::make_shared<Dielectric>(1.33f, Color3f(1.0f));
+        pane->setThinWalled(true);
+        pane->setThinFilm(film);
+        scene.retainMaterial(pane);
+        scene.addShape(std::make_shared<Sphere>(Vec3f(0.0f), 1.0f, pane.get()));
+        scene.setEnvironment(whiteFurnace());
+        scene.buildAccelerator();
+        PathTracer pt(16, 64);
+        const Color3f L = averageLi(pt, scene, Ray(Vec3f(0.3f, 0.1f, 10.0f), Vec3f(0, 0, -1)), 4000);
+        EXPECT_NEAR(L.r, 1.0f, 0.02f) << "film " << film;
+        EXPECT_NEAR(L.b, 1.0f, 0.02f) << "film " << film;
+    }
+}
+
+// İndisi 1 olan ince duvar tamamen saydamdır: ışık ile difüz zemin arasına konunca sonuç
+// cam yokkenkiyle aynı olmalı. Gölge ışını camdan geçerken BSDF ışını da geçer; MIS durumu
+// korunmasaydı ışık iki kez sayılır ve zemin parlak çıkardı.
+TEST(ThinWalled, TransparentPaneDoesNotDoubleCountLight) {
+    auto shade = [](bool withPane) {
+        Scene scene;
+        DisneyMaterial floorMat(Color3f(0.7f), 0.0f, 0.6f, 0.5f);
+        scene.addShape(makeBox(Vec3f(-5, -1, -5), Vec3f(5, 0, 5), &floorMat));
+        auto pane = std::make_shared<Dielectric>(1.0f, Color3f(1.0f));
+        pane->setThinWalled(true);
+        if (withPane) {
+            scene.retainMaterial(pane);
+            scene.addShape(std::make_shared<TriangleMesh>(
+                std::vector<Vec3f>{{-3, 1, -3}, {3, 1, -3}, {3, 1, 3}, {-3, 1, 3}}, std::vector<Vec3f>{},
+                std::vector<Vec2f>{}, std::vector<uint32_t>{0, 2, 1, 0, 3, 2}, pane.get()));
+        }
+        scene.addLight(std::make_shared<AreaLight>(Vec3f(-0.5f, 2.5f, -0.5f), Vec3f(1, 0, 0), Vec3f(0, 0, 1), Color3f(10.0f)));
+        scene.buildAccelerator();
+        PathTracer pt(3, 64);
+        return averageLi(pt, scene, Ray(Vec3f(0.2f, 0.5f, 0.3f), Vec3f(0, -1, 0)), 20000, 11);
+    };
+    const Color3f open = shade(false), pane = shade(true);
+    EXPECT_NEAR(pane.g, open.g, open.g * 0.03f);
+}
+
+// Yuvarlatılmış kenar: küpün yüz ortasında normal değişmez, kenara R'den yakın noktada
+// komşu yüze doğru eğilir.
+TEST(RoundEdges, NormalBendsOnlyNearEdges) {
+    Scene scene;
+    DisneyMaterial m(Color3f(0.5f), 0.0f, 0.5f, 0.5f);
+    m.setRoundEdgeRadius(0.1f);
+    auto box = makeBox(Vec3f(-1, -1, -1), Vec3f(1, 1, 1), &m);
+    scene.addShape(box);
+    scene.buildAccelerator();
+    // Yuvarlatma integratörün içinde yapılır; test kancası aynı hesabı üst yüzdeki
+    // birincil isabette tekrarlar (64 örneğin ortalaması).
+    auto normalAt = [&](float x) {
+        IndependentSampler rng(2);
+        Vec3f sum(0.0f);
+        for (int i = 0; i < 64; ++i) {
+            Ray r(Vec3f(x, 3.0f, 0.0f), Vec3f(0, -1, 0));
+            SurfaceInteraction si;
+            if (!scene.intersect(r, si)) continue;
+            sum += PathTracer::roundedEdgeNormalForTest(scene, si, 0.1f, rng);
+        }
+        return sum.normalized();
+    };
+    EXPECT_GT(normalAt(0.0f).y, 0.999f);   // yüz ortası
+    const Vec3f edge = normalAt(0.97f);     // kenara 0.03
+    EXPECT_LT(edge.y, 0.97f);
+    EXPECT_GT(edge.x, 0.15f);               // +X yüzüne doğru eğildi
 }
