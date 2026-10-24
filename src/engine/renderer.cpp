@@ -9,6 +9,7 @@
 #include "materials/lambertian.h"
 #include "materials/mirror.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -28,10 +29,6 @@ ThreadPool* makePoolOverride(const RenderSettings& settings, std::unique_ptr<Thr
 // Raster (x, y)'de y = 0 ÜSTTE; kameranın ekran uzayında v = 0 ALTTA.
 Vec2f rasterToScreen(float x, float y, int width, int height) {
     return Vec2f(x / static_cast<float>(width), 1.0f - y / static_cast<float>(height));
-}
-
-float luminance(const Color3f& c) {
-    return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
 }
 
 Color3f clamp01(const Color3f& c) {
@@ -142,6 +139,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
 
     std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
     PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
+    integrator.setClampIndirect(settings.clampIndirect);
     std::unique_ptr<ThreadPool> ownedPool;
     ThreadPool* pool = makePoolOverride(settings, ownedPool);
 
@@ -165,71 +163,30 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
             }
         }, settings.tileSize, pool, cancel);
     } else {
-        // ponytail: önce her yere taban SPP, kalan bütçe yüksek varyanslı piksellere.
-        // Tavan: hâlâ O(piksel × spp); yükseltme = karo düzeyinde göreli hata + erken durma.
-        const int baseSpp = std::max(4, spp / 4);
-        const int extraBudget = spp - baseSpp;
-
-        std::vector<float> sumL(static_cast<size_t>(w) * h, 0.0f);
-        std::vector<float> sumL2(static_cast<size_t>(w) * h, 0.0f);
-
+        // Uyarlamalı (gürültü eşiği): her piksel en az minAdaptiveSamples alır, sonra her 8
+        // örnekte bir göreli standart hatasına bakılır; eşiğin altına inen piksel durur. Bütçe
+        // böylece kenarlara, kostiklere ve gölgelere gider; düz fon erken biter.
+        const int minSpp = std::clamp(settings.minAdaptiveSamples, 2, spp);
+        const float threshold = std::max(1e-4f, settings.noiseThreshold);
+        std::atomic<uint64_t> taken{0};
         parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-            const uint64_t tileSeed = 12345; // karo boyutundan bağımsız, deterministik
-            std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
-
+            std::unique_ptr<Sampler> tileSampler = baseSampler->clone(12345);
+            uint64_t local = 0;
             for (int y = yBegin; y < yEnd; ++y) {
                 for (int x = xBegin; x < xEnd; ++x) {
-                    const size_t flat = static_cast<size_t>(y) * w + x;
-                    for (int s = 0; s < baseSpp; ++s) {
+                    for (int s = 0; s < spp; ++s) {
                         PixelSample ps = tracePixel(scene, camera, integrator, *tileSampler, x, y, s, w, h, wantAovs);
                         film.addSample(x, y, ps.L);
                         if (wantAovs) addAovs(&aovs, x, y, ps);
-                        float L = luminance(ps.L);
-                        sumL[flat] += L;
-                        sumL2[flat] += L * L;
+                        ++local;
+                        if (s + 1 >= minSpp && ((s + 1) & 7) == 0 && film.relativeError(x, y) < threshold) break;
                     }
                 }
             }
+            taken.fetch_add(local, std::memory_order_relaxed);
         }, settings.tileSize, pool, cancel);
-
-        if (extraBudget > 0 && !(cancel && cancel->load())) {
-            // Görüntünün ortalama varyansı eşik olur; gürültülü piksellere ek örnek.
-            double varSum = 0.0;
-            int varCount = 0;
-            for (size_t i = 0; i < sumL.size(); ++i) {
-                float mean = sumL[i] / static_cast<float>(baseSpp);
-                float var = std::max(0.0f, sumL2[i] / static_cast<float>(baseSpp) - mean * mean);
-                varSum += var;
-                ++varCount;
-            }
-            const float meanVar = varCount > 0 ? static_cast<float>(varSum / varCount) : 0.0f;
-            const float threshold = std::max(1e-6f, meanVar * 0.5f);
-
-            parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-                const uint64_t tileSeed = 12345; // aynı dizinin devamı (baseSpp + s)
-                std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
-
-                for (int y = yBegin; y < yEnd; ++y) {
-                    for (int x = xBegin; x < xEnd; ++x) {
-                        const size_t flat = static_cast<size_t>(y) * w + x;
-                        float mean = sumL[flat] / static_cast<float>(baseSpp);
-                        float var = std::max(0.0f, sumL2[flat] / static_cast<float>(baseSpp) - mean * mean);
-                        if (var < threshold) continue;
-
-                        float ratio = std::min(1.0f, var / std::max(meanVar, 1e-6f));
-                        int extras = std::max(1, static_cast<int>(std::ceil(ratio * extraBudget)));
-                        extras = std::min(extras, extraBudget);
-
-                        for (int s = 0; s < extras; ++s) {
-                            PixelSample ps = tracePixel(scene, camera, integrator, *tileSampler,
-                                                        x, y, baseSpp + s, w, h, wantAovs);
-                            film.addSample(x, y, ps.L);
-                            if (wantAovs) addAovs(&aovs, x, y, ps);
-                        }
-                    }
-                }
-            }, settings.tileSize, pool, cancel);
-        }
+        std::cout << "Uyarlamalı: ortalama " << static_cast<double>(taken.load()) / (static_cast<double>(w) * h)
+                  << " örnek/piksel (hedef " << spp << ")" << std::endl;
     }
 
     Image out = film.resolve();
@@ -281,33 +238,35 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
 
     std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
     PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
+    integrator.setClampIndirect(settings.clampIndirect);
     std::unique_ptr<ThreadPool> ownedPool;
     ThreadPool* pool = makePoolOverride(settings, ownedPool);
 
-    // Uyarlamalı örnekleme: komşularıyla kontrastı düşük pikseller bu pass'i atlar.
-    const bool adaptive = settings.adaptiveSampling && passIndex >= std::max(4, settings.samplesPerPixel / 4);
+    // Uyarlamalı örnekleme: kendisi ve 3×3 komşuları gürültü eşiğinin altına inen piksel bu
+    // pass'i atlar (komşuluk: temiz bölgenin içinde gürültülü tek piksel kalmasın).
+    const bool adaptive = settings.adaptiveSampling && passIndex >= std::max(2, settings.minAdaptiveSamples);
     std::vector<uint8_t> skipMask;
     if (adaptive) {
-        skipMask.assign(static_cast<size_t>(w) * static_cast<size_t>(h), 0);
+        const float threshold = std::max(1e-4f, settings.noiseThreshold);
+        std::vector<uint8_t> clean(static_cast<size_t>(w) * static_cast<size_t>(h), 0);
         parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-            for (int y = yBegin; y < yEnd; ++y) {
+            for (int y = yBegin; y < yEnd; ++y)
+                for (int x = xBegin; x < xEnd; ++x)
+                    clean[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] =
+                        accum.relativeError(x, y) < threshold ? 1 : 0;
+        }, 64, pool, cancel);
+        skipMask.assign(clean.size(), 0);
+        parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
+            for (int y = yBegin; y < yEnd; ++y)
                 for (int x = xBegin; x < xEnd; ++x) {
-                    float L = luminance(accum.resolvedPixel(x, y));
-                    float neighbor = 0.0f;
-                    int n = 0;
-                    for (int dy = -1; dy <= 1; ++dy) {
-                        for (int dx = -1; dx <= 1; ++dx) {
-                            int nx = x + dx, ny = y + dy;
-                            if (nx < 0 || ny < 0 || nx >= w || ny >= h || (dx == 0 && dy == 0)) continue;
-                            neighbor += luminance(accum.resolvedPixel(nx, ny));
-                            ++n;
+                    bool all = true;
+                    for (int dy = -1; dy <= 1 && all; ++dy)
+                        for (int dx = -1; dx <= 1 && all; ++dx) {
+                            const int nx = std::clamp(x + dx, 0, w - 1), ny = std::clamp(y + dy, 0, h - 1);
+                            all = clean[static_cast<size_t>(ny) * static_cast<size_t>(w) + static_cast<size_t>(nx)] != 0;
                         }
-                    }
-                    float meanN = n > 0 ? neighbor / static_cast<float>(n) : L;
-                    if (std::abs(L - meanN) < 0.02f * std::max(1.0f, meanN))
-                        skipMask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = 1;
+                    skipMask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = all ? 1 : 0;
                 }
-            }
         }, 64, pool, cancel);
     }
 

@@ -32,6 +32,20 @@ ThinLensCamera::ThinLensCamera(const Vec3f& position, const Vec3f& target, const
     m_lowerLeft = m_position - m_horizontal * 0.5f - m_vertical * 0.5f - focusDistance * m_w;
 }
 
+// Birim çembere çizilmiş düzgün N-gen içinde alan-düzgün nokta: u.x ile üçgen dilimi
+// (eşit alanlı N dilim), dilim içinde yeniden gerilmiş (u.x, u.y) ile üçgende düzgün nokta.
+Vec2f ThinLensCamera::samplePolygon(const Vec2f& u) const {
+    const float n = static_cast<float>(m_blades);
+    const float scaled = std::min(u.x * n, n - 1e-4f);
+    const float k = std::floor(scaled);
+    const float ux = scaled - k;
+    const float a0 = m_bladeRotation + TWO_PI * k / n;
+    const float a1 = a0 + TWO_PI / n;
+    const Vec2f b = uniformSampleTriangle(Vec2f(ux, u.y)); // merkez, köşe0, köşe1
+    const Vec2f v0(std::cos(a0), std::sin(a0)), v1(std::cos(a1), std::sin(a1));
+    return v0 * b.x + v1 * b.y;
+}
+
 Ray ThinLensCamera::generateRay(float u, float v, const Vec2f& lensSample) const {
     // 1. Calculate point on focal plane
     Vec3f pFocus = m_lowerLeft + u * m_horizontal + v * m_vertical;
@@ -39,7 +53,7 @@ Ray ThinLensCamera::generateRay(float u, float v, const Vec2f& lensSample) const
     // 2. Sample point on lens
     // Mercek, kamera konumunda u–v düzleminde yarıçapı m_lensRadius olan bir disktir;
     // eşmerkezli disk eşlemesi düzgün dağılım verir (yuvarlak bokeh).
-    Vec2f lensPoint2D = uniformSampleDisk(lensSample) * m_lensRadius;
+    Vec2f lensPoint2D = (m_blades >= 3 ? samplePolygon(lensSample) : uniformSampleDisk(lensSample)) * m_lensRadius;
     Vec3f lensPointWorld = m_position + m_u * lensPoint2D.x + m_v * lensPoint2D.y;
 
     // 3. Compute ray pointing from lens to focus point

@@ -13,6 +13,8 @@
 #include "lights/light.h"
 #include "lights/environment_light.h"
 #include "lights/sky_model.h"
+#include "core/image/imager.h"
+#include <nlohmann/json_fwd.hpp>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -75,6 +77,10 @@ struct EnvironmentDesc {
 
 /// Konum/saat seçiliyse güneşin yükseklik ve sahne azimutunu hesaplayıp sky'a yazar.
 void resolveSunPosition(EnvironmentDesc& env);
+
+/// Görüntüleyici ayarları ↔ proje dosyasının "render.imager" nesnesi.
+nlohmann::json imagerToJson(const ImagerSettings& s);
+ImagerSettings imagerFromJson(const nlohmann::json& j);
 
 /// LightDesc listesinden render ışıkları (yalnız etkin olanlar).
 std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& descs);

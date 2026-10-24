@@ -7,6 +7,7 @@
 // gürültü giderilir ve seçilen biçimde kaydedilir.
 #include "app/application.h"
 #include "engine/denoiser.h"
+#include "core/image/imager.h"
 #include "core/image/image_io.h"
 #include "core/math/constants.h"
 #include "core/platform/path.h"
@@ -91,6 +92,7 @@ void Application::startFinalRender() {
     const bool transparent = m_s.environment.background.mode == Background::Mode::Transparent;
     const ToneMapOperator tmo = m_s.settings.tmo;
     const float ev = m_s.settings.exposure;
+    const ImagerSettings imager = m_s.imager;
 
     job.cancel = false;
     job.spp = 0;
@@ -108,7 +110,7 @@ void Application::startFinalRender() {
     }
     job.active = true;
 
-    job.thread = std::thread([this, scene, cam, rs, out, transparent, tmo, ev]() {
+    job.thread = std::thread([this, scene, cam, rs, out, transparent, tmo, ev, imager]() {
         FinalRenderJob& j = m_s.finalJob;
         using Clock = std::chrono::steady_clock;
         const auto t0 = Clock::now();
@@ -157,8 +159,11 @@ void Application::startFinalRender() {
                     Denoiser denoiser;
                     denoiser.run(img, &albedo, &normal, Denoiser::Quality::High);
                 }
-                const bool ok = saveByFormat(img, &alpha, out.path, out.format, tmo, ev, transparent);
-                auto finalImg = std::make_shared<Image>(std::move(img));
+                // Görüntüleyici yalnız ekran çıktılarına (PNG/JPEG); EXR sahne-doğrusal ham kalır.
+                Image shown = img;
+                applyImager(shown, imager, ev);
+                const bool ok = saveByFormat(out.format == 2 ? img : shown, &alpha, out.path, out.format, tmo, ev, transparent);
+                auto finalImg = std::make_shared<Image>(std::move(shown));
                 std::lock_guard<std::mutex> lk(j.mutex);
                 j.preview = finalImg;
                 j.previewNew = true;
@@ -199,6 +204,7 @@ void Application::startTurntable() {
     const int frames = std::max(4, m_s.output.turntableFrames);
     const ToneMapOperator tmo = m_s.settings.tmo;
     const float ev = m_s.settings.exposure;
+    const ImagerSettings imager = m_s.imager;
     const CameraParams base = cameraParams();
 
     job.cancel = false;
@@ -214,7 +220,7 @@ void Application::startTurntable() {
         job.succeeded = false;
     }
     job.active = true;
-    job.thread = std::thread([this, scene, orbit, rs, frames, tmo, ev, base, dir]() {
+    job.thread = std::thread([this, scene, orbit, rs, frames, tmo, ev, imager, base, dir]() {
         FinalRenderJob& j = m_s.finalJob;
         const auto t0 = std::chrono::steady_clock::now();
         try {
@@ -227,6 +233,7 @@ void Application::startTurntable() {
                 auto camera = makeCamera(p, static_cast<float>(rs.width) / static_cast<float>(rs.height));
                 Image img = renderer.render(*scene, *camera, rs, &j.cancel);
                 if (j.cancel) break;
+                applyImager(img, imager, ev);
                 char name[32];
                 std::snprintf(name, sizeof(name), "frame_%04d.png", i);
                 saveImagePNG(img, pathToUtf8(dir / name), tmo, ev);

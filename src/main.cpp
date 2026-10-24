@@ -3,7 +3,9 @@
 //   photon_render sahne.photon  [--out render.png] [--spp 256] [--res 1920x1080]
 //   photon_render model.obj     [...]               (stüdyo ışığı + otomatik kadraj)
 //   photon_render --cornell     [...]
-// Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json
+// Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json,
+//   --noise 0.02 (uyarlamalı örnekleme: göreli hata hedefi), --min-spp N,
+//   --clamp 10 (dolaylı parlama sınırı), --time SN (süre sınırı; ilerlemeli render)
 // stats.json: süre, örnek sayısı, Mray/s (milyon birincil ışın / saniye).
 #include "scene/project_io.h"
 #include "scene/model_import.h"
@@ -14,6 +16,7 @@
 #include "camera/thin_lens_camera.h"
 #include "camera/orthographic_camera.h"
 #include "core/image/image_io.h"
+#include "core/image/imager.h"
 #include "core/math/constants.h"
 #include "core/platform/path.h"
 
@@ -43,11 +46,16 @@ struct Options {
     int threads = 0;
     int bounces = -1;
     bool denoise = true;
+    float noise = 0.0f;   ///< > 0 → uyarlamalı örnekleme
+    int minSpp = 16;
+    float clamp = -1.0f;  ///< < 0 → projedeki değer
+    float timeLimit = 0.0f;
 };
 
 void usage() {
     std::cout << "photon_render <sahne.photon | model.obj | --cornell> [--out dosya.png|.jpg|.exr] [--spp N]\n"
-                 "              [--res GxY] [--threads N] [--bounces N] [--no-denoise] [--stats stats.json]\n";
+                 "              [--res GxY] [--threads N] [--bounces N] [--no-denoise] [--stats stats.json]\n"
+                 "              [--noise 0.02] [--min-spp N] [--clamp X] [--time saniye]\n";
 }
 
 // Proje dosyasındaki orbit kamera alanlarından (hedef, yarıçap, θ, φ) kamera.
@@ -65,7 +73,9 @@ std::unique_ptr<Camera> cameraFromJson(const nlohmann::json& c, float aspect) {
     const float aperture = c.value("aperture", 0.0f);
     if (aperture > 0.0f) {
         const float focus = c.value("focusExplicit", false) ? c.value("focusDistance", r) : r;
-        return std::make_unique<ThinLensCamera>(eye, target, Vec3f(0, 1, 0), fov, aspect, aperture, focus);
+        auto cam = std::make_unique<ThinLensCamera>(eye, target, Vec3f(0, 1, 0), fov, aspect, aperture, focus);
+        cam->setApertureShape(c.value("apertureBlades", 0), c.value("bladeRotation", 0.0f));
+        return cam;
     }
     return std::make_unique<PerspectiveCamera>(eye, target, Vec3f(0, 1, 0), fov, aspect);
 }
@@ -85,6 +95,10 @@ int main(int argc, char** argv) {
         else if (a == "--no-denoise") o.denoise = false;
         else if (a == "--stats") o.stats = next();
         else if (a == "--cornell") o.cornell = true;
+        else if (a == "--noise") o.noise = static_cast<float>(std::atof(next().c_str()));
+        else if (a == "--min-spp") o.minSpp = std::max(2, std::atoi(next().c_str()));
+        else if (a == "--clamp") o.clamp = static_cast<float>(std::atof(next().c_str()));
+        else if (a == "--time") o.timeLimit = static_cast<float>(std::atof(next().c_str()));
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (!a.empty() && a[0] != '-') o.input = a;
         else { usage(); return 2; }
@@ -156,14 +170,33 @@ int main(int argc, char** argv) {
     rs.denoiseEnabled = o.denoise;
     rs.tmo = static_cast<ToneMapOperator>(data.render.value("toneMap", static_cast<int>(ToneMapOperator::PBRNeutral)));
     rs.exposure = data.render.value("exposure", 0.0f);
+    rs.adaptiveSampling = o.noise > 0.0f;
+    if (o.noise > 0.0f) rs.noiseThreshold = o.noise;
+    rs.minAdaptiveSamples = o.minSpp;
+    rs.clampIndirect = o.clamp >= 0.0f ? o.clamp : data.render.value("clampIndirect", 0.0f);
+    const ImagerSettings imager = imagerFromJson(data.render.value("imager", nlohmann::json::object()));
     auto camera = cameraFromJson(data.camera, static_cast<float>(o.width) / static_cast<float>(o.height));
 
     Renderer renderer;
     const auto tRender = std::chrono::steady_clock::now();
-    Image img = renderer.render(*scene, *camera, rs);
+    int sppDone = o.spp;
+    Image img;
+    if (o.timeLimit > 0.0f) {
+        // Süre sınırı: piksel başına birer örneklik pass'ler; süre dolunca son pass'te durur.
+        img = renderer.renderProgressive(*scene, *camera, rs, [&](const Film&, int done) {
+            sppDone = done;
+            return std::chrono::duration<float>(std::chrono::steady_clock::now() - tRender).count() < o.timeLimit;
+        });
+        // ponytail: süre dolup erken biten render'da gürültü giderme yapılmaz (renderProgressive
+        // yalnız tamamlanınca denoise eder); AOV'leri tutup burada denoise etmek sonraki adım.
+    } else {
+        img = renderer.render(*scene, *camera, rs);
+    }
     const auto tDone = std::chrono::steady_clock::now();
 
     std::string ext = pathToUtf8(pathFromUtf8(o.out).extension());
+    // Görüntüleyici (bloom, glare, beyaz dengesi...) ekran çıktılarına uygulanır; EXR ham kalır.
+    if (ext != ".exr") applyImager(img, imager, rs.exposure);
     bool ok;
     if (ext == ".exr") ok = saveImageEXR(img, o.out);
     else if (ext == ".jpg" || ext == ".jpeg") ok = saveImageJPG(img, o.out, rs.tmo, rs.exposure);
@@ -171,7 +204,7 @@ int main(int argc, char** argv) {
 
     const double loadS = std::chrono::duration<double>(tLoad - t0).count();
     const double renderS = std::chrono::duration<double>(tDone - tRender).count();
-    const double mrays = static_cast<double>(o.width) * o.height * o.spp / renderS / 1e6;
+    const double mrays = static_cast<double>(o.width) * o.height * sppDone / renderS / 1e6;
     std::cout << "Sahne: " << loadS << " sn, render: " << renderS << " sn, " << mrays << " M örnek/sn ("
               << o.width << "x" << o.height << " @ " << o.spp << " spp, " << rs.maxBounces << " sekme)\n";
     if (!o.stats.empty()) {

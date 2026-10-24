@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 
 namespace photon {
 
@@ -16,6 +17,7 @@ Film::Film(const Film& other)
     , m_height(other.m_height)
     , m_sum(other.m_sum)
     , m_count(other.m_count)
+    , m_sumSq(other.m_sumSq)
     , m_rejected(other.rejectedSamples()) {}
 
 Film& Film::operator=(const Film& other) {
@@ -24,6 +26,7 @@ Film& Film::operator=(const Film& other) {
         m_height = other.m_height;
         m_sum = other.m_sum;
         m_count = other.m_count;
+        m_sumSq = other.m_sumSq;
         m_rejected.store(other.rejectedSamples(), std::memory_order_relaxed);
     }
     return *this;
@@ -35,12 +38,14 @@ void Film::resize(int width, int height) {
     const size_t n = static_cast<size_t>(m_width) * static_cast<size_t>(m_height);
     m_sum.assign(n * 3, 0.0f);
     m_count.assign(n, 0);
+    m_sumSq.assign(n, 0.0f);
     m_rejected.store(0, std::memory_order_relaxed);
 }
 
 void Film::clear() {
     std::fill(m_sum.begin(), m_sum.end(), 0.0f);
     std::fill(m_count.begin(), m_count.end(), 0u);
+    std::fill(m_sumSq.begin(), m_sumSq.end(), 0.0f);
     m_rejected.store(0, std::memory_order_relaxed);
 }
 
@@ -61,6 +66,8 @@ void Film::addSample(int x, int y, const Color3f& L) {
     s[0] += L.r;
     s[1] += L.g;
     s[2] += L.b;
+    const float lum = L.luminance();
+    m_sumSq[flat] += lum * lum;
 }
 
 void Film::addSampleSigned(int x, int y, const Color3f& v) {
@@ -88,6 +95,17 @@ Color3f Film::resolvedPixel(int x, int y) const {
 
 int Film::sampleCount(int x, int y) const {
     return static_cast<int>(m_count[flatIndex(x, y)]);
+}
+
+float Film::relativeError(int x, int y) const {
+    const size_t flat = flatIndex(x, y);
+    const uint32_t n = m_count[flat];
+    if (n < 2) return 1e30f;
+    const float* s = &m_sum[flat * 3];
+    const float mean = (0.212671f * s[0] + 0.715160f * s[1] + 0.072169f * s[2]) / static_cast<float>(n);
+    const float meanSq = m_sumSq[flat] / static_cast<float>(n);
+    const float var = std::max(0.0f, meanSq - mean * mean) * static_cast<float>(n) / static_cast<float>(n - 1);
+    return std::sqrt(var / static_cast<float>(n)) / (std::max(mean, 0.0f) + 0.01f);
 }
 
 Image Film::resolve() const {

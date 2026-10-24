@@ -142,6 +142,33 @@ void EnvironmentCache::clear() {
     m_skies.clear();
 }
 
+nlohmann::json imagerToJson(const ImagerSettings& s) {
+    return {{"bloom", s.bloomIntensity}, {"bloomRadius", s.bloomRadius}, {"bloomThreshold", s.bloomThreshold},
+            {"glare", s.glareIntensity}, {"glareBlades", s.glareBlades}, {"glareAngle", s.glareAngleDeg},
+            {"glareLength", s.glareLength}, {"whiteBalance", s.whiteBalanceK}, {"tint", s.tint},
+            {"saturation", s.saturation}, {"contrast", s.contrast}, {"vignette", s.vignette},
+            {"chromaticAberration", s.chromaticAberration}};
+}
+
+ImagerSettings imagerFromJson(const nlohmann::json& j) {
+    ImagerSettings s;
+    if (!j.is_object()) return s;
+    s.bloomIntensity = j.value("bloom", s.bloomIntensity);
+    s.bloomRadius = j.value("bloomRadius", s.bloomRadius);
+    s.bloomThreshold = j.value("bloomThreshold", s.bloomThreshold);
+    s.glareIntensity = j.value("glare", s.glareIntensity);
+    s.glareBlades = j.value("glareBlades", s.glareBlades);
+    s.glareAngleDeg = j.value("glareAngle", s.glareAngleDeg);
+    s.glareLength = j.value("glareLength", s.glareLength);
+    s.whiteBalanceK = j.value("whiteBalance", s.whiteBalanceK);
+    s.tint = j.value("tint", s.tint);
+    s.saturation = j.value("saturation", s.saturation);
+    s.contrast = j.value("contrast", s.contrast);
+    s.vignette = j.value("vignette", s.vignette);
+    s.chromaticAberration = j.value("chromaticAberration", s.chromaticAberration);
+    return s;
+}
+
 void resolveSunPosition(EnvironmentDesc& env) {
     if (!env.skyFromLocation) return;
     float el = 0.0f, compass = 0.0f;

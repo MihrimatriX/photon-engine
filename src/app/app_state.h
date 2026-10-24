@@ -88,6 +88,7 @@ struct AppState {
     // ── Görünüm ──
     OrbitCamera camera;
     RenderSettings settings;
+    ImagerSettings imager;      ///< Bloom, glare, beyaz dengesi... (viewport ve son render)
     float resolutionScale = 1.0f;  ///< Viewport render çözünürlüğü / ekran pikseli
     int previewSpp = 0;            ///< 0 = sınırsız
     bool denoise = true;

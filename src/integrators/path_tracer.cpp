@@ -275,6 +275,20 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
     auto accumulate = [&L](const Color3f& c) {
         if (c.isFinite()) L += c;
     };
+    // Delta olmayan (difüz/parlak/yüzey altı) saçılma sayısı: kırpma "doğrudan"ı (ilk böyle
+    // köşeden görülen ışık) korur; cam ve ayna zinciri doğrudanlığı bozmaz.
+    int diffuseBounces = 0;
+    // Dolaylı katkı: ışığa ikinci ya da sonraki köşeden ulaşan yol (isteğe bağlı kırpma).
+    auto accumulateIndirect = [&](const Color3f& c) {
+        if (m_clampIndirect > 0.0f) {
+            const float m = std::max({c.r, c.g, c.b});
+            if (m > m_clampIndirect) {
+                accumulate(c * (m_clampIndirect / m));
+                return;
+            }
+        }
+        accumulate(c);
+    };
 
     for (;;) {
         bool hit = true;
@@ -337,7 +351,8 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                         float lightPdf = picker.pmf(explicitLights) * env->pdfLi(currentRay.direction, lastNormal);
                         weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                     }
-                    accumulate(throughput * Le * weight);
+                    if (diffuseBounces >= 2) accumulateIndirect(throughput * Le * weight);
+                    else accumulate(throughput * Le * weight);
                 }
                 break;
             }
@@ -393,7 +408,8 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                             weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                         }
                     }
-                    accumulate(throughput * emitted * weight);
+                    if (diffuseBounces >= 2) accumulateIndirect(throughput * emitted * weight);
+                    else accumulate(throughput * emitted * weight);
                 }
             }
         }
@@ -472,8 +488,10 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                             weight = powerHeuristic(shadowSamples, lightPdf, 1, bsdfPdf);
                         }
                         // Tahminci: f·Li·|cos| / (n_l · pdf_l), MIS ağırlığıyla.
-                        accumulate(throughput * f * ls.Li
-                                   * (cosTheta * weight / (lightPdf * static_cast<float>(shadowSamples))));
+                        const Color3f c = throughput * f * ls.Li
+                                          * (cosTheta * weight / (lightPdf * static_cast<float>(shadowSamples)));
+                        if (diffuseBounces >= 1) accumulateIndirect(c);
+                        else accumulate(c);
                     }
                 }
             }
@@ -490,7 +508,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
         if (bs.subsurface) {
             SubsurfaceCoeffs coeffs;
             if (!isect.material->subsurfaceCoeffs(isect, coeffs)) break;
-            throughput *= bs.weight;
+            throughput *= bs.weight; // yüzey altı ışığı "doğrudan" sayılır: kırpılmaz
             SurfaceInteraction exitSi;
             if (!randomWalkSubsurface(scene, isect, bs.wi, coeffs, sampler, throughput, exitSi)) break;
             // Çıkış köşesi: normal dışa, malzeme beyaz Lambert. Derinlik artmaz.
@@ -514,6 +532,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
         lastNormal = isect.normal;
         lastPoint = isect.point;
         specularBounce = bs.delta;
+        if (!bs.delta) ++diffuseBounces;
         cameraRay = cameraRay && bs.delta && wi.dot(isect.normal) < 0.0f; // yalnız delta kırılma
 
         // Hacim sınırından geçiş: wo ve wi geometrik normalin farklı taraflarındaysa ışın

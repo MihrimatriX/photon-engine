@@ -19,7 +19,19 @@ public:
 
     Ray generateRay(float u, float v, const Vec2f& lensSample) const override;
 
+    /// Diyafram kanatları: 0 = yuvarlak açıklık; ≥ 3 → düzgün çokgen (odak dışı ışıklar
+    /// gerçek objektiflerdeki gibi altıgen/sekizgen "bokeh" verir). Açı derece.
+    void setApertureShape(int blades, float rotationDeg) {
+        m_blades = blades >= 3 ? blades : 0;
+        m_bladeRotation = rotationDeg * 0.017453292519943295f;
+    }
+
 private:
+    Vec2f samplePolygon(const Vec2f& u) const;
+
+    int m_blades = 0;
+    float m_bladeRotation = 0.0f;
+
     Vec3f m_position;
     Vec3f m_horizontal;
     Vec3f m_vertical;
