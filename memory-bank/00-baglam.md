@@ -97,7 +97,8 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - **Görüntü:** görüntüleyici (bloom, glare, beyaz dengesi, kontrast, doygunluk, vinyet, renk sapması), çokgen bokeh, gürültü eşikli uyarlamalı örnekleme, dolaylı parlama sınırı; CLI `--noise/--clamp/--time`.
   - **Yuvarlatılmış kenarlar** (integratörde bevel normali) ve **ince duvarlı cam** (+ film; sabun köpüğü).
   - Arayüz: malzeme panelinde tüm yeni bölümler (cam paneli artık preset üzerinden kuruluyor: önceden IOR değişince gelişmiş alanlar kayboluyordu), Ortam'da HDRI/fiziksel gök, Işıklar'da spot/IES, Kamera'da diyafram kanatları, Görüntü'de görüntüleyici. Kütüphanede 5 fiziksel gök hazırı ve ~20 yeni malzeme.
-  - Testler 56 → 128 (fırın testleri: saçan ortam, dispersiyonlu cam, ince duvar, beyaz pürüzlü metal; küresel dikdörtgen kareleme; güneş konumu; gölge yakalayıcı; görüntüleyici; uyarlamalı hata).
+  - Testler 56 → 133 (fırın testleri: saçan ortam, dispersiyonlu cam, ince duvar, beyaz pürüzlü metal; küresel dikdörtgen kareleme; güneş konumu; gölge yakalayıcı; görüntüleyici; uyarlamalı hata).
+  - Kod incelemesi düzeltmeleri: keskin/ince duvarlı camın ağırlığı |cos θi|'ye bölünüyor (integratörün kosinüsü iki kez sayılıyordu); düz renk arka planda geçiş (pass-through) ıskası arka planı biriktiriyor; ışın başlangıç ofseti **geometrik** normal boyunca (yumuşak normalli + saçan camda fırın 0.88 → 1.0); Abbe ≥ 10, spektral IOR ≥ 1.0001; `visibleToCamera` eksik proje dosyalarında görünür.
   - Ölçüm: `bench/BASELINE.md` "Linux" bölümü; `scripts/compare_exr.py`; sahneler `scripts/gen_material_scenes.py`.
 - **Sıradaki adımlar:**
   - Windows/MSVC'de bu oturumun değişiklikleri derlenmedi (yalnız GCC 13). `/W4` uyarıları ve `std::complex` kullanımı kontrol edilmeli; OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli.
