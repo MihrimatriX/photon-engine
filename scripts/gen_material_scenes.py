@@ -29,6 +29,25 @@ def glass(ior=1.5, roughness=0.0, tint=(1, 1, 1), **extra):
     return m
 
 
+def preset(file, **overrides):
+    """assets/materials/<file> preset'ini proje malzemesine çevir (anahtarlar ortak)."""
+    with open(os.path.join(ROOT, "assets", "materials", file), encoding="utf-8") as f:
+        p = json.load(f)
+    if p.get("type") == "glass":
+        m = glass(p.get("ior", 1.5), p.get("roughness", 0.0), p.get("baseColor", (1, 1, 1)))
+    else:
+        m = disney(p.get("baseColor", (0.8, 0.8, 0.8)), p.get("metallic", 0.0), p.get("roughness", 0.5),
+                   p.get("specular", 0.5))
+        for k in ("clearCoat", "clearCoatRoughness", "anisotropy", "sheen", "diffuseTransmission"):
+            if k in p:
+                m[k] = p[k]
+    for k in ("absorption", "scattering", "abbe", "subsurface", "edgeTint", "thinFilm", "flakes"):
+        if k in p:
+            m[k] = p[k]
+    m.update(overrides)
+    return m
+
+
 def area(name, az, el, dist, size, intensity, target, color=(1, 1, 1)):
     a, e = math.radians(az), math.radians(el)
     d = (math.cos(e) * math.cos(a), math.sin(e), math.cos(e) * math.sin(a))
@@ -50,7 +69,7 @@ def scene(materials, names, spacing=1.25, hdr="studio_small_09_1k.hdr", env_inte
                       "xf": xf, "children": [{"name": "Parça 1", "type": "mesh", "visible": True, "sourceIndex": 0,
                                               "material": i, "xf": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]}]})
     target = [0.0, 0.5, 0.0]
-    radius = max(3.2, width * 1.05 + 1.6)
+    radius = max(3.2, (width / 2 + 0.45) / 0.62)  # ~2.5:1 kadrajda sıra tam sığar
     lights = [area("Ana ışık", 120, 42, radius * 0.9, radius * 0.45, 7.0, target, (1.0, 0.97, 0.92)),
               area("Dolgu", 45, 25, radius * 1.1, radius * 0.6, 1.5, target),
               area("Kontur", 260, 35, radius * 0.8, radius * 0.3, 9.0, target)]
@@ -95,3 +114,17 @@ volume = [
     ("Elmas", glass(2.42, abbe=12.0)),
 ]
 write("materials_volume.photon", scene([m for _, m in volume], [n for n, _ in volume]))
+
+# 2) Metaller ve boyalar: ölçülmüş metaller (F82 kenar tonu), ince film, pullu boyalar.
+metals = [
+    ("Krom", preset("20_chrome.json")),
+    ("Altın", preset("23_gold.json", roughness=0.25)),
+    ("Bakır", preset("24_copper.json", roughness=0.45)),
+    ("Isıl renkli titanyum", preset("29_titanium_heat_tint.json")),
+    ("Gümüş metalik boya", preset("44_silver_metallic_paint.json",
+                                  flakes={"density": 0.7, "size": 0.006, "roughness": 0.3, "color": [0.92, 0.92, 0.93]})),
+    ("Sedef", preset("46_pearlescent.json")),
+    ("Şeker kırmızı", preset("47_candy_red.json",
+                             flakes={"density": 0.6, "size": 0.006, "roughness": 0.25, "color": [1.0, 0.2, 0.15]})),
+]
+write("materials_metal.photon", scene([m for _, m in metals], [n for n, _ in metals], spacing=1.15))

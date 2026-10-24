@@ -3,8 +3,17 @@
   "name": "Pirinç",
   "category": "Metal",
   "type": "generic",
-  "baseColor": [0.91, 0.78, 0.42],
+  "baseColor": [
+    0.887,
+    0.789,
+    0.434
+  ],
   "roughness": 0.22,
   "metallic": 1,
-  "specular": 0.5
+  "specular": 0.5,
+  "edgeTint": [
+    0.956,
+    0.974,
+    1.0
+  ]
 }

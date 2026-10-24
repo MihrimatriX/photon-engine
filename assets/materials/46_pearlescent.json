@@ -1,0 +1,20 @@
+{
+  "category": "Boya",
+  "type": "generic",
+  "metallic": 0,
+  "specular": 0.5,
+  "clearCoat": 1.0,
+  "clearCoatRoughness": 0.02,
+  "id": "pearlescent",
+  "name": "Sedef (iridesan)",
+  "baseColor": [
+    0.72,
+    0.73,
+    0.76
+  ],
+  "roughness": 0.3,
+  "thinFilm": {
+    "thickness": 380,
+    "ior": 2.3
+  }
+}

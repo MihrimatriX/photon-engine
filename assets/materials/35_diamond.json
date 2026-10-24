@@ -3,9 +3,14 @@
   "name": "Elmas",
   "category": "Cam",
   "type": "glass",
-  "baseColor": [1.0, 1.0, 1.0],
+  "baseColor": [
+    1.0,
+    1.0,
+    1.0
+  ],
   "roughness": 0,
   "metallic": 0,
   "specular": 0.5,
-  "ior": 2.42
+  "ior": 2.42,
+  "abbe": 55
 }

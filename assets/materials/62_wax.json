@@ -1,0 +1,24 @@
+{
+  "category": "Yarı Saydam",
+  "type": "generic",
+  "metallic": 0,
+  "specular": 0.5,
+  "id": "wax",
+  "name": "Mum",
+  "baseColor": [
+    0.93,
+    0.84,
+    0.66
+  ],
+  "roughness": 0.38,
+  "subsurface": {
+    "weight": 1.0,
+    "radius": [
+      1.0,
+      0.6,
+      0.3
+    ],
+    "scale": 0.03,
+    "anisotropy": 0.0
+  }
+}

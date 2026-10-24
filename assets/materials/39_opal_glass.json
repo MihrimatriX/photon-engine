@@ -1,0 +1,32 @@
+{
+  "category": "Cam",
+  "type": "glass",
+  "baseColor": [
+    1,
+    1,
+    1
+  ],
+  "roughness": 0,
+  "metallic": 0,
+  "specular": 0.5,
+  "id": "opal_glass",
+  "name": "Opal Cam",
+  "ior": 1.47,
+  "absorption": {
+    "color": [
+      0.96,
+      0.9,
+      0.82
+    ],
+    "distance": 0.2
+  },
+  "scattering": {
+    "density": 60.0,
+    "color": [
+      0.98,
+      0.98,
+      1.0
+    ],
+    "anisotropy": 0.3
+  }
+}

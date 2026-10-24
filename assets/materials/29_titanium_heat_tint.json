@@ -1,0 +1,23 @@
+{
+  "baseColor": [
+    0.605,
+    0.582,
+    0.542
+  ],
+  "edgeTint": [
+    0.77,
+    0.788,
+    0.829
+  ],
+  "metallic": 1,
+  "id": "titanium_heat_tint",
+  "name": "Isıl Renkli Titanyum",
+  "category": "Metal",
+  "type": "generic",
+  "roughness": 0.12,
+  "specular": 0.5,
+  "thinFilm": {
+    "thickness": 330,
+    "ior": 2.4
+  }
+}

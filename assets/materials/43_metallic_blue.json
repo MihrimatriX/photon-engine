@@ -3,10 +3,24 @@
   "name": "Metalik Mavi",
   "category": "Boya",
   "type": "generic",
-  "baseColor": [0.08, 0.2, 0.55],
-  "roughness": 0.35,
-  "metallic": 0.6,
+  "baseColor": [
+    0.03,
+    0.09,
+    0.32
+  ],
+  "roughness": 0.4,
+  "metallic": 0.0,
   "specular": 0.5,
   "clearCoat": 1.0,
-  "clearCoatRoughness": 0.02
+  "clearCoatRoughness": 0.02,
+  "flakes": {
+    "density": 0.55,
+    "size": 0.0015,
+    "roughness": 0.35,
+    "color": [
+      0.55,
+      0.7,
+      0.95
+    ]
+  }
 }
