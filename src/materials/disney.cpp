@@ -76,7 +76,9 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
     float F90 = 0.5f + 2.0f * p.roughness * cosThetaD * cosThetaD;
     float Fo = 1.0f + (F90 - 1.0f) * pow5(1.0f - cosThetaO);
     float Fi = 1.0f + (F90 - 1.0f) * pow5(1.0f - cosThetaI);
-    Color3f fDiffuse = p.baseColor * INV_PI * Fo * Fi * (1.0f - p.metallic) * (1.0f - trans);
+    // Yüzey altı payı difüzden düşülür: o ışık giriş noktasında değil, yürüyüşün çıktığı
+    // noktada (integratörde) görünür.
+    Color3f fDiffuse = p.baseColor * INV_PI * Fo * Fi * (1.0f - p.metallic) * (1.0f - trans) * (1.0f - p.subsurface);
 
     // GGX speküler. F0: dielektrikte 0.08·specular (Burley 2012; specular = 0.5 →
     // F0 = 0.04, yani IOR 1.5). Metalde baseColor. (materials-9: eskiden 0.04·specular.)
@@ -111,13 +113,17 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
 }
 
 void lobeWeights(const DisneyMaterial::ShadingParams& p, float& pCoat, float& pSpec,
-                 float& pDiffRefl, float& pTrans) {
+                 float& pDiffRefl, float& pTrans, float* pSssOut = nullptr) {
     pCoat = 0.25f * p.clearCoat;
     pSpec = (1.0f - pCoat) * lerp(0.5f, 1.0f, p.metallic);
     float pDiff = 1.0f - pCoat - pSpec;
     float trans = std::clamp(p.diffuseTransmission, 0.0f, 1.0f) * (1.0f - p.metallic);
     pTrans = pDiff * trans;
     pDiffRefl = pDiff - pTrans;
+    // Yüzey altı lobu yansıyan difüz payından ayrılır (metalde ve tam geçirgende 0).
+    const float pSss = p.metallic < 1.0f ? pDiffRefl * p.subsurface : 0.0f;
+    pDiffRefl -= pSss;
+    if (pSssOut) *pSssOut = pSss;
 }
 
 /// sample() ile birebir aynı karışım pdf'i: Σ (lob seçme olasılığı × lob pdf'i).
@@ -216,6 +222,7 @@ DisneyMaterial::ShadingParams DisneyMaterial::resolve(const SurfaceInteraction& 
     p.anisotropy = m_anisotropy;
     p.sheen = m_sheen;
     p.diffuseTransmission = m_diffuseTransmission;
+    p.subsurface = m_subsurface;
     p.normal = si.normal;
     p.tangent = si.tangent;
     const Vec2f uv = (m_albedoTex || m_roughnessTex || m_metalnessTex || m_normalTex) ? textureCoord(si) : si.uv;
@@ -269,8 +276,8 @@ bool DisneyMaterial::sample(const Vec3f& wo, const SurfaceInteraction& si, const
         return false;
     }
 
-    float pCoat, pSpec, pDiffRefl, pTrans;
-    lobeWeights(p, pCoat, pSpec, pDiffRefl, pTrans);
+    float pCoat, pSpec, pDiffRefl, pTrans, pSss;
+    lobeWeights(p, pCoat, pSpec, pDiffRefl, pTrans, &pSss);
 
     Vec3f wiLocal;
     float xi = sample.x;
@@ -291,8 +298,11 @@ bool DisneyMaterial::sample(const Vec3f& wo, const SurfaceInteraction& si, const
     } else if (xi < pCoat + pSpec + pDiffRefl) {
         float scaledX = std::min((xi - pCoat - pSpec) / std::max(pDiffRefl, 1e-6f), 0.99999994f);
         wiLocal = cosineSampleHemisphere(Vec2f(scaledX, sample.y));
+    } else if (xi < pCoat + pSpec + pDiffRefl + pSss) {
+        // Yüzey altı lobu rastgele yürüyüş ister; yalnız sampleFull'u çağıran integratör yapar.
+        return false;
     } else {
-        float scaledX = std::min((xi - pCoat - pSpec - pDiffRefl) / std::max(pTrans, 1e-6f), 0.99999994f);
+        float scaledX = std::min((xi - pCoat - pSpec - pDiffRefl - pSss) / std::max(pTrans, 1e-6f), 0.99999994f);
         wiLocal = cosineSampleHemisphere(Vec2f(scaledX, sample.y));
         wiLocal.z = -wiLocal.z;
     }
@@ -321,6 +331,89 @@ Color3f DisneyMaterial::evalPdf(const Vec3f& wo, const Vec3f& wi, const SurfaceI
     const ShadingParams p = resolve(si);
     pdfOut = pdfLobes(wo, wi, p);
     return evalLobes(wo, wi, p);
+}
+
+} // namespace photon
+
+namespace photon {
+
+// Örnekleme sırası sample() ile aynı, ama lob uc ile seçilir ve yön u'nun iki boyutunu da
+// kullanır (iki karar birbirinden bağımsız boyutlardan gelir). Ek olarak yüzey altı lobu:
+// ışık kosinüs ağırlıklı olarak yüzeyin İÇİNE girer; renk ve çıkış yerini integratördeki
+// rastgele yürüyüş belirler. Giriş ağırlığı = ss·(1 − metal)·(1 − geçirgenlik)·kaplamaGeçişi
+// / seçimOlasılığı (beklenen değer lobun enerji payı).
+bool DisneyMaterial::sampleFull(const Vec3f& wo, const SurfaceInteraction& si, float uc, const Vec2f& u,
+                                BSDFSample& out) const {
+    out.delta = false;
+    out.subsurface = false;
+    const ShadingParams p = resolve(si);
+    const Frame frame = shadingFrame(p.normal, p.tangent);
+    const Vec3f woLocal = frame.toLocal(wo);
+    if (woLocal.z <= 0.0f) return false;
+
+    float pCoat, pSpec, pDiffRefl, pTrans, pSss;
+    lobeWeights(p, pCoat, pSpec, pDiffRefl, pTrans, &pSss);
+
+    Vec3f wiLocal;
+    if (uc < pCoat) {
+        const float alphaC = p.clearCoatRoughness * p.clearCoatRoughness;
+        wiLocal = reflectVec(woLocal, ggxSampleVisibleNormal(woLocal, alphaC, alphaC, u.x, u.y));
+        if (wiLocal.z <= 0.0f) return false;
+    } else if (uc < pCoat + pSpec) {
+        float ax, ay;
+        anisoAlpha(p.roughness, p.anisotropy, ax, ay);
+        wiLocal = reflectVec(woLocal, ggxSampleVisibleNormal(woLocal, ax, ay, u.x, u.y));
+        if (wiLocal.z <= 0.0f) return false;
+    } else if (uc < pCoat + pSpec + pDiffRefl) {
+        wiLocal = cosineSampleHemisphere(u);
+    } else if (uc < pCoat + pSpec + pDiffRefl + pSss) {
+        wiLocal = cosineSampleHemisphere(u);
+        wiLocal.z = -wiLocal.z;
+        const float trans = std::clamp(p.diffuseTransmission, 0.0f, 1.0f) * (1.0f - p.metallic);
+        const float coatO = 1.0f - p.clearCoat * schlick(COAT_F0, woLocal.z);
+        const float w = p.subsurface * (1.0f - p.metallic) * (1.0f - trans) * coatO / std::max(pSss, 1e-6f);
+        out.wi = frame.toWorld(wiLocal).normalized();
+        out.subsurface = true;
+        out.weight = Color3f(w);
+        out.pdf = pSss * cosineHemispherePdf(-wiLocal.z);
+        out.f = out.weight * out.pdf / std::max(-wiLocal.z, 1e-6f);
+        return out.pdf > 0.0f;
+    } else {
+        wiLocal = cosineSampleHemisphere(u);
+        wiLocal.z = -wiLocal.z;
+    }
+    out.wi = frame.toWorld(wiLocal).normalized();
+    out.f = evalLobes(wo, out.wi, p);
+    out.pdf = pdfLobes(wo, out.wi, p);
+    return out.pdf > 0.0f;
+}
+
+// Chiang, Kutz, Burley 2016 "Practical and Controllable Subsurface Scattering for
+// Production Path Tracing" (Cycles'ın da kullandığı ters çevirme): istenen çoklu saçılma
+// rengi A'yı verecek tek saçılma albedosu α ve sönüm σt. Yarıçap d = ortalama serbest yol.
+//   α = 1 − exp(A·(−5.09406 + A·(2.61188 − 4.31805·A)))
+//   s = 1.9 − A + 3.5·(A − 0.8)²,   σt = 1 / (d·s)
+// Anizotropi (benzerlik teorisi): indirgenmiş saçılma σs' = σs·(1 − g) korunur ki g
+// değişince cismin genel rengi/yumuşaklığı aynı kalsın: σs = σs'/(1 − g).
+bool DisneyMaterial::subsurfaceCoeffs(const SurfaceInteraction& si, SubsurfaceCoeffs& out) const {
+    if (m_subsurface <= 0.0f) return false;
+    const ShadingParams p = resolve(si);
+    const float g = m_subsurfaceAnisotropy;
+    for (int c = 0; c < 3; ++c) {
+        const float A = std::clamp(p.baseColor[c], 0.0f, 0.999f);
+        const float d = std::max(m_subsurfaceRadius[c] * m_subsurfaceScale, 1e-7f);
+        const float alpha = 1.0f - std::exp(A * (-5.09406f + A * (2.61188f - 4.31805f * A)));
+        const float sVal = 1.9f - A + 3.5f * (A - 0.8f) * (A - 0.8f);
+        float sigmaT = 1.0f / std::max(d * sVal, 1e-12f);
+        float sigmaS = alpha * sigmaT;
+        const float sigmaA = sigmaT - sigmaS;
+        sigmaS /= (1.0f - g);
+        sigmaT = sigmaS + sigmaA;
+        out.sigmaT[c] = sigmaT;
+        out.albedo[c] = sigmaT > 0.0f ? sigmaS / sigmaT : 0.0f;
+    }
+    out.g = g;
+    return true;
 }
 
 } // namespace photon

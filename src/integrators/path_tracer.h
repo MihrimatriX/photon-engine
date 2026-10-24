@@ -7,6 +7,7 @@
 
 #include "integrators/integrator.h"
 #include "geometry/surface_interaction.h"
+#include "materials/material.h"
 
 namespace photon {
 
@@ -35,6 +36,15 @@ public:
     /// sahnenin arka plan modu (düz renk / şeffaf) ıskalayan kamera ışınına uygulanır.
     /// Böylece AOV için ayrı bir birincil ışın atmaya gerek kalmaz.
     Color3f Li(const Ray& ray, const Scene& scene, Sampler& sampler, PrimaryHit* primary) const;
+
+    /// Yüzey altı rastgele yürüyüşü (Chiang 2016 / Cycles): @p entry noktasından @p dir
+    /// yönünde cismin içine girilir; homojen ortamda serbest uçuş + Henyey–Greenstein
+    /// saçılmalarıyla ilerlenir, bir yüzeye ulaşınca çıkılır. Çıkış bulunursa true döner,
+    /// @p exitSi o noktanın kesişim kaydıdır (normal İÇE bakar), @p throughput yürüyüşün
+    /// ağırlığıyla çarpılmıştır. Kaçış (açık mesh) ya da soğrulma → false.
+    static bool randomWalkSubsurface(const Scene& scene, const SurfaceInteraction& entry, const Vec3f& dir,
+                                     const SubsurfaceCoeffs& coeffs, Sampler& sampler, Color3f& throughput,
+                                     SurfaceInteraction& exitSi);
 
 private:
     int m_maxDepth;

@@ -12,6 +12,7 @@
 // Aynı malzemeyi paylaşan düğümler "materials" tablosunda tek kayda işaret eder.
 #include "scene/project_io.h"
 #include "scene/model_import.h"
+#include "scene/material_library.h"
 #include "materials/disney.h"
 #include "materials/dielectric.h"
 #include "materials/lambertian.h"
@@ -108,11 +109,13 @@ json materialJson(const Material& mat, const fs::path& base) {
         if (!maps.empty()) j["maps"] = maps;
         j["mapping"] = d->textureMapping() == DisneyMaterial::TextureMapping::Box ? "box" : "uv";
         j["texScale"] = d->textureScale();
+        presetAdvancedToJson(MaterialLibrary::presetFromMaterial(mat, ""), j);
     } else if (const auto* g = dynamic_cast<const Dielectric*>(&mat)) {
         j["type"] = "glass";
         j["ior"] = g->ior();
         j["tint"] = col3(g->tint());
         j["roughness"] = g->roughness();
+        presetAdvancedToJson(MaterialLibrary::presetFromMaterial(mat, ""), j);
     } else if (const auto* l = dynamic_cast<const Lambertian*>(&mat)) {
         j["type"] = "lambert";
         j["albedo"] = col3(l->albedo());
@@ -128,9 +131,17 @@ json materialJson(const Material& mat, const fs::path& base) {
 
 std::shared_ptr<Material> materialFromJson(const json& j, const fs::path& base) {
     const std::string type = j.value("type", std::string("disney"));
+    // Gelişmiş alanlar (SSS, cam hacmi, dispersiyon, ince film, pullar) preset ile aynı anahtarlar.
+    auto applyAdvanced = [&j](Material& m) {
+        MaterialPreset p = MaterialLibrary::presetFromMaterial(m, "");
+        presetAdvancedFromJson(j, p);
+        MaterialLibrary::applyAdvanced(p, m);
+    };
     if (type == "glass") {
-        return std::make_shared<Dielectric>(j.value("ior", 1.5f), readCol3(j, "tint", Color3f(1.0f)),
-                                            j.value("roughness", 0.0f));
+        auto g = std::make_shared<Dielectric>(j.value("ior", 1.5f), readCol3(j, "tint", Color3f(1.0f)),
+                                              j.value("roughness", 0.0f));
+        applyAdvanced(*g);
+        return g;
     }
     if (type == "lambert") {
         return std::make_shared<Lambertian>(readCol3(j, "albedo", Color3f(0.8f)),
@@ -156,6 +167,7 @@ std::shared_ptr<Material> materialFromJson(const json& j, const fs::path& base) 
         if (maps->contains("roughness")) d->setRoughnessMap(resolvePath((*maps)["roughness"].get<std::string>(), base));
         if (maps->contains("metalness")) d->setMetalnessMap(resolvePath((*maps)["metalness"].get<std::string>(), base));
     }
+    applyAdvanced(*d);
     return d;
 }
 
