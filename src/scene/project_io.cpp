@@ -365,7 +365,8 @@ LightDesc lightFromJson(const json& j, const fs::path& base) {
     d.height = j.value("height", d.height);
     d.azimuthDeg = j.value("azimuth", d.azimuthDeg);
     d.elevationDeg = j.value("elevation", d.elevationDeg);
-    d.visibleToCamera = j.value("visibleToCamera", d.visibleToCamera);
+    // 0.2 öncesi projelerde alan ışıkları kameraya hep görünürdü; anahtar yoksa öyle kalır.
+    d.visibleToCamera = j.value("visibleToCamera", true);
     d.coneAngleDeg = j.value("coneAngle", d.coneAngleDeg);
     d.coneBlend = j.value("coneBlend", d.coneBlend);
     d.iesPath = resolvePath(j.value("ies", std::string()), base);

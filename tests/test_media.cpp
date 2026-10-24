@@ -310,3 +310,75 @@ TEST(RoundEdges, NormalBendsOnlyNearEdges) {
     EXPECT_LT(edge.y, 0.97f);
     EXPECT_GT(edge.x, 0.15f);               // +X yüzüne doğru eğildi
 }
+
+// Regresyon: kameradan doğrudan görülen ince duvarlı camın arkasındaki düz renk fon camın
+// tonunu almıyordu (L = fon rengi atanıyordu), şeffaf fonda cam opak siyah çıkıyordu.
+TEST(ThinWalled, TintAppliesOverColorAndTransparentBackground) {
+    for (auto mode : {Background::Mode::Color, Background::Mode::Transparent}) {
+        Scene scene;
+        auto pane = std::make_shared<Dielectric>(1.5f, Color3f(0.2f, 1.0f, 0.2f));
+        pane->setThinWalled(true);
+        scene.retainMaterial(pane);
+        scene.addShape(std::make_shared<TriangleMesh>(
+            std::vector<Vec3f>{{-2, -2, 0}, {2, -2, 0}, {2, 2, 0}, {-2, 2, 0}}, std::vector<Vec3f>{},
+            std::vector<Vec2f>{}, std::vector<uint32_t>{0, 1, 2, 0, 2, 3}, pane.get()));
+        scene.setEnvironment(whiteFurnace());
+        Background bg;
+        bg.mode = mode;
+        bg.color = Color3f(1.0f);
+        scene.setBackground(bg);
+        scene.buildAccelerator();
+        PathTracer pt(8);
+        IndependentSampler sampler(6);
+        Color3f sum(0.0f);
+        float cov = 0.0f;
+        const int n = 4000;
+        for (int i = 0; i < n; ++i) {
+            PathTracer::PrimaryHit ph;
+            sum += pt.Li(Ray(Vec3f(0.1f, 0.1f, 5.0f), Vec3f(0, 0, -1)), scene, sampler, &ph);
+            cov += ph.coverage >= 0.0f ? ph.coverage : 1.0f;
+        }
+        sum /= static_cast<float>(n);
+        if (mode == Background::Mode::Color) {
+            // Geçen: ton × (1 − R_levha) ≈ (0.2, 0.92, 0.2); yansıyan: beyaz fırın × R ≈ 0.08.
+            EXPECT_LT(sum.r, 0.45f);
+            EXPECT_GT(sum.g, 0.9f);
+        } else {
+            EXPECT_LT(cov / n, 0.6f); // kapsama artık 1 (opak) değil
+        }
+    }
+}
+
+// Regresyon: ortalama (yumuşak) normalli cam küpün içindeki saçan ortam, silüette geometrik
+// normale düşen çerçeve yüzünden her sekmede throughput'u şişiriyordu (fırında ~1e24).
+TEST(Media, SmoothShadedGlassWithScatteringStaysInFurnace) {
+    // 8 köşe paylaşımlı küp: köşe normalleri merkezden dışa (yumuşak gölgeleme).
+    std::vector<Vec3f> p, n;
+    for (int i = 0; i < 8; ++i) {
+        const Vec3f v((i & 1) ? 1.f : -1.f, (i & 2) ? 1.f : -1.f, (i & 4) ? 1.f : -1.f);
+        p.push_back(v);
+        n.push_back(v.normalized());
+    }
+    const std::vector<uint32_t> idx = {0, 2, 1, 1, 2, 3, 4, 5, 6, 5, 7, 6, 0, 1, 4, 1, 5, 4,
+                                       2, 6, 3, 3, 6, 7, 0, 4, 2, 2, 4, 6, 1, 3, 5, 3, 7, 5};
+    Scene scene;
+    auto glass = std::make_shared<Dielectric>(1.5f, Color3f(1.0f));
+    glass->setScattering(3.0f, Color3f(1.0f), 0.0f);
+    scene.addShape(std::make_shared<TriangleMesh>(p, n, std::vector<Vec2f>{}, idx, glass.get()));
+    scene.setEnvironment(whiteFurnace());
+    scene.buildAccelerator();
+    PathTracer pt(64, 64);
+    const Color3f L = averageLi(pt, scene, Ray(Vec3f(0.3f, 0.2f, 10.0f), Vec3f(0, 0, -1)), 20000);
+    EXPECT_NEAR(L.g, 1.0f, 0.1f);
+}
+
+TEST(Spectral, TinyAbbeNeverGivesIorBelowOne) {
+    Dielectric g(1.5f, Color3f(1.0f));
+    g.setAbbe(0.5f);
+    EXPECT_GE(g.abbe(), 10.0f);
+    SurfaceInteraction si;
+    for (float l : {380.0f, 550.0f, 730.0f}) {
+        si.wavelength = l;
+        EXPECT_GE(g.iorAt(si), 1.0f);
+    }
+}

@@ -26,6 +26,15 @@ Vec3f offsetRayOrigin(const Vec3f& p, const Vec3f& n, const Vec3f& dir) {
     return p + n * (dir.dot(n) > 0.0f ? 1e-4f : -1e-4f);
 }
 
+/// Yüzeyden çıkan ışının başlangıcı: ofset GEOMETRİK normal boyunca, ışının gittiği tarafa.
+/// Gölgelendirme normali (yumuşatılmış, normal haritalı) yüzeyin gerçek yönünü bilmez; ona
+/// göre itmek, kırılan/yansıyan ışını yüzeyin yanlış tarafından başlatıp aynı yüzeye
+/// yeniden çarptırabilir (yumuşak normalli camda enerji sızıntısı). [F5.9'un ilk adımı]
+Vec3f spawnOrigin(const SurfaceInteraction& isect, const Vec3f& dir) {
+    const Vec3f& n = isect.ng.lengthSquared() > 0.0f ? isect.ng : isect.normal;
+    return offsetRayOrigin(isect.point, n, dir);
+}
+
 float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sampler,
                float strength, int samples) {
     if (strength <= 0.0f || samples <= 0) return 1.0f;
@@ -36,7 +45,7 @@ float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sam
     for (int i = 0; i < samples; ++i) {
         Vec3f local = cosineSampleHemisphere(sampler.get2D());
         Vec3f dir = frame.toWorld(local).normalized();
-        Ray aoRay(offsetRayOrigin(isect.point, isect.normal, dir), dir, 1e-4f, maxDist);
+        Ray aoRay(spawnOrigin(isect, dir), dir, 1e-4f, maxDist);
         if (scene.intersectAny(aoRay)) occ += 1.0f;
     }
     float visibility = 1.0f - (occ / static_cast<float>(samples));
@@ -133,6 +142,30 @@ bool russianRoulette(Color3f& throughput, Sampler& sampler) {
     if (m >= 1.0f) return true;
     if (!(m > 0.0f) || sampler.get1D() >= m) return false;
     throughput /= m;
+    return true;
+}
+
+/// NEE gölge ışını. Başlangıç alıcının yüzeyinden ofsetlenir; ışık örneği alıcıya göre
+/// ölçüldüğü için wi boyunca gidilirse ışığın düzlemi örnekten ÖNCE kesilir ve alan ışığının
+/// kendi dörtgeni kendi örneğini örter (yakın ışıkta tam karanlık). Bu yüzden yüzeyli
+/// ışıklarda ışın ofsetli başlangıçtan örnek noktasına yönelir ve biraz önce durur.
+/// false → ışın kurulamadı (örnek alıcıya fazla yakın).
+bool makeShadowRay(const SurfaceInteraction& isect, const LightSample& ls, bool pointOnSurface, Ray& out) {
+    const Vec3f origin = spawnOrigin(isect, ls.wi);
+    Vec3f dir = ls.wi;
+    float end = ls.distance < INFINITY_F ? ls.distance - 1e-4f : 1e30f;
+    if (pointOnSurface) {
+        const Vec3f pLight = isect.point + ls.wi * ls.distance;
+        const Vec3f delta = pLight - origin;
+        const float dist = delta.length();
+        if (dist > 1e-4f) {
+            dir = delta / dist;
+            // ponytail: stop short of the sample; a contact occluder inside the slop is missed until shadow rays skip light prims
+            end = dist - std::max(1e-4f, dist * 1e-4f);
+        }
+    }
+    if (end <= 1e-4f) return false;
+    out = Ray(origin, dir, 1e-4f, end);
     return true;
 }
 
@@ -256,7 +289,7 @@ bool PathTracer::randomWalkSubsurface(const Scene& scene, const SurfaceInteracti
     const Color3f sigmaS = coeffs.albedo * coeffs.sigmaT;
     Vec3f d = dir.normalized();
     // Giriş: yüzeyin hemen içinden başla (normal ışığın geldiği tarafa bakar).
-    Vec3f origin = offsetRayOrigin(entry.point, entry.normal, d);
+    Vec3f origin = spawnOrigin(entry, d);
     for (int step = 0; step < kMaxWalkSteps; ++step) {
         Ray r(origin, d);
         SurfaceInteraction hit;
@@ -402,10 +435,13 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             wo = -currentRay.direction;
 
             if (!hit) {
-                // Kameradan doğrudan görülen arka plan (yalnız birincil ışın; yansımalar ve
-                // cam arkası her zaman ortamı görür). Şeffafta katkı 0, alfa da 0 olur.
+                // Kameradan doğrudan görülen arka plan (birincil ışın ya da ince duvardan düz geçen
+                // devamı; yansımalar ve kırıcı cam arkası her zaman ortamı görür). İnce camın tonu
+                // throughput'ta olduğu için arka plan onunla çarpılır. Şeffafta renk katkısı 0;
+                // kapsama, camın geçirmediği orandır (yalnız düz geçiş varsa ≠ 1).
                 if (depth == 0 && primary && scene.background().mode != Background::Mode::Environment) {
-                    if (scene.background().mode == Background::Mode::Color) L = scene.background().color;
+                    if (scene.background().mode == Background::Mode::Color) accumulate(throughput * scene.background().color);
+                    else if (passThroughs > 0) primary->coverage = std::max(0.0f, 1.0f - throughput.luminance());
                     break;
                 }
                 if (env) {
@@ -445,9 +481,10 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                         const float c = ls.Li.luminance() * cosT / (pmf * ls.pdf);
                         if (!(c > 0.0f) || !std::isfinite(c)) continue;
                         total += c;
-                        const Ray shadow(offsetRayOrigin(isect.point, isect.normal, ls.wi), ls.wi, 1e-4f,
-                                         std::isfinite(ls.distance) && ls.distance < INFINITY_F ? ls.distance * (1.0f - 1e-4f) : 1e30f);
-                        visible += c * shadowTransmittance(scene, shadow).luminance();
+                        const bool onSurface = li < explicitLights && !lights[static_cast<size_t>(li)]->isDelta();
+                        Ray shadow;
+                        if (makeShadowRay(isect, ls, onSurface, shadow))
+                            visible += c * shadowTransmittance(scene, shadow).luminance();
                     }
                 }
                 const float ratio = total > 0.0f ? std::clamp(visible / total, 0.0f, 1.0f) : 1.0f;
@@ -523,25 +560,8 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                     if (!ls.isValid()) continue;
                 }
 
-                Vec3f shadowOrigin = offsetRayOrigin(isect.point, isect.normal, ls.wi);
-                Vec3f shadowDir = ls.wi;
-                float shadowEnd = ls.distance - 1e-4f;
-                if (!fromEnv && !lights[lightIndex]->isDelta()) {
-                    // Origin is pushed off the receiver, so a ray along wi meets the
-                    // light plane early and the quad occludes its own NEE sample.
-                    Vec3f pLight = isect.point + ls.wi * ls.distance;
-                    Vec3f delta = pLight - shadowOrigin;
-                    float dist = delta.length();
-                    if (dist > 1e-4f) {
-                        shadowDir = delta / dist;
-                        // ponytail: stop short of the sample; a contact occluder inside the slop is missed until shadow rays skip light prims
-                        float slop = std::max(1e-4f, dist * 1e-4f);
-                        shadowEnd = dist - slop;
-                    }
-                }
-
-                if (shadowEnd <= 1e-4f) continue;
-                Ray shadowRay(shadowOrigin, shadowDir, 1e-4f, shadowEnd);
+                Ray shadowRay;
+                if (!makeShadowRay(isect, ls, !fromEnv && !lights[lightIndex]->isDelta(), shadowRay)) continue;
                 const Color3f vis = shadowTransmittance(scene, shadowRay);
 
                 if (!vis.isBlack()) {
@@ -604,7 +624,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             // bulunduğu için iki strateji böylece tutarlı tartılır.
             throughput *= bs.f * (std::abs(bs.wi.dot(isect.normal)) / bs.pdf);
             if (!throughput.isFinite()) break;
-            currentRay = Ray(offsetRayOrigin(isect.point, isect.normal, bs.wi), bs.wi);
+            currentRay = Ray(spawnOrigin(isect, bs.wi), bs.wi);
             if (++passThroughs > 64) break; // sonsuz cam yığınına karşı sigorta (sekme sayılmaz)
             continue;
         }
@@ -631,7 +651,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             }
         }
 
-        Vec3f nextRayOrigin = offsetRayOrigin(isect.point, isect.normal, wi);
+        Vec3f nextRayOrigin = spawnOrigin(isect, wi);
         currentRay = Ray(nextRayOrigin, wi);
         ++depth;
 
