@@ -7,6 +7,7 @@
 #include "materials/microfacet.h"
 #include "core/math/frame.h"
 #include "core/math/utils.h"
+#include "core/color/spectral.h"
 #include <algorithm>
 #include <cmath>
 
@@ -118,6 +119,33 @@ float pdfRoughLocal(const Vec3f& wo, const Vec3f& wi, float ior, float alpha) {
 
 } // namespace
 
+void Dielectric::setAbsorption(const Color3f& color, float distance) {
+    m_absorbColor = color.clamp(0.0f, 1.0f);
+    m_absorbDistance = std::max(distance, 1e-5f);
+    rebuildMedium();
+}
+
+void Dielectric::setScattering(float density, const Color3f& color, float anisotropy) {
+    m_scatterDensity = std::max(density, 0.0f);
+    m_scatterColor = color.clamp(0.0f, 1.0f);
+    m_scatterAniso = std::clamp(anisotropy, -0.95f, 0.95f);
+    rebuildMedium();
+}
+
+void Dielectric::rebuildMedium() {
+    // σa = −ln(T)/d: T rengine d mesafede ulaşan Beer–Lambert katsayısı. T = 0'da sonsuz
+    // olmasın diye 1e-4'e kenetlenir (~9.2/d, pratikte opak).
+    Color3f sa;
+    for (int c = 0; c < 3; ++c) sa[c] = -std::log(std::max(m_absorbColor[c], 1e-4f)) / m_absorbDistance;
+    const Color3f ss = m_scatterColor * m_scatterDensity;
+    sa += (Color3f(1.0f) - m_scatterColor) * m_scatterDensity;
+    m_medium = Medium{sa, ss, m_scatterAniso};
+}
+
+float Dielectric::iorAt(const SurfaceInteraction& si) const {
+    return (m_abbe > 0.0f && si.wavelength > 0.0f) ? cauchyIor(m_ior, m_abbe, si.wavelength) : m_ior;
+}
+
 bool Dielectric::sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec2f& sample,
                         Vec3f& wi, Color3f& brdf, float& pdf) const {
     // ponytail: eski çağıranlar için uc = u.x; pürüzlü camda h ile lob kararı ilişkili olur.
@@ -131,13 +159,14 @@ bool Dielectric::sampleWithLobe(const Vec3f& woWorld, const SurfaceInteraction& 
     const Vec3f& wo = g.wo;
     if (wo.z == 0.0f) return false;
     const bool entering = wo.z > 0.0f;
+    const float ior = iorAt(si);
     // refractVec kuralı: eta = ηi/ηt, ηi = wo'nun bulunduğu ortam.
-    const float eta = entering ? (1.0f / m_ior) : m_ior;
+    const float eta = entering ? (1.0f / ior) : ior;
 
     if (sharp(m_roughness)) {
         // Delta cam: olasılık F ile yansıma, 1-F ile kırılma. Değerler "ağırlık" olarak
         // döner: brdf·|cosθ|/pdf = F/F = 1 (yansıma) veya (1-F)·eta²/(1-F) (kırılma).
-        float F = fresnelDielectric(wo.z, 1.0f, m_ior);
+        float F = fresnelDielectric(wo.z, 1.0f, ior);
         Vec3f wiLocal(-wo.x, -wo.y, wo.z);
         if (uc < F) {
             pdf = F;
@@ -167,7 +196,7 @@ bool Dielectric::sampleWithLobe(const Vec3f& woWorld, const SurfaceInteraction& 
     // h seç, sonra o mikro-yüzeyin Fresnel'i R = F(wo·h) ile yansı ya da kır.
     const float alpha = alphaOf(m_roughness);
     Vec3f wm = ggxSampleVisibleNormal(wo, alpha, alpha, u.x, u.y);
-    float R = fresnelDielectric(wo.dot(wm), 1.0f, m_ior);
+    float R = fresnelDielectric(wo.dot(wm), 1.0f, ior);
     Vec3f wiLocal;
     if (uc < R) {
         wiLocal = reflectVec(wo, wm);
@@ -178,8 +207,8 @@ bool Dielectric::sampleWithLobe(const Vec3f& woWorld, const SurfaceInteraction& 
         if (wiLocal.z * wo.z >= 0.0f) return false;
     }
     // f ve pdf'i aynı fonksiyonlardan almak eval()/pdf() ile tutarlılığı garanti eder.
-    brdf = evalRoughLocal(wo, wiLocal, m_ior, alpha, m_tint);
-    pdf = pdfRoughLocal(wo, wiLocal, m_ior, alpha);
+    brdf = evalRoughLocal(wo, wiLocal, ior, alpha, m_tint);
+    pdf = pdfRoughLocal(wo, wiLocal, ior, alpha);
     wi = g.frame.toWorld(wiLocal).normalized();
     return pdf > 0.0f && !brdf.isBlack();
 }
@@ -187,13 +216,13 @@ bool Dielectric::sampleWithLobe(const Vec3f& woWorld, const SurfaceInteraction& 
 Color3f Dielectric::eval(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {
     if (sharp(m_roughness)) return Color3f::black();
     GlassLocal g = glassFrame(wo, si);
-    return evalRoughLocal(g.wo, g.frame.toLocal(wi), m_ior, alphaOf(m_roughness), m_tint);
+    return evalRoughLocal(g.wo, g.frame.toLocal(wi), iorAt(si), alphaOf(m_roughness), m_tint);
 }
 
 float Dielectric::pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {
     if (sharp(m_roughness)) return 0.0f;
     GlassLocal g = glassFrame(wo, si);
-    return pdfRoughLocal(g.wo, g.frame.toLocal(wi), m_ior, alphaOf(m_roughness));
+    return pdfRoughLocal(g.wo, g.frame.toLocal(wi), iorAt(si), alphaOf(m_roughness));
 }
 
 } // namespace photon

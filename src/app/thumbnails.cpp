@@ -24,11 +24,7 @@ namespace {
 // değişir ve küçük resim yeniden render edilir. Sürüm numarası motor değiştikçe artar.
 std::string materialHash(const MaterialPreset& p, const std::string& studio) {
     std::ostringstream ss;
-    ss << "v3|" << studio << '|' << static_cast<int>(p.kind) << '|' << p.baseColor.r << ',' << p.baseColor.g << ','
-       << p.baseColor.b << '|' << p.metallic << '|' << p.roughness << '|' << p.specular << '|' << p.clearCoat << '|'
-       << p.clearCoatRoughness << '|' << p.anisotropy << '|' << p.sheen << '|' << p.diffuseTransmission << '|'
-       << p.emissive << '|' << p.ior << '|' << p.albedoMap << '|' << p.normalMap << '|' << p.roughnessMap
-       << '|' << p.boxMapping << '|' << p.texScale;
+    ss << "v4|" << studio << '|' << presetSignature(p);
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%016llx",
                   static_cast<unsigned long long>(std::hash<std::string>{}(ss.str())));

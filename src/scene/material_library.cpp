@@ -78,6 +78,7 @@ bool MaterialLibrary::loadFile(const std::string& path) {
     p.roughnessMap = mapPath("roughness");
     p.boxMapping = j.value("mapping", std::string("uv")) == "box";
     p.texScale = j.value("texScale", 1.0f);
+    presetAdvancedFromJson(j, p);
     m_presets.push_back(std::move(p));
     return true;
 }
@@ -125,7 +126,9 @@ std::shared_ptr<Material> MaterialLibrary::createMaterial(const MaterialPreset& 
     if (p.kind == MaterialKind::Glass) {
         // Pürüzlülük ~0 ise kusursuz (delta) cam, aksi hâlde GGX buzlu cam.
         const float r = p.roughness <= 0.02f ? 0.0f : p.roughness;
-        return std::make_shared<Dielectric>(p.ior, p.baseColor, r);
+        auto g = std::make_shared<Dielectric>(p.ior, p.baseColor, r);
+        applyAdvanced(p, *g);
+        return g;
     }
     auto m = std::make_shared<DisneyMaterial>(p.baseColor, p.metallic, p.roughness, p.specular);
     m->setClearCoat(p.clearCoat);
@@ -139,7 +142,93 @@ std::shared_ptr<Material> MaterialLibrary::createMaterial(const MaterialPreset& 
     if (!p.roughnessMap.empty()) m->setRoughnessMap(p.roughnessMap);
     m->setTextureMapping(p.boxMapping ? DisneyMaterial::TextureMapping::Box : DisneyMaterial::TextureMapping::UV);
     m->setTextureScale(p.texScale);
+    applyAdvanced(p, *m);
     return m;
+}
+
+void MaterialLibrary::applyAdvanced(const MaterialPreset& p, Material& mat) {
+    if (auto* g = dynamic_cast<Dielectric*>(&mat)) {
+        g->setAbsorption(p.absorbColor, p.absorbDistance);
+        g->setScattering(p.scatterDensity, p.scatterColor, p.scatterAnisotropy);
+        g->setAbbe(p.abbe);
+    } else if (auto* d = dynamic_cast<DisneyMaterial*>(&mat)) {
+        d->setSubsurface(p.subsurface);
+        d->setSubsurfaceRadius(p.subsurfaceRadius);
+        d->setSubsurfaceScale(p.subsurfaceScale);
+        d->setSubsurfaceAnisotropy(p.subsurfaceAnisotropy);
+        d->setEdgeTint(p.edgeTint);
+        d->setThinFilm(p.thinFilmThickness, p.thinFilmIor);
+        d->setFlakes(p.flakeDensity, p.flakeSize, p.flakeRoughness, p.flakeColor);
+    }
+}
+
+namespace {
+
+json colJson(const Color3f& c) { return json::array({c.r, c.g, c.b}); }
+
+} // namespace
+
+void presetAdvancedToJson(const MaterialPreset& p, json& j) {
+    const MaterialPreset def;
+    if (p.kind == MaterialKind::Glass) {
+        if (p.absorbColor != def.absorbColor)
+            j["absorption"] = {{"color", colJson(p.absorbColor)}, {"distance", p.absorbDistance}};
+        if (p.scatterDensity > 0.0f)
+            j["scattering"] = {{"density", p.scatterDensity}, {"color", colJson(p.scatterColor)},
+                               {"anisotropy", p.scatterAnisotropy}};
+        if (p.abbe > 0.0f) j["abbe"] = p.abbe;
+        return;
+    }
+    if (p.subsurface > 0.0f)
+        j["subsurface"] = {{"weight", p.subsurface}, {"radius", colJson(p.subsurfaceRadius)},
+                           {"scale", p.subsurfaceScale}, {"anisotropy", p.subsurfaceAnisotropy}};
+    if (p.edgeTint != def.edgeTint) j["edgeTint"] = colJson(p.edgeTint);
+    if (p.thinFilmThickness > 0.0f) j["thinFilm"] = {{"thickness", p.thinFilmThickness}, {"ior", p.thinFilmIor}};
+    if (p.flakeDensity > 0.0f)
+        j["flakes"] = {{"density", p.flakeDensity}, {"size", p.flakeSize}, {"roughness", p.flakeRoughness},
+                       {"color", colJson(p.flakeColor)}};
+}
+
+void presetAdvancedFromJson(const json& j, MaterialPreset& p) {
+    if (auto a = j.find("absorption"); a != j.end() && a->is_object()) {
+        p.absorbColor = readColor(*a, "color", p.absorbColor);
+        p.absorbDistance = a->value("distance", p.absorbDistance);
+    }
+    if (auto s = j.find("scattering"); s != j.end() && s->is_object()) {
+        p.scatterDensity = s->value("density", p.scatterDensity);
+        p.scatterColor = readColor(*s, "color", p.scatterColor);
+        p.scatterAnisotropy = s->value("anisotropy", p.scatterAnisotropy);
+    }
+    p.abbe = j.value("abbe", p.abbe);
+    if (auto s = j.find("subsurface"); s != j.end() && s->is_object()) {
+        p.subsurface = s->value("weight", p.subsurface);
+        p.subsurfaceRadius = readColor(*s, "radius", p.subsurfaceRadius);
+        p.subsurfaceScale = s->value("scale", p.subsurfaceScale);
+        p.subsurfaceAnisotropy = s->value("anisotropy", p.subsurfaceAnisotropy);
+    }
+    p.edgeTint = readColor(j, "edgeTint", p.edgeTint);
+    if (auto t = j.find("thinFilm"); t != j.end() && t->is_object()) {
+        p.thinFilmThickness = t->value("thickness", p.thinFilmThickness);
+        p.thinFilmIor = t->value("ior", p.thinFilmIor);
+    }
+    if (auto f = j.find("flakes"); f != j.end() && f->is_object()) {
+        p.flakeDensity = f->value("density", p.flakeDensity);
+        p.flakeSize = f->value("size", p.flakeSize);
+        p.flakeRoughness = f->value("roughness", p.flakeRoughness);
+        p.flakeColor = readColor(*f, "color", p.flakeColor);
+    }
+}
+
+std::string presetSignature(const MaterialPreset& p) {
+    json j;
+    j["k"] = static_cast<int>(p.kind);
+    j["c"] = colJson(p.baseColor);
+    j["v"] = {p.metallic, p.roughness, p.specular, p.clearCoat, p.clearCoatRoughness, p.anisotropy,
+              p.sheen, p.diffuseTransmission, p.emissive, p.ior, p.texScale};
+    j["m"] = {p.albedoMap, p.normalMap, p.roughnessMap};
+    j["b"] = p.boxMapping;
+    presetAdvancedToJson(p, j);
+    return j.dump();
 }
 
 MaterialPreset MaterialLibrary::presetFromMaterial(const Material& mat, const std::string& name) {
@@ -164,11 +253,33 @@ MaterialPreset MaterialLibrary::presetFromMaterial(const Material& mat, const st
             p.emissive = m;
             p.baseColor = e / m;
         }
+        p.subsurface = d->subsurface();
+        p.subsurfaceRadius = d->subsurfaceRadius();
+        p.subsurfaceScale = d->subsurfaceScale();
+        p.subsurfaceAnisotropy = d->subsurfaceAnisotropy();
+        p.edgeTint = d->edgeTint();
+        p.thinFilmThickness = d->thinFilmThickness();
+        p.thinFilmIor = d->thinFilmIor();
+        p.flakeDensity = d->flakeDensity();
+        p.flakeSize = d->flakeSize();
+        p.flakeRoughness = d->flakeRoughness();
+        p.flakeColor = d->flakeColor();
+        p.albedoMap = d->albedoMap();
+        p.normalMap = d->normalMap();
+        p.roughnessMap = d->roughnessMap();
+        p.boxMapping = d->textureMapping() == DisneyMaterial::TextureMapping::Box;
+        p.texScale = d->textureScale();
     } else if (const auto* g = dynamic_cast<const Dielectric*>(&mat)) {
         p.kind = MaterialKind::Glass;
         p.baseColor = g->tint();
         p.roughness = g->roughness();
         p.ior = g->ior();
+        p.absorbColor = g->absorptionColor();
+        p.absorbDistance = g->absorptionDistance();
+        p.scatterDensity = g->scatterDensity();
+        p.scatterColor = g->scatterColor();
+        p.scatterAnisotropy = g->scatterAnisotropy();
+        p.abbe = g->abbe();
     }
     return p;
 }
@@ -195,6 +306,17 @@ bool MaterialLibrary::savePreset(MaterialPreset p, const std::string& dir) {
         j["diffuseTransmission"] = p.diffuseTransmission;
         j["emissive"] = p.emissive;
     }
+    // Kullanıcı preset'lerinde dokular mutlak yolla saklanır (loadFile mutlak yolu olduğu gibi alır).
+    json maps = json::object();
+    if (!p.albedoMap.empty()) maps["albedo"] = p.albedoMap;
+    if (!p.normalMap.empty()) maps["normal"] = p.normalMap;
+    if (!p.roughnessMap.empty()) maps["roughness"] = p.roughnessMap;
+    if (!maps.empty()) {
+        j["maps"] = maps;
+        j["mapping"] = p.boxMapping ? "box" : "uv";
+        j["texScale"] = p.texScale;
+    }
+    presetAdvancedToJson(p, j);
     std::error_code ec;
     fs::create_directories(pathFromUtf8(dir), ec);
     const fs::path file = pathFromUtf8(dir) / pathFromUtf8("90_" + p.id + ".json");

@@ -311,11 +311,7 @@ void Application::drawMaterialProps() {
         MaterialPreset preview = MaterialLibrary::presetFromMaterial(*mat, "önizleme");
         static std::string lastSig;
         static std::string lastKey;
-        char sig[256];
-        std::snprintf(sig, sizeof(sig), "%d %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
-                      static_cast<int>(preview.kind), preview.baseColor.r, preview.baseColor.g, preview.baseColor.b,
-                      preview.metallic, preview.roughness, preview.specular, preview.clearCoat, preview.anisotropy,
-                      preview.sheen, preview.emissive, preview.ior, preview.diffuseTransmission);
+        const std::string sig = presetSignature(preview);
         if (key != lastKey || sig != lastSig) {
             m_s.thumbs.requestMaterial(key, preview, true);
             lastKey = key;

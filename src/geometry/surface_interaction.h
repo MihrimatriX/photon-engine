@@ -23,6 +23,9 @@ struct SurfaceInteraction {
     const Material* material = nullptr; ///< Material of the intersected surface
     const void* hitObject = nullptr;    ///< Çarpılan şekil/mesh (seçim için; BVH yazar)
     bool frontFace = true;  ///< True if ray hit front side of the surface
+    /// Yolun dalga boyu (nm). 0 = RGB modu. Dispersiyonlu camda integratör seçer ve
+    /// malzemeye bu alanla iletir (kırılma indisi dalga boyuna göre değişir).
+    float wavelength = 0.0f;
 
     /// İki normal tutulur: 'normal' daima gelen ışına bakar (malzemeler tek yarıküreyle çalışsın),
     /// 'ng' ise çevrilmemiş dış normaldir. frontFace ışının dışarıdan mı içeriden mi geldiğini

@@ -10,6 +10,7 @@ target_sources(photon_core PRIVATE
     math/vec.cpp
     math/transform.cpp
     color/transfer.cpp
+    color/spectral.cpp
     image/film.cpp
     image/image.cpp
     image/image_io.cpp
