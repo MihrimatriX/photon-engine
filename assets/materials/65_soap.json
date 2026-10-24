@@ -1,0 +1,24 @@
+{
+  "category": "Yarı Saydam",
+  "type": "generic",
+  "metallic": 0,
+  "specular": 0.5,
+  "id": "soap",
+  "name": "Sabun",
+  "baseColor": [
+    0.9,
+    0.75,
+    0.85
+  ],
+  "roughness": 0.3,
+  "subsurface": {
+    "weight": 1.0,
+    "radius": [
+      1.0,
+      0.8,
+      0.9
+    ],
+    "scale": 0.04,
+    "anisotropy": 0.0
+  }
+}

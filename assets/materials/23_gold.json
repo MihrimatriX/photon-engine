@@ -3,8 +3,17 @@
   "name": "Altın",
   "category": "Metal",
   "type": "generic",
-  "baseColor": [1.0, 0.78, 0.34],
+  "baseColor": [
+    0.941,
+    0.786,
+    0.396
+  ],
   "roughness": 0.12,
   "metallic": 1,
-  "specular": 0.5
+  "specular": 0.5,
+  "edgeTint": [
+    0.987,
+    1.0,
+    0.973
+  ]
 }

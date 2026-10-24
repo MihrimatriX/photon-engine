@@ -1,9 +1,12 @@
 // Basitleştirilmiş Disney Principled BRDF (Burley 2012/2015): Burley difüz, GGX
 // speküler (anizotrop olabilir), sheen, ince-yüzey difüz geçirgenlik ve enerjiyi
 // koruyan bir clearcoat katmanı. Örnekleme Heitz 2018 görünür normalleri (VNDF) ile.
+// Üretim eklemeleri: metal kenar tonu (F82), çoklu saçılma enerji telafisi (Turquin
+// 2019), ince film girişimi, metalik boya pulları ve rastgele yürüyüş SSS lobu.
 
 #include "materials/disney.h"
 #include "materials/microfacet.h"
+#include "materials/fresnel.h"
 #include "core/image/image_io.h"
 #include "core/math/frame.h"
 #include "core/math/utils.h"
@@ -43,6 +46,65 @@ Frame shadingFrame(const Vec3f& nIn, const Vec3f& tangentIn) {
     return Frame(t, b, n);
 }
 
+/// Pulların mikro-yüzey pürüzlülüğü: her pul neredeyse ayna gibi parlak bir levhadır.
+constexpr float FLAKE_ALPHA = 0.06f;
+
+/// Taban speküler lobunun Fresnel'i (yalıtkan ve metal paylarının karışımı).
+///  - İnce film yoksa: yalıtkan Schlick(0.08·specular), metal F82-tint(baseColor, edgeTint).
+///  - İnce film varsa: Airy toplamı; yalıtkan taban n = (1+√F0)/(1−√F0), metal taban
+///    Gulbrandsen'den karmaşık n + ik.
+Color3f specularFresnel(const DisneyMaterial::ShadingParams& p, float cosD) {
+    const float f0d = 0.08f * p.specular;
+    if (p.thinFilmThickness <= 0.0f) {
+        const Color3f fd(schlickF(f0d, cosD));
+        if (p.metallic <= 0.0f) return fd;
+        return lerp(fd, fresnelF82Tint(p.baseColor, p.edgeTint, cosD), p.metallic);
+    }
+    const float sd = std::sqrt(std::clamp(f0d, 0.0f, 0.99f));
+    const cfloat nd((1.0f + sd) / (1.0f - sd), 0.0f);
+    const cfloat dielectric[3] = {nd, nd, nd};
+    Color3f fd = thinFilmRGB(cosD, p.thinFilmIor, dielectric, p.thinFilmThickness);
+    if (p.metallic <= 0.0f) return fd;
+    cfloat metal[3];
+    for (int c = 0; c < 3; ++c) metal[c] = gulbrandsenIor(p.baseColor[c], p.edgeTint[c]);
+    return lerp(fd, thinFilmRGB(cosD, p.thinFilmIor, metal, p.thinFilmThickness), p.metallic);
+}
+
+/// Çoklu saçılma telafisi (Turquin 2019): tek saçılmalı GGX, mikro-yüzeyler arasında
+/// birden çok seken ışığı hesaba katmaz; pürüzlü metal olması gerekenden koyu çıkar.
+/// Kaybolan oran 1 − E(μo); F0 kadarı geri eklenir:  f_ms = f_ss · (1 + F0·(1/E − 1)).
+/// pdf değişmez (örnekleme yine VNDF), yalnız değer büyür; beyaz pürüzlü metal ≈ 1 yansıtır.
+Color3f multiScatterFactor(const DisneyMaterial::ShadingParams& p, float cosO, float ax, float ay) {
+    const float E = ggxDirectionalAlbedo(cosO, std::sqrt(ax * ay));
+    const Color3f f0 = lerp(Color3f(0.08f * p.specular), p.baseColor, p.metallic);
+    return Color3f(1.0f) + f0 * (1.0f / E - 1.0f);
+}
+
+/// Pul lobu: pulun kendi normali etrafında dar GGX, renkli Schlick (metal pul).
+/// Kosinüsler pul çerçevesinde ölçülür (normal haritası gibi gölgelendirme normali).
+Color3f evalFlake(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingParams& p) {
+    const Frame ff(p.flakeNormal);
+    const Vec3f o = ff.toLocal(wo), i = ff.toLocal(wi);
+    if (o.z <= 0.0f || i.z <= 0.0f) return Color3f::black();
+    const Vec3f h = (o + i).normalized();
+    const float D = ggxD(h, FLAKE_ALPHA, FLAKE_ALPHA);
+    const float G = ggxG(o, i, FLAKE_ALPHA, FLAKE_ALPHA);
+    const float c = o.dot(h);
+    Color3f F;
+    for (int k = 0; k < 3; ++k) F[k] = schlickF(p.flakeColor[k], c);
+    return F * (D * G / (4.0f * o.z * i.z));
+}
+
+float pdfFlake(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingParams& p) {
+    const Frame ff(p.flakeNormal);
+    const Vec3f o = ff.toLocal(wo), i = ff.toLocal(wi);
+    if (o.z <= 0.0f || i.z <= 0.0f) return 0.0f;
+    const Vec3f h = (o + i).normalized();
+    const float c = o.dot(h);
+    if (c <= 0.0f) return 0.0f;
+    return ggxVisiblePdf(o, h, FLAKE_ALPHA, FLAKE_ALPHA) / (4.0f * c);
+}
+
 /// Tüm lobların toplamı f(wo, wi), yerel çerçevede.
 ///
 /// Clearcoat (bulgu materials-10): kaplama, alttaki tabanın ÜSTÜNDE ince bir 1.5 IOR
@@ -61,7 +123,7 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
     const float cosThetaO = woLocal.z;
     const float coatO = 1.0f - p.clearCoat * schlick(COAT_F0, cosThetaO);
 
-    float trans = std::clamp(p.diffuseTransmission, 0.0f, 1.0f) * (1.0f - p.metallic);
+    float trans = p.inFlake ? 0.0f : std::clamp(p.diffuseTransmission, 0.0f, 1.0f) * (1.0f - p.metallic);
     if (wiLocal.z <= 0.0f) {
         if (trans <= 0.0f) return Color3f::black();
         // İnce yaprak: alttan gelen ışık kaplamayı yalnızca wo tarafında bir kez geçer.
@@ -71,6 +133,12 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
     Vec3f hLocal = (woLocal + wiLocal).normalized();
     const float cosThetaI = wiLocal.z;
     const float cosThetaD = woLocal.dot(hLocal);
+
+    Color3f base;
+    if (p.inFlake) {
+        // Pulun üstünde taban görünmez: ışık pul levhasından yansır.
+        base = evalFlake(wo, wi, p);
+    } else {
 
     // Burley difüz: F_D90 = 0.5 + 2·r·cos²θd ile kenarlarda geri-saçılma.
     float F90 = 0.5f + 2.0f * p.roughness * cosThetaD * cosThetaD;
@@ -86,9 +154,8 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
     anisoAlpha(p.roughness, p.anisotropy, ax, ay);
     float D = ggxD(hLocal, ax, ay);
     float G = ggxG(woLocal, wiLocal, ax, ay);
-    Color3f F0 = lerp(Color3f(0.08f * p.specular), p.baseColor, p.metallic);
-    Color3f F = F0 + (Color3f(1.0f) - F0) * pow5(1.0f - cosThetaD);
-    Color3f fSpecular = (F * D * G) / (4.0f * cosThetaO * cosThetaI);
+    Color3f F = specularFresnel(p, cosThetaD);
+    Color3f fSpecular = (F * D * G) / (4.0f * cosThetaO * cosThetaI) * multiScatterFactor(p, cosThetaO, ax, ay);
 
     Color3f fSheen(0.0f);
     if (p.sheen > 0.0f) {
@@ -100,7 +167,8 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
         fSheen = csheen * (p.sheen * fh * (1.0f - p.metallic));
     }
 
-    Color3f base = fDiffuse + fSpecular + fSheen;
+    base = fDiffuse + fSpecular + fSheen;
+    }
     if (p.clearCoat <= 0.0f) return base;
 
     float alphaC = p.clearCoatRoughness * p.clearCoatRoughness;
@@ -115,6 +183,13 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
 void lobeWeights(const DisneyMaterial::ShadingParams& p, float& pCoat, float& pSpec,
                  float& pDiffRefl, float& pTrans, float* pSssOut = nullptr) {
     pCoat = 0.25f * p.clearCoat;
+    if (p.inFlake) {
+        // Pulda yalnız kaplama ve pul lobu var; pSpec pulu temsil eder.
+        pSpec = 1.0f - pCoat;
+        pDiffRefl = pTrans = 0.0f;
+        if (pSssOut) *pSssOut = 0.0f;
+        return;
+    }
     pSpec = (1.0f - pCoat) * lerp(0.5f, 1.0f, p.metallic);
     float pDiff = 1.0f - pCoat - pSpec;
     float trans = std::clamp(p.diffuseTransmission, 0.0f, 1.0f) * (1.0f - p.metallic);
@@ -149,9 +224,14 @@ float pdfLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingPa
     if (cosThetaD <= 0.0f) return 0.0f;
 
     float pdfDiffuse = cosineHemispherePdf(wiLocal.z);
-    float ax, ay;
-    anisoAlpha(p.roughness, p.anisotropy, ax, ay);
-    float pdfSpecular = ggxVisiblePdf(woLocal, hLocal, ax, ay) / (4.0f * cosThetaD);
+    float pdfSpecular;
+    if (p.inFlake) {
+        pdfSpecular = pdfFlake(wo, wi, p);
+    } else {
+        float ax, ay;
+        anisoAlpha(p.roughness, p.anisotropy, ax, ay);
+        pdfSpecular = ggxVisiblePdf(woLocal, hLocal, ax, ay) / (4.0f * cosThetaD);
+    }
 
     float pdfCoat = 0.0f;
     if (pCoat > 0.0f) {
@@ -160,6 +240,79 @@ float pdfLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingPa
     }
 
     return pDiffRefl * pdfDiffuse + pSpec * pdfSpecular + pCoat * pdfCoat;
+}
+
+/// Taban speküler lobundan (ya da pul lobundan) VNDF ile yön; sonuç makro yerel çerçevede.
+bool sampleSpecularLobe(const DisneyMaterial::ShadingParams& p, const Frame& frame, const Vec3f& wo,
+                        const Vec3f& woLocal, float u1, float u2, Vec3f& wiLocal) {
+    if (p.inFlake) {
+        const Frame ff(p.flakeNormal);
+        const Vec3f o = ff.toLocal(wo);
+        if (o.z <= 0.0f) return false;
+        const Vec3f i = reflectVec(o, ggxSampleVisibleNormal(o, FLAKE_ALPHA, FLAKE_ALPHA, u1, u2));
+        if (i.z <= 0.0f) return false;
+        wiLocal = frame.toLocal(ff.toWorld(i));
+    } else {
+        float ax, ay;
+        anisoAlpha(p.roughness, p.anisotropy, ax, ay);
+        wiLocal = reflectVec(woLocal, ggxSampleVisibleNormal(woLocal, ax, ay, u1, u2));
+    }
+    return wiLocal.z > 0.0f;
+}
+
+/// Tamsayı karması (lowbias32) ve [0,1) dönüşümü: pul hücreleri için.
+uint32_t hashU32(uint32_t x) {
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+
+uint32_t hashCell(int x, int y, int z) {
+    return hashU32(static_cast<uint32_t>(x) * 0x8da6b343u ^ hashU32(static_cast<uint32_t>(y) * 0xd8163841u ^
+                   hashU32(static_cast<uint32_t>(z) * 0xcb1ab31fu)));
+}
+
+float unitFloat(uint32_t h) { return static_cast<float>(h >> 8) * 0x1p-24f; }
+
+/// Metalik pullar: uzay pul boyutunda hücrelere bölünür, her hücrede rastgele bir
+/// "çekirdek" (3B Voronoi). Nokta en yakın çekirdeğin pulunda sayılır; pulun var olup
+/// olmadığı (yoğunluk) ve eğimi o çekirdeğin karmasından gelir. Eğim GGX eğim dağılımı
+/// gibi: tan²θ = r²·u/(1−u); r = 0 → tüm pullar yüzeye paralel (yalnız kaplama gibi
+/// parlar), r büyüdükçe her yönde ışıltı. ponytail: dünya uzayında; nesne hareket edince
+/// pullar kayar (kutu eşlemeyle aynı sınırlama).
+void resolveFlake(const Vec3f& point, float size, float density, float rough, DisneyMaterial::ShadingParams& p) {
+    const Vec3f q = point / size;
+    const int cx = static_cast<int>(std::floor(q.x));
+    const int cy = static_cast<int>(std::floor(q.y));
+    const int cz = static_cast<int>(std::floor(q.z));
+    float best = 1e30f;
+    uint32_t bestHash = 0;
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+                const uint32_t h = hashCell(cx + dx, cy + dy, cz + dz);
+                const Vec3f f(static_cast<float>(cx + dx) + unitFloat(h),
+                              static_cast<float>(cy + dy) + unitFloat(hashU32(h ^ 0x68e31da4u)),
+                              static_cast<float>(cz + dz) + unitFloat(hashU32(h ^ 0xb5297a4du)));
+                const float d2 = (q - f).lengthSquared();
+                if (d2 < best) {
+                    best = d2;
+                    bestHash = h;
+                }
+            }
+    if (unitFloat(hashU32(bestHash ^ 0x1b56c4e9u)) >= density) return;
+    const float u1 = std::min(unitFloat(hashU32(bestHash ^ 0x2c1b3c6du)), 0.999f);
+    const float u2 = unitFloat(hashU32(bestHash ^ 0x297a2d39u));
+    const float tan2 = rough * rough * u1 / (1.0f - u1);
+    const float cosT = 1.0f / std::sqrt(1.0f + tan2);
+    const float sinT = std::sqrt(std::max(0.0f, 1.0f - cosT * cosT));
+    const float phi = TWO_PI * u2;
+    const Frame f(p.normal);
+    p.inFlake = true;
+    p.flakeNormal = f.toWorld(Vec3f(sinT * std::cos(phi), sinT * std::sin(phi), cosT)).normalized();
 }
 
 } // namespace
@@ -259,6 +412,11 @@ DisneyMaterial::ShadingParams DisneyMaterial::resolve(const SurfaceInteraction& 
         p.normal = (T * nTs.x + B * nTs.y + si.normal * nTs.z).normalized();
         if (p.normal.dot(si.normal) < 0.0f) p.normal = -p.normal;
     }
+    p.edgeTint = m_edgeTint;
+    p.thinFilmThickness = m_thinFilmThickness;
+    p.thinFilmIor = m_thinFilmIor;
+    p.flakeColor = m_flakeColor;
+    if (m_flakeDensity > 0.0f) resolveFlake(si.point, m_flakeSize, m_flakeDensity, m_flakeRoughness, p);
     return p;
 }
 
@@ -290,11 +448,7 @@ bool DisneyMaterial::sample(const Vec3f& wo, const SurfaceInteraction& si, const
         if (wiLocal.z <= 0.0f) return false;
     } else if (xi < pCoat + pSpec) {
         float scaledX = std::min((xi - pCoat) / std::max(pSpec, 1e-6f), 0.99999994f);
-        float ax, ay;
-        anisoAlpha(p.roughness, p.anisotropy, ax, ay);
-        Vec3f hLocal = ggxSampleVisibleNormal(woLocal, ax, ay, scaledX, sample.y);
-        wiLocal = reflectVec(woLocal, hLocal);
-        if (wiLocal.z <= 0.0f) return false;
+        if (!sampleSpecularLobe(p, frame, wo, woLocal, scaledX, sample.y, wiLocal)) return false;
     } else if (xi < pCoat + pSpec + pDiffRefl) {
         float scaledX = std::min((xi - pCoat - pSpec) / std::max(pDiffRefl, 1e-6f), 0.99999994f);
         wiLocal = cosineSampleHemisphere(Vec2f(scaledX, sample.y));
@@ -360,10 +514,7 @@ bool DisneyMaterial::sampleFull(const Vec3f& wo, const SurfaceInteraction& si, f
         wiLocal = reflectVec(woLocal, ggxSampleVisibleNormal(woLocal, alphaC, alphaC, u.x, u.y));
         if (wiLocal.z <= 0.0f) return false;
     } else if (uc < pCoat + pSpec) {
-        float ax, ay;
-        anisoAlpha(p.roughness, p.anisotropy, ax, ay);
-        wiLocal = reflectVec(woLocal, ggxSampleVisibleNormal(woLocal, ax, ay, u.x, u.y));
-        if (wiLocal.z <= 0.0f) return false;
+        if (!sampleSpecularLobe(p, frame, wo, woLocal, u.x, u.y, wiLocal)) return false;
     } else if (uc < pCoat + pSpec + pDiffRefl) {
         wiLocal = cosineSampleHemisphere(u);
     } else if (uc < pCoat + pSpec + pDiffRefl + pSss) {

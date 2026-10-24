@@ -1,0 +1,26 @@
+{
+  "category": "Yarı Saydam",
+  "type": "generic",
+  "metallic": 0,
+  "specular": 0.5,
+  "id": "jade",
+  "name": "Yeşim",
+  "baseColor": [
+    0.3,
+    0.68,
+    0.4
+  ],
+  "roughness": 0.12,
+  "clearCoat": 0.4,
+  "clearCoatRoughness": 0.05,
+  "subsurface": {
+    "weight": 1.0,
+    "radius": [
+      0.45,
+      1.0,
+      0.6
+    ],
+    "scale": 0.05,
+    "anisotropy": 0.2
+  }
+}

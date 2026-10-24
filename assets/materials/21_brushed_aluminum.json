@@ -3,9 +3,18 @@
   "name": "Fırçalanmış Alüminyum",
   "category": "Metal",
   "type": "generic",
-  "baseColor": [0.91, 0.92, 0.92],
+  "baseColor": [
+    0.912,
+    0.921,
+    0.924
+  ],
   "roughness": 0.32,
   "metallic": 1,
   "specular": 0.5,
-  "anisotropy": 0.75
+  "anisotropy": 0.75,
+  "edgeTint": [
+    0.877,
+    0.906,
+    0.932
+  ]
 }

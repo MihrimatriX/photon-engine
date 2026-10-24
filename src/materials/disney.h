@@ -134,6 +134,12 @@ public:
         float sheen = 0.0f;
         float diffuseTransmission = 0.0f;
         float subsurface = 0.0f;
+        Color3f edgeTint{1.0f};
+        float thinFilmThickness = 0.0f;
+        float thinFilmIor = 1.4f;
+        bool inFlake = false;         ///< nokta bir metalik pulun üstünde mi
+        Vec3f flakeNormal{0, 1, 0};   ///< o pulun eğik normali
+        Color3f flakeColor{0.9f};
         Vec3f normal{0, 1, 0};
         Vec3f tangent{1, 0, 0};
     };

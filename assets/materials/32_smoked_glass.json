@@ -3,9 +3,21 @@
   "name": "Füme Cam",
   "category": "Cam",
   "type": "glass",
-  "baseColor": [0.55, 0.55, 0.57],
+  "baseColor": [
+    1,
+    1,
+    1
+  ],
   "roughness": 0,
   "metallic": 0,
   "specular": 0.5,
-  "ior": 1.5
+  "ior": 1.5,
+  "absorption": {
+    "color": [
+      0.42,
+      0.42,
+      0.45
+    ],
+    "distance": 0.02
+  }
 }
