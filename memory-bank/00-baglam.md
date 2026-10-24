@@ -86,8 +86,25 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - `scene/primitives.*`: küp, küre, silindir, koni, düzlem, simit (1 birimlik kutu, taban y=0, dışa bakan sarma; `test_primitives`). Kütüphane → Model'de sürüklenebilir kutucuklar, Ekle menüsü, sahne panelindeki "+". Boyut sahnedeki nesnelerin ortanca boyu (toplam boyuna bağlıyken her şekil bir öncekinden büyük geliyordu).
   - Görüntü modları (`ViewMode`, Z): Render, Kil (`buildRenderScene(..., clay)` → tek mat gri malzeme, yalnız viewport), Katı / Tel kafes / Normaller (`app/raster_view.*`: OpenGL 3.3, 3.x işlevleri glfwGetProcAddress ile, 4× MSAA FBO, hidden-line tel kafes, zemin ızgarası). GPU modlarında ışın izleyici duraklar. "Tel kafes bindir" Render/Kil üstüne.
   - Kompakt tema: 14 px yazı, dar dolgular; malzeme ızgarası 4 sütun; araç çubuğu kutusu düğmelerin gerçek boyutundan (ImDrawList kanalları).
+- **2026-10-24 (oturum 7, bulut, "KeyShot/Octane seviyesi" geçişi, dal `ccr-7dde8115-rf4vin`, sürüm 0.2.0):**
+  - Linux: vcpkg'siz FetchContent yolu artık `photon_app`'i de derliyor (ImGuizmo commit sabitlemesi + `src/` düzeni, imgui_stdlib, `<cstdint>`); Xvfb altında `--screenshot` ile arayüz doğrulandı.
+  - **Hacimler:** `Medium`, ortam yığını, Beer–Lambert, spektral MIS serbest uçuş, HG faz. Cam: soğurma rengi/mesafesi, bulanıklık.
+  - **SSS:** Disney `subsurface` (Blender 4 anlamı), Chiang 2016 ters çevirmesi, rastgele yürüyüş, beyaz Lambert çıkış köşesi.
+  - **Dispersiyon:** `core/color/spectral.*` (CIE → sRGB, beyaza normalize, önem örneklemeli λ), Cauchy/Abbe.
+  - **Metaller:** F82 kenar tonu, Turquin çoklu saçılma telafisi (E tablosu), ölçülmüş n,k'den preset'ler. **İnce film** (Airy, Gulbrandsen tabanı), **pullar** (Voronoi).
+  - **Işıklar:** küresel dikdörtgen örnekleme, noktaya özel ışık seçimi (`LightPicker`), O(1) yayıcı pdf, kameraya görünmez alan ışığı (yeni ışıklarda varsayılan), spot + IES (`assets/ies`, prosedürel).
+  - **Ortam:** Nishita fiziksel gök + örneklenen güneş konisi, NOAA konum/saat; **gölge yakalayıcı** zemin.
+  - **Görüntü:** görüntüleyici (bloom, glare, beyaz dengesi, kontrast, doygunluk, vinyet, renk sapması), çokgen bokeh, gürültü eşikli uyarlamalı örnekleme, dolaylı parlama sınırı; CLI `--noise/--clamp/--time`.
+  - **Yuvarlatılmış kenarlar** (integratörde bevel normali) ve **ince duvarlı cam** (+ film; sabun köpüğü).
+  - Arayüz: malzeme panelinde tüm yeni bölümler (cam paneli artık preset üzerinden kuruluyor: önceden IOR değişince gelişmiş alanlar kayboluyordu), Ortam'da HDRI/fiziksel gök, Işıklar'da spot/IES, Kamera'da diyafram kanatları, Görüntü'de görüntüleyici. Kütüphanede 5 fiziksel gök hazırı ve ~20 yeni malzeme.
+  - Testler 56 → 128 (fırın testleri: saçan ortam, dispersiyonlu cam, ince duvar, beyaz pürüzlü metal; küresel dikdörtgen kareleme; güneş konumu; gölge yakalayıcı; görüntüleyici; uyarlamalı hata).
+  - Ölçüm: `bench/BASELINE.md` "Linux" bölümü; `scripts/compare_exr.py`; sahneler `scripts/gen_material_scenes.py`.
 - **Sıradaki adımlar:**
-  - Stüdyo alan ışıkları kameraya görünüyor (beyaz dörtgenler); KeyShot gibi "kameraya görünmez" seçeneği.
+  - Windows/MSVC'de bu oturumun değişiklikleri derlenmedi (yalnız GCC 13). `/W4` uyarıları ve `std::complex` kullanımı kontrol edilmeli; OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli.
+  - Kostikler: cam arkası ve delta ışık + parlak yüzey yolları hâlâ gürültülü (parlama sınırı geçici çözüm). Path guiding (Open PGL) ya da MNEE.
+  - Render geçişleri (AOV'ler, ışık grupları, çok katmanlı EXR, Cryptomatte); ışık bağlama; yansımada görünürlük bayrağı.
+  - GPU (Faz 9).
+  - Pullar ve kutu eşleme dünya uzayında (nesne hareket edince kayar).
   - GPU Katı modunda dokular ve ışıklar yok (yalnız taban rengi).
   - Tutamaç sürüklenirken Esc ile iptal (şimdilik Ctrl+Z).
   - Kurulum paketi (Inno Setup, makinede yok), kod imzalama, log + çökme dökümü, otomatik kaydetme (eksik analizi "Faz 1").

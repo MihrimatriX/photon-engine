@@ -2,7 +2,7 @@
 
 **Ürün görselleştirme için fiziksel tabanlı render motoru ve masaüstü stüdyo.**
 
-PhotonEngine, KeyShot tarzı bir iş akışı sunan C++20 bir yol izleyicidir (path tracer):
+PhotonEngine, KeyShot / Octane tarzı bir iş akışı sunan C++20 bir yol izleyicidir (path tracer):
 modeli sürükle-bırak ile içe aktar, kütüphaneden malzemeleri parçaların üzerine bırak,
 bir stüdyo/HDRI seç, viewport'ta birkaç saniyede gürültüsüz önizlemeyi gör ve tek tıkla
 yüksek çözünürlüklü render al. Aynı zamanda bir öğrenme projesidir: kod, bilgisayar
@@ -14,24 +14,51 @@ grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazılm
 
 ## Öne çıkanlar
 
-**Render**
+![Malzemeler: SSS, renkli cam, dispersiyon](docs/img/v2-volume.jpg)
+![Metaller, ince film ve pullu boyalar](docs/img/v2-metal.jpg)
+
+**Işık taşıma**
 - Çok sekmeli yol izleme: ışık örneklemesi (NEE) + BSDF örneklemesi, MIS (güç sezgiseli), Rus ruleti.
-- Owen karıştırmalı Sobol örnekleme (Burley 2020): ilerlemeli render'da hızlı yakınsama.
-- Intel Embree 4 ile ışın kesişimi (yoksa motorun kendi SAH BVH'si).
-- Intel Open Image Denoise (OIDN 2.5): viewport'ta etkileşim sırasında ve hedef örnekte yapay zekâ ile gürültü giderme; albedo + normal AOV'leri.
-- Ton eşleme: **Khronos PBR Nötr** (ürün renkleri için), AgX, ACES, Hable; EV pozlama; sRGB + titreşimli 8-bit.
+- **Noktaya özel ışık seçimi:** her ışığın o noktaya tahmini katkısına orantılı + %15 düzgün taban
+  (yansız). Softbox'lar **küresel dikdörtgen** olarak katı açıda düzgün örneklenir (Ureña 2013).
+  Vitrin sahnesinde eşit örnekte göreli hata (relMSE) **yarıya iner** (`bench/BASELINE.md`).
+- **Katılımcı ortamlar:** renkli cam ve sıvılarda Beer–Lambert soğurması, bulanık sıvılarda saçılma
+  (spektral MIS serbest uçuş, Henyey–Greenstein), iç içe hacimler için ortam yığını.
+- **Rastgele yürüyüş yüzey altı saçılımı (SSS)** (Chiang 2016 / Cycles): mum, yeşim, ten, sabun, süt, mermer.
+- **Spektral dispersiyon:** Abbe sayısından Cauchy n(λ); yol ilk dispersiyonlu camda bir dalga boyu
+  seçer (önem örneklemeli, beyaza normalize CIE ağırlıkları). Elmas "ateşi", prizma gökkuşağı.
+- **İnce duvarlı cam:** pencere, ampul, sabun köpüğü; gölgeler renkli ve kostik gürültüsüz geçer, MIS tutarlı.
+- **Uyarlamalı örnekleme** (piksel başına göreli standart hata eşiği) ve isteğe bağlı **dolaylı parlama sınırı**.
+- Owen karıştırmalı Sobol örnekleme (Burley 2020), Intel Embree 4, Intel Open Image Denoise 2.5.
 
 **Malzemeler**
-- Disney Principled: metal, plastik, araç boyası (vernik/clear coat), anizotropi (fırçalanmış metal), kumaş parlaklığı (sheen), ince yüzey geçirgenliği, ışık yayma.
-- Cam: kusursuz ve buzlu (GGX, VNDF örnekleme), kırılma indisi hazırları (su, cam, kristal, elmas).
-- 37 hazır malzeme (Plastik, Metal, Cam, Boya, Kumaş, Kauçuk, Seramik, Işık); motorla render edilmiş küçük resimler.
-- Dokular: taban rengi (sRGB), normal / pürüzlülük / metalik (doğrusal).
+- Disney Principled + üretim eklemeleri: **çoklu saçılma enerji telafisi** (Turquin 2019; beyaz pürüzlü
+  metal her pürüzlülükte ≈ %100 yansıtır), **F82 kenar tonu** (ölçülmüş n, k'den metaller), **ince film
+  girişimi** (Airy; ısıl renkli titanyum, sedef, yağ tabakası), **metalik boya pulları** (Voronoi),
+  vernik, anizotropi, sheen, ince yüzey geçirgenliği, ışık yayma.
+- **Yuvarlatılmış kenarlar** (KeyShot "round edges"): keskin CAD kenarları gölgelendirmede yuvarlanır.
+- Cam: kusursuz / buzlu (GGX, VNDF), hacim rengi, bulanıklık, dispersiyon, ince duvar + film.
+- 60+ hazır malzeme: plastik, ölçülmüş metaller (krom, alüminyum, altın, bakır, gümüş, platin...),
+  cam ve sıvılar (şarap, bal, opal, kurşun kristal, elmas, sabun köpüğü), pullu araç boyaları,
+  yarı saydamlar (SSS), kumaş, kauçuk, seramik, ışık.
 
 **Aydınlatma**
-- HDRI ortamlar (Poly Haven, CC0) + prosedürel gökyüzleri; döndürme ve parlaklık.
-- Arka plan: ortam, düz renk ya da **şeffaf** (alfa kanallı PNG).
-- Otomatik sonsuz zemin (gölge ve yansıma taşır).
-- Alan (softbox), güneş ve nokta ışıklar; 6 stüdyo preset'i (ışıklar sahne boyutuna ve kameraya göre yerleşir).
+- HDRI ortamlar (Poly Haven, CC0) + prosedürel stüdyo gradyanları.
+- **Fiziksel gök + güneş** (Nishita: Rayleigh, Mie, ozon): yükseklik/yön ya da **konum + tarih + saat**
+  (NOAA), pus, güneş boyutu; güneş ortam ışığının içinde ayrı bir koni olarak örneklenir (keskin, temiz gölge).
+- Alan (softbox, **kameraya görünmez** seçeneği), güneş, nokta ve **spot ışıklar (IES profilleriyle)**.
+- **Gölge yakalayıcı zemin:** ürünü beyaz fona ya da şeffaf PNG'ye yalnız gölgesiyle yerleştirir.
+- Arka plan: ortam, düz renk ya da şeffaf (alfa kanallı PNG). 6 stüdyo preset'i.
+
+![Fiziksel gök + gölge yakalayıcı](docs/img/v2-sky.jpg)
+
+**Kamera ve görüntü**
+- Fiziksel kamera: odak uzaklığı, f-durağı, alan derinliği, **çokgen diyafram (bokeh kanatları)**.
+- **Görüntüleyici (imager):** bloom, yıldız parlaması (glare), beyaz dengesi (K + ton), kontrast,
+  doygunluk, vinyet, renk sapması; viewport ve son render'da (EXR ham kalır).
+- Ton eşleme: **Khronos PBR Nötr** (ürün renkleri için), AgX, ACES, Hable; EV pozlama; sRGB + titreşimli 8-bit.
+
+![Bokeh, bloom ve yıldız parlaması](docs/img/v2-bokeh.jpg)
 
 **Arayüz**
 - Kütüphane (malzeme / ortam / stüdyo / model / doku), sahne ağacı, özellikler (nesne, malzeme, ortam, ışıklar, kamera, görüntü).
@@ -62,6 +89,21 @@ ctest --preset release
 
 glfw, Dear ImGui (docking), ImGuizmo ve nlohmann-json vcpkg ile gelir (`vcpkg.json`).
 
+## Derleme (Linux, GCC/Clang)
+
+vcpkg gerekmez; tüm bağımlılıklar sabitlenmiş FetchContent yedekleriyle gelir. Embree ve OIDN
+isteğe bağlıdır (yoksa motorun kendi BVH'si ve basit bulanıklık kullanılır).
+
+```bash
+sudo apt install build-essential cmake ninja-build libgl-dev libx11-dev libxrandr-dev \
+                 libxinerama-dev libxcursor-dev libxi-dev
+cmake --preset fetch-release -DGLFW_BUILD_WAYLAND=OFF
+cmake --build --preset fetch-release
+ctest --preset fetch-release
+```
+
+Arayüzsüz sunucuda uygulama `xvfb-run` ile çalışır (`--screenshot` modu görsel kontrol için).
+
 ### Paketleme
 
 ```powershell
@@ -81,7 +123,12 @@ build\release\photon_render.exe sahne.photon --res 1920x1080 --spp 256 --out ren
 ```
 
 `photon_render` arayüzsüz render ve ölçüm aracıdır: `--threads N`, `--bounces N`,
-`--no-denoise`, `--stats stats.json` (süre, Mörnek/sn).
+`--no-denoise`, `--stats stats.json` (süre, Mörnek/sn), `--noise 0.02` (uyarlamalı örnekleme),
+`--min-spp N`, `--clamp 10` (dolaylı parlama sınırı), `--time 60` (süre sınırı). Projedeki
+görüntüleyici ayarları PNG/JPEG çıktısına uygulanır.
+
+Görsel regresyon ve tanıtım sahneleri `bench/scenes/` altındadır (`scripts/gen_material_scenes.py`
+üretir); `scripts/compare_exr.py` iki EXR'nin bir referansa göre relMSE'sini verir.
 
 `photon_app --screenshot cikti.png [--ui material|render|env|light|camera] [--spp 16]`
 arayüzü çizip ekran görüntüsü alır ve çıkar (görsel regresyon için).
@@ -119,13 +166,15 @@ Tüm kısayollar: **F1**.
 
 ```
 src/
-├── core/          matematik, renk, görüntü + G/Ç, ton eşleme, RNG, örnekleme, iş parçacıkları
+├── core/          matematik, renk (+ spektral), görüntü + G/Ç, ton eşleme, görüntüleyici, RNG, örnekleme
+│                  (+ faz fonksiyonu), iş parçacıkları
 ├── geometry/      küre, üçgen, mesh, kendi BVH'miz
-├── materials/     Lambert, ayna, cam (dielectric), Disney Principled, mikro-yüzey yardımcıları
-├── lights/        nokta, yönlü, alan, mesh ışığı, HDRI ortam ışığı
+├── materials/     Lambert, ayna, cam (hacim, dispersiyon, ince duvar), Disney Principled (SSS, ince film,
+│                  pullar, kenar tonu), mikro-yüzey + Fresnel yardımcıları, GGX albedo tablosu
+├── lights/        nokta, yönlü, spot + IES, alan (küresel dikdörtgen), mesh ışığı, HDRI + güneş, fiziksel gök
 ├── camera/        perspektif, ince mercek (alan derinliği), ortografik
 ├── samplers/      bağımsız, tabakalı, Owen-Sobol
-├── integrators/   yol izleyici
+├── integrators/   yol izleyici (ortamlar, SSS yürüyüşü, dispersiyon, ışık seçimi, gölge yakalayıcı)
 ├── io/            OBJ ve glTF yükleyiciler
 ├── engine/        render Scene, Renderer, Embree hızlandırıcısı, OIDN
 ├── scene/         sahne ağacı, malzeme kütüphanesi, ışık/ortam belgesi, stüdyolar, proje dosyası, geri al

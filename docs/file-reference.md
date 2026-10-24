@@ -228,6 +228,24 @@ thin_lens_camera.h — İnce mercek yaklaşımıyla alan derinliği (DoF) olan p
 apertureRadius = mercek açıklığının yarıçapı (büyüdükçe bulanıklık artar),
 focusDistance = keskin görünen düzlemin kameraya uzaklığı.
 
+### `src/core/color/spectral.cpp`
+
+spectral.cpp — CIE renk eşleme fonksiyonları, normalize RGB ağırlıkları ve dalga boyu örnekleme.
+
+### `src/core/color/spectral.h`
+
+spectral.h — Dalga boyu ↔ RGB köprüsü: dispersiyon (gökkuşağı kırılması) için.
+
+Motor RGB ile çalışır. Kırılma indisi dalga boyuna bağlı bir cama (elmas, kristal,
+prizma) çarpan yol tek bir dalga boyu λ seçer ve o andan sonra "tek renkli" ilerler:
+yol ağırlığı λ'nın RGB karşılığıyla çarpılır, cam her kesişimde n(λ) kullanır.
+Ağırlıklar, beyaz bir spektrumun (tüm λ eşit) ortalamasının tam (1, 1, 1) olacağı
+biçimde normalize edilir: dispersiyonsuz bir sahnede seçim görüntüyü değiştirmez.
+
+Renk eşleme fonksiyonları: CIE 1931 2°, Wyman–Sloan–Shirley 2013 çok-loblu analitik
+yaklaşımı. XYZ → doğrusal sRGB (D65); negatif kısımlar 0'a kırpılır (gamut dışı spektral
+renkler hafif doygunluk kaybeder, ama ağırlık asla negatif olmaz; film negatifi reddeder).
+
 ### `src/core/color/spectrum.h`
 
 spectrum.h — Color3f: renderer'ın "spektrumu" olarak kullanılan doğrusal RGB üçlüsü.
@@ -279,6 +297,19 @@ image_io.h — Görüntü okuma/yazma: PNG/JPG (8-bit, ton eşlenmiş), EXR (hal
 HDR/EXR/LDR yükleme. 8-bit dokular sRGB ya da doğrusal (veri) olarak çözülür.
 Kural: renk dokuları sRGB kodludur ve doğrusala çevrilir; normal/pürüzlülük haritaları
 "veri"dir, eğri uygulanmaz.
+
+### `src/core/image/imager.cpp`
+
+imager.cpp — Bloom (çok ölçekli Gauss), yıldız parlaması, Bradford beyaz dengesi,
+log-kontrast, doygunluk, vinyet ve yanal renk sapması.
+
+### `src/core/image/imager.h`
+
+imager.h — Görüntüleyici (imager): render'ın HDR sonucuna, ton eşlemeden ÖNCE uygulanan
+fotoğrafik son işlemler. Octane'nin "Imager"ı ve KeyShot'ın "Image Styles" karşılığı:
+  renk sapması → bloom → yıldız parlaması (glare) → beyaz dengesi → kontrast/doygunluk → vinyet
+Hepsi doğrusal (scene-linear) değerlerde çalışır; parlak noktalar gerçek HDR değerleriyle
+taştığı için bloom ve glare fiziksel bir merceğe benzer davranır. Varsayılanlar etkisizdir.
 
 ### `src/core/image/tone_mapping.cpp`
 
@@ -409,6 +440,13 @@ yolları ("Masaüstü/şişe.obj") bozar; u8string üzerinden geçmek bunu engel
 
 rng.h — PCG32 sözde-rastgele sayı üreteci (O'Neill 2014, XSH-RR çıkışı). Hızlı, küçük
 durumlu ve tohumlanabilir; örnekleyiciler ve testler bunu kullanır.
+
+### `src/core/sampling/phase.h`
+
+phase.h — Henyey–Greenstein faz fonksiyonu: katılımcı ortamda (sis, süt, mum, deri)
+bir saçılma olayında ışığın yeni yönünün dağılımı. Yüzeylerdeki BSDF'nin hacimdeki
+karşılığıdır; tek parametresi g ∈ (−1, 1): 0 her yöne eşit (izotrop), > 0 ileri,
+< 0 geri saçılma. Kaynak: Henyey & Greenstein 1941, PBRT 4. baskı §11.3.
 
 ### `src/core/sampling/sampling.h`
 
@@ -629,6 +667,20 @@ Equirectangular (enlem-boylam) bir HDR görüntü sahneyi her yönden aydınlat�
 dağılımından 2B bir CDF kurulur: parlak pencereler/güneş daha sık seçilir,
 böylece aynı örnek sayısında çok daha az gürültü olur.
 
+### `src/lights/ies.cpp`
+
+ies.cpp — IES LM-63 ayrıştırıcı ve çift doğrusal profil okuması.
+
+### `src/lights/ies.h`
+
+ies.h — IES LM-63 fotometrik profilleri: gerçek bir armatürün yönlere göre ışık
+şiddeti dağılımı (üreticilerin yayımladığı .ies dosyaları). Spot ışığına "gerçek lamba"
+karakteri verir: duvarda yelpaze desenleri, sert/yumuşak huzme kenarı.
+
+C tipi fotometri: dikey açı γ armatürün ekseninden (0° = nadir, aşağı; 180° = yukarı),
+yatay açı φ eksen etrafında. Dosya simetriyi son yatay açıyla bildirir: 0 → eksenel
+simetrik, 90 → dörtte bir, 180 → iki taraflı, 360 → tam.
+
 ### `src/lights/light.h`
 
 light.h — Tüm ışık kaynaklarının ortak arayüzü (Light) ve örnek sonucu (LightSample).
@@ -645,6 +697,33 @@ point_light.cpp — Nokta ışığın örneklenmesi ve toplam gücü.
 point_light.h — Nokta ışık: tek bir noktadan her yöne eşit ışıyan delta ışık.
 İdeal bir kavramdır (sonsuz küçük kaynak): keskin gölge verir, kameraya görünmez.
 
+### `src/lights/sky_model.cpp`
+
+sky_model.cpp — Nishita tek saçılmalı gökyüzü ve NOAA güneş konumu.
+
+### `src/lights/sky_model.h`
+
+sky_model.h — Fiziksel gökyüzü (Nishita 1993, tek saçılma) ve güneş konumu.
+
+Atmosfer küresel kabuktur: Rayleigh (hava molekülleri, mavi gök), Mie (aerosol/pus,
+güneş çevresindeki parlak hale) ve ozon (alacakaranlığın mavisi; yalnız soğurur).
+Her bakış yönü için ışın atmosfer boyunca yürünür; her adımda güneşten gelen ışığın
+oraya kadar ve oradan göze kadar zayıflaması (Beer–Lambert) ile saçılma faz
+fonksiyonları çarpılıp toplanır. Sonuç equirect bir HDR görüntüdür; güneş diski ayrı
+döner (EnvironmentLight onu koni olarak örnekler: keskin, gürültüsüz gölgeler).
+Kaynaklar: Nishita vd. 1993; Scratchapixel "Simulating the Colors of the Sky";
+Bruneton & Neyret 2008 (ozon profili); Blender Cycles Nishita gök dokusu.
+
+### `src/lights/spot_light.cpp`
+
+spot_light.cpp — Spot ışığın koni düşüşü, IES profili ve örneklenmesi.
+
+### `src/lights/spot_light.h`
+
+spot_light.h — Spot ışık: tek noktadan bir koni içine ışıyan delta ışık (projektör,
+ray spot, el feneri). Koni kenarı yumuşatılabilir; isteğe bağlı IES profili gerçek bir
+armatürün açısal dağılımını verir. Koni 180° ise yalnız IES dağılımı kullanılır.
+
 ### `src/main.cpp`
 
 main.cpp — photon_render: arayüzsüz (komut satırı) renderer ve ölçüm aracı.
@@ -652,7 +731,9 @@ main.cpp — photon_render: arayüzsüz (komut satırı) renderer ve ölçüm ar
   photon_render sahne.photon  [--out render.png] [--spp 256] [--res 1920x1080]
   photon_render model.obj     [...]               (stüdyo ışığı + otomatik kadraj)
   photon_render --cornell     [...]
-Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json
+Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json,
+  --noise 0.02 (uyarlamalı örnekleme: göreli hata hedefi), --min-spp N,
+  --clamp 10 (dolaylı parlama sınırı), --time SN (süre sınırı; ilerlemeli render)
 stats.json: süre, örnek sayısı, Mray/s (milyon birincil ışın / saniye).
 
 ### `src/materials/dielectric.cpp`
@@ -672,11 +753,22 @@ kırılma; pürüzlü hali GGX mikro-yüzey BSDF'si (PBRT-v4 DielectricBxDF, Wal
 Basitleştirilmiş Disney Principled BRDF (Burley 2012/2015): Burley difüz, GGX
 speküler (anizotrop olabilir), sheen, ince-yüzey difüz geçirgenlik ve enerjiyi
 koruyan bir clearcoat katmanı. Örnekleme Heitz 2018 görünür normalleri (VNDF) ile.
+Üretim eklemeleri: metal kenar tonu (F82), çoklu saçılma enerji telafisi (Turquin
+2019), ince film girişimi, metalik boya pulları ve rastgele yürüyüş SSS lobu.
 
 ### `src/materials/disney.h`
 
 Disney Principled BRDF malzemesinin arayüzü: parametreler (metallic, roughness, specular,
 clearcoat, sheen, anizotropi, difüz geçirgenlik) ve doku haritaları. Matematik disney.cpp'de.
+
+### `src/materials/fresnel.h`
+
+fresnel.h — Gelişmiş Fresnel modelleri: karmaşık indisli iletken (metal), F82-tint
+(OpenPBR'ın metal kenar tonu), Gulbrandsen'in sanatçı dostu metal ters çevirmesi ve
+ince film girişimi (Airy toplamı). Hepsi kutuplanmamış ışık için (s ve p ortalaması).
+Kaynaklar: Born & Wolf §1.5 ve §13.4; Gulbrandsen 2014 (JCGT 3(4)); Kutz, Hasan,
+Edmondson 2021 "Novel aspects of the Adobe Standard Material" (F82); Belcour & Barla
+2017 "A Practical Extension to Microfacet Theory for the Modeling of Varying Iridescence".
 
 ### `src/materials/lambertian.cpp`
 
@@ -692,6 +784,10 @@ BRDF sabittir: f = albedo / π. İsteğe bağlı 'emission' ile yüzey ışık d
 
 Malzeme (BSDF) arayüzü: sample / eval / pdf / emitted. Tüm malzemeler bunu uygular.
 Yön kuralı PBRT ile aynı: wo ve wi yüzeyden DIŞARI bakar, birim uzunluktadır.
+
+### `src/materials/microfacet.cpp`
+
+microfacet.cpp — GGX yönlü albedo tablosu E(μ, α): çoklu saçılma enerji telafisi için.
 
 ### `src/materials/microfacet.h`
 
