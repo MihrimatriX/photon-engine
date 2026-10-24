@@ -14,6 +14,7 @@ void Scene::addShape(std::shared_ptr<Shape> shape) {
     auto mesh = std::dynamic_pointer_cast<TriangleMesh>(shape);
     m_shapes.push_back(std::move(shape));
     if (!mesh || !mesh->material()) return;
+    if (mesh->material()->transmitsShadows()) m_shadowTransmitters = true;
 
     // Emisyonlu mesh (ör. LED panel malzemesi) → ışık örneklemesine de girer.
     SurfaceInteraction si;
@@ -64,7 +65,9 @@ void Scene::setEnvironment(std::shared_ptr<EnvironmentLight> envLight) {
 }
 
 void Scene::retainMaterial(std::shared_ptr<const Material> material) {
-    if (material) m_materials.push_back(std::move(material));
+    if (!material) return;
+    if (material->transmitsShadows()) m_shadowTransmitters = true;
+    m_materials.push_back(std::move(material));
 }
 
 namespace {
@@ -99,6 +102,7 @@ void Scene::reset() {
     m_emitterOfShape.clear();
     m_cameraInvisible.clear();
     m_shadowCatcher = nullptr;
+    m_shadowTransmitters = false;
     m_background = Background{};
 }
 

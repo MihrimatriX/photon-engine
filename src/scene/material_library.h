@@ -65,6 +65,8 @@ struct MaterialPreset {
     float flakeSize = 0.004f;      ///< sahne birimi
     float flakeRoughness = 0.3f;   ///< pul yönlerinin dağınıklığı
     Color3f flakeColor{0.9f};
+    float roundEdges = 0.0f;       ///< yuvarlatılmış kenar yarıçapı (her tür)
+    bool thinWalled = false;       ///< cam: ince duvar (pencere, köpük); film kalınlığı thinFilmThickness
 };
 
 /// Gelişmiş alanları JSON'a yaz / JSON'dan oku (yalnız varsayılandan farklı olanlar yazılır).

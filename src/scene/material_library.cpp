@@ -147,7 +147,10 @@ std::shared_ptr<Material> MaterialLibrary::createMaterial(const MaterialPreset& 
 }
 
 void MaterialLibrary::applyAdvanced(const MaterialPreset& p, Material& mat) {
+    mat.setRoundEdgeRadius(p.roundEdges);
     if (auto* g = dynamic_cast<Dielectric*>(&mat)) {
+        g->setThinWalled(p.thinWalled);
+        g->setThinFilm(p.thinWalled ? p.thinFilmThickness : 0.0f);
         g->setAbsorption(p.absorbColor, p.absorbDistance);
         g->setScattering(p.scatterDensity, p.scatterColor, p.scatterAnisotropy);
         g->setAbbe(p.abbe);
@@ -170,7 +173,12 @@ json colJson(const Color3f& c) { return json::array({c.r, c.g, c.b}); }
 
 void presetAdvancedToJson(const MaterialPreset& p, json& j) {
     const MaterialPreset def;
+    if (p.roundEdges > 0.0f) j["roundEdges"] = p.roundEdges;
     if (p.kind == MaterialKind::Glass) {
+        if (p.thinWalled) {
+            j["thinWalled"] = true;
+            if (p.thinFilmThickness > 0.0f) j["thinFilm"] = {{"thickness", p.thinFilmThickness}};
+        }
         if (p.absorbColor != def.absorbColor)
             j["absorption"] = {{"color", colJson(p.absorbColor)}, {"distance", p.absorbDistance}};
         if (p.scatterDensity > 0.0f)
@@ -207,6 +215,8 @@ void presetAdvancedFromJson(const json& j, MaterialPreset& p) {
         p.subsurfaceAnisotropy = s->value("anisotropy", p.subsurfaceAnisotropy);
     }
     p.edgeTint = readColor(j, "edgeTint", p.edgeTint);
+    p.roundEdges = j.value("roundEdges", p.roundEdges);
+    p.thinWalled = j.value("thinWalled", p.thinWalled);
     if (auto t = j.find("thinFilm"); t != j.end() && t->is_object()) {
         p.thinFilmThickness = t->value("thickness", p.thinFilmThickness);
         p.thinFilmIor = t->value("ior", p.thinFilmIor);
@@ -236,6 +246,7 @@ MaterialPreset MaterialLibrary::presetFromMaterial(const Material& mat, const st
     p.name = name;
     p.id = slug(name);
     p.category = "Benim";
+    p.roundEdges = mat.roundEdgeRadius();
     if (const auto* d = dynamic_cast<const DisneyMaterial*>(&mat)) {
         p.baseColor = d->baseColor();
         p.metallic = d->metallic();
@@ -280,6 +291,8 @@ MaterialPreset MaterialLibrary::presetFromMaterial(const Material& mat, const st
         p.scatterColor = g->scatterColor();
         p.scatterAnisotropy = g->scatterAnisotropy();
         p.abbe = g->abbe();
+        p.thinWalled = g->thinWalled();
+        p.thinFilmThickness = g->thinFilmThickness();
     }
     return p;
 }

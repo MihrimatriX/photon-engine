@@ -39,6 +39,9 @@ struct BSDFSample {
     Color3f f;
     float pdf = 0.0f;
     bool delta = false;      ///< Dirac lobu (ayna, pürüzsüz cam): NEE ve MIS yok.
+    /// Doğrultu değişmeden geçiş (ince duvarlı cam): integratör MIS durumunu (önceki köşe)
+    /// korur; böylece aynı ışığa gölge ışınıyla ve BSDF ışınıyla ulaşan yollar çakışmaz.
+    bool passThrough = false;
     /// Yüzey altına giriş: integratör cismin içinde rastgele yürüyüş yapar, ışık başka
     /// bir noktadan çıkar. Bu durumda f/pdf yerine doğrudan 'weight' kullanılır.
     bool subsurface = false;
@@ -107,6 +110,18 @@ public:
     /// sampleFull 'subsurface' döndürdüğünde rastgele yürüyüşün katsayıları.
     virtual bool subsurfaceCoeffs(const SurfaceInteraction&, SubsurfaceCoeffs&) const { return false; }
 
+    /// Gölge ışını bu yüzeyden doğrultusu değişmeden geçebilir mi (ince duvarlı cam)?
+    virtual bool transmitsShadows() const { return false; }
+    /// Geçen ışığın oranı (transmitsShadows true iken).
+    virtual Color3f shadowTransmittance(const SurfaceInteraction&, const Vec3f& /*dir*/) const {
+        return Color3f::black();
+    }
+
+    /// Yuvarlatılmış kenarlar (KeyShot "Round edges", Cycles "Bevel"): keskin model
+    /// kenarları gölgelendirmede bu yarıçapla (sahne birimi) yuvarlanır; geometri değişmez.
+    void setRoundEdgeRadius(float r) { m_roundEdges = r > 0.0f ? r : 0.0f; }
+    float roundEdgeRadius() const { return m_roundEdges; }
+
     /// Yalnız delta (Dirac) lobları varsa true: kusursuz ayna, pürüzsüz cam. Bu yüzeylerde
     /// ışık örneklemesi (NEE) anlamsızdır (BSDF tek bir yön dışında 0) ve bir sonraki
     /// isabetteki ışık yayımı MIS ağırlığı olmadan eklenir. Eskiden integratör bunu
@@ -124,6 +139,9 @@ public:
     virtual Color3f emitted(const SurfaceInteraction&) const {
         return Color3f::black();
     }
+
+protected:
+    float m_roundEdges = 0.0f;
 };
 
 } // namespace photon

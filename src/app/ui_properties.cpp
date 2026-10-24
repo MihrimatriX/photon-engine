@@ -384,33 +384,94 @@ void Application::drawMaterialProps() {
     ImGui::Spacing();
 
     if (auto g = std::dynamic_pointer_cast<Dielectric>(mat)) {
-        // Dielectric değişmez alanlı; düzenleme = yeni nesne + değiştir (yerinde set yok).
-        float ior = g->ior(), rough = g->roughness();
-        Color3f tint = g->tint();
+        // Dielectric değişmez alanlı; düzenleme = preset üzerinden yeni nesne + değiştir.
+        // (Preset tüm gelişmiş alanları taşır: soğurma, bulanıklık, dispersiyon kaybolmaz.)
+        MaterialPreset p = MaterialLibrary::presetFromMaterial(*g, "cam");
         bool changed = false;
+        auto glassSlider = [&](const char* label, const char* id, float& v, float lo, float hi, const char* fmt,
+                               const char* tip = nullptr, ImGuiSliderFlags flags = 0) {
+            ui::Prop(label, tip);
+            if (ui::SliderF(id, &v, lo, hi, fmt, flags)) {
+                undoPoint(*this, ImGui::GetID(id));
+                changed = true;
+            }
+        };
         if (ui::BeginProps("glass")) {
-            ui::Prop("Renk (geçirgenlik)");
-            if (colorEdit("##tint", tint)) { undoPoint(*this, ImGui::GetID("tint")); changed = true; }
-            ui::Prop("Kırılma indisi", "Işığın camda ne kadar büküleceği. Su 1.33, cam 1.5, elmas 2.42");
-            if (ui::SliderF("##ior", &ior, 1.0f, 2.6f, "%.3f")) { undoPoint(*this, ImGui::GetID("ior")); changed = true; }
-            ui::Prop("Pürüzlülük", "0 = berrak cam, yükseldikçe buzlu cam");
-            if (ui::SliderF("##gr", &rough, 0.0f, 1.0f, "%.3f")) { undoPoint(*this, ImGui::GetID("gr")); changed = true; }
+            ui::Prop("Yüzey rengi", "Her yüzey geçişinde uygulanan renk. Kalınlığa bağlı gerçek renk için "
+                                    "Hacim → Renk kullanın");
+            if (colorEdit("##tint", p.baseColor)) { undoPoint(*this, ImGui::GetID("tint")); changed = true; }
+            glassSlider("Kırılma indisi", "##ior", p.ior, 1.0f, 2.6f, "%.3f", "Işığın camda ne kadar büküleceği. Su 1.33, cam 1.5, elmas 2.42");
+            glassSlider("Pürüzlülük", "##gr", p.roughness, 0.0f, 1.0f, "%.3f", "0 = berrak cam, yükseldikçe buzlu cam");
             ui::EndProps();
         }
         ImGui::Spacing();
         ImGui::TextColored(pal.textFaint, "Hazır:");
-        struct IorPreset { const char* n; float v; };
-        const IorPreset presets[] = {{"Su", 1.333f}, {"Cam", 1.5f}, {"Kristal", 1.6f}, {"Safir", 1.77f}, {"Elmas", 2.42f}};
-        for (const auto& p : presets) {
+        struct IorPreset { const char* n; float v; float abbe; };
+        const IorPreset presets[] = {{"Su", 1.333f, 0.0f}, {"Cam", 1.5f, 0.0f}, {"Kristal", 1.62f, 34.0f},
+                                     {"Safir", 1.77f, 72.0f}, {"Elmas", 2.42f, 55.0f}};
+        for (const auto& pr : presets) {
             ImGui::SameLine();
-            if (ui::GhostButton(p.n)) {
+            if (ui::GhostButton(pr.n)) {
                 pushUndo();
-                ior = p.v;
+                p.ior = pr.v;
+                p.abbe = pr.abbe;
                 changed = true;
             }
         }
+        const bool hasVolume = p.absorbColor != Color3f(1.0f) || p.scatterDensity > 0.0f;
+        if (ui::Section(ICON_DROPLET, "Hacim (renk ve bulanıklık)", hasVolume)) {
+            if (ui::BeginProps("vol")) {
+                ui::Prop("Renk", "Işık camın içinde 'Mesafe' kadar ilerleyince bu renge döner (Beer–Lambert). "
+                                 "Kalın yerler koyu, ince yerler açık görünür: şarap, bal, renkli şişe");
+                if (colorEdit("##abs", p.absorbColor)) { undoPoint(*this, ImGui::GetID("abs")); changed = true; }
+                glassSlider("Mesafe", "##absd", p.absorbDistance, 1e-4f, 10.0f, "%.4f", "Sahne birimi (metre)",
+                            ImGuiSliderFlags_Logarithmic);
+                glassSlider("Bulanıklık", "##sd", p.scatterDensity, 0.0f, 500.0f, "%.2f",
+                            "İçeride saçılma yoğunluğu (1/birim): süt, sabunlu su, opal", ImGuiSliderFlags_Logarithmic);
+                if (p.scatterDensity > 0.0f) {
+                    ui::Prop("Saçılma rengi");
+                    if (colorEdit("##sc", p.scatterColor)) { undoPoint(*this, ImGui::GetID("sc")); changed = true; }
+                    glassSlider("Anizotropi", "##sg", p.scatterAnisotropy, -0.9f, 0.9f, "%.2f", "> 0 ileri saçılma (sis, süt)");
+                }
+                ui::EndProps();
+            }
+        }
+        if (ui::Section(ICON_SQUARE_DASHED, "İnce duvar", p.thinWalled)) {
+            if (ui::BeginProps("thin")) {
+                ui::Prop("İnce duvar", "Kalınlığı olmayan zar: pencere camı, sabun köpüğü, ampul. Işık kırılmadan "
+                                       "geçer, gölgeler renkli ve hızlı (kostik gürültüsü yok)");
+                if (ui::Toggle("thinw", &p.thinWalled)) {
+                    pushUndo();
+                    changed = true;
+                }
+                if (p.thinWalled) {
+                    glassSlider("Film kalınlığı", "##tfg", p.thinFilmThickness, 0.0f, 1500.0f,
+                                p.thinFilmThickness > 0.0f ? "%.0f nm" : "kapalı",
+                                "Duvarın kendisi bir girişim filmi: sabun köpüğü ~300–700 nm (indis = kırılma indisi)");
+                }
+                ui::EndProps();
+            }
+        }
+        if (ui::Section(ICON_GEM, "Dispersiyon", p.abbe > 0.0f)) {
+            if (ui::BeginProps("disp")) {
+                glassSlider("Abbe sayısı", "##abbe", p.abbe, 0.0f, 90.0f, p.abbe > 0.0f ? "%.1f" : "kapalı",
+                            "Beyaz ışığın renklere ayrılması (elmas ateşi, prizma). Küçük sayı = güçlü "
+                            "dispersiyon: flint ~30, crown ~60, elmas 55. 0 = kapalı");
+                ui::EndProps();
+            }
+            ui::Hint("Dispersiyonlu yollar tek dalga boyunda izlenir: renkli kostikler daha çok örnek ister.");
+        }
+        if (ui::Section(ICON_CIRCLE, "Yuvarlatılmış kenarlar", p.roundEdges > 0.0f)) {
+            if (ui::BeginProps("rnd")) {
+                glassSlider("Yarıçap", "##rndg", p.roundEdges, 0.0f, 0.05f, p.roundEdges > 0.0f ? "%.4f" : "kapalı",
+                            "Keskin kenarlar gölgelendirmede bu yarıçapla yuvarlanır (sahne birimi)",
+                            ImGuiSliderFlags_Logarithmic);
+                ui::EndProps();
+            }
+        }
         if (changed) {
-            auto fresh = std::make_shared<Dielectric>(ior, tint, rough <= 0.005f ? 0.0f : rough);
+            if (p.roughness <= 0.005f) p.roughness = 0.0f;
+            auto fresh = MaterialLibrary::createMaterial(p);
             replaceMaterial(*m_s.graph.root(), mat.get(), fresh);
             markDocumentChanged(true);
         }
@@ -447,6 +508,15 @@ void Application::drawMaterialProps() {
                    "0 = ayna gibi parlak, 1 = tamamen mat");
             slider("Yansıma", "##spec", d->specular(), 0, 1, [&](float v) { d->setSpecular(v); },
                    "Yalıtkanlarda dik açıdaki yansıma gücü (0.5 ≈ %4)");
+            if (d->metallic() > 0.0f) {
+                ui::Prop("Kenar tonu", "Metalin sıyırma açısındaki rengi (F82). Beyaz = standart; altın ve "
+                                       "bakırda ölçülmüş metaller kenarda hafif renk değiştirir");
+                Color3f et = d->edgeTint();
+                if (colorEdit("##et", et)) {
+                    undoPoint(*this, ImGui::GetID("et"));
+                    editLive([&] { d->setEdgeTint(et); });
+                }
+            }
             ui::EndProps();
         }
     }
@@ -467,6 +537,83 @@ void Application::drawMaterialProps() {
                    "Kadife/kumaş kenarlarındaki yumuşak parlama (sheen)");
             slider("Işık geçirgenliği", "##dt", d->diffuseTransmission(), 0, 1,
                    [&](float v) { d->setDiffuseTransmission(v); }, "İnce yüzeylerde arkadan gelen ışık (silikon, kağıt)");
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_DROPLET, "Yüzey altı saçılımı (SSS)", d->subsurface() > 0.0f)) {
+        if (ui::BeginProps("sss")) {
+            slider("Ağırlık", "##ssw", d->subsurface(), 0, 1, [&](float v) { d->setSubsurface(v); },
+                   "Işığın yüzeyin altına girip başka yerden çıkması: mum, yeşim, ten, sabun, süt, mermer. "
+                   "Renk taban rengidir");
+            if (d->subsurface() > 0.0f) {
+                ui::Prop("Yarıçap (renk)", "Kanal başına ışığın içeride gittiği göreli mesafe. Tende kırmızı "
+                                           "en uzağa gider: (1, 0.2, 0.1)");
+                Color3f rad = d->subsurfaceRadius();
+                if (colorEdit("##ssr", rad)) {
+                    undoPoint(*this, ImGui::GetID("ssr"));
+                    editLive([&] { d->setSubsurfaceRadius(rad); });
+                }
+                ui::Prop("Ölçek", "Yarıçap çarpanı (sahne birimi, metre). Nesne boyutuna göre ayarlayın");
+                float sc = d->subsurfaceScale();
+                if (ui::SliderF("##sss", &sc, 1e-4f, 2.0f, "%.4f", ImGuiSliderFlags_Logarithmic)) {
+                    undoPoint(*this, ImGui::GetID("sss"));
+                    editLive([&] { d->setSubsurfaceScale(sc); });
+                }
+                slider("Anizotropi", "##ssg", d->subsurfaceAnisotropy(), -0.9f, 0.9f,
+                       [&](float v) { d->setSubsurfaceAnisotropy(v); }, "> 0 ileri saçılma (ten, yaprak)");
+            }
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_CIRCLE, "Yuvarlatılmış kenarlar", d->roundEdgeRadius() > 0.0f)) {
+        if (ui::BeginProps("rnd")) {
+            ui::Prop("Yarıçap", "CAD modellerindeki jilet keskinliğindeki kenarlar gölgelendirmede bu yarıçapla "
+                                "yuvarlanır (geometri değişmez). Sahne birimi; 1–5 mm tipik");
+            float r = d->roundEdgeRadius();
+            if (ui::SliderF("##rnd", &r, 0.0f, 0.05f, r > 0.0f ? "%.4f" : "kapalı", ImGuiSliderFlags_Logarithmic)) {
+                undoPoint(*this, ImGui::GetID("rnd"));
+                editLive([&] { d->setRoundEdgeRadius(r); });
+            }
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_SPARKLES, "İnce film (iridesans)", d->thinFilmThickness() > 0.0f)) {
+        if (ui::BeginProps("tf")) {
+            ui::Prop("Kalınlık", "Nanometre. 0 = kapalı. 200–800 nm arası gökkuşağı renkleri: sabun köpüğü, "
+                                 "yağ tabakası, ısıl renk almış titanyum, mercek kaplaması");
+            float t = d->thinFilmThickness();
+            if (ui::SliderF("##tft", &t, 0.0f, 1500.0f, t > 0.0f ? "%.0f nm" : "kapalı")) {
+                undoPoint(*this, ImGui::GetID("tft"));
+                editLive([&] { d->setThinFilm(t, d->thinFilmIor()); });
+            }
+            ui::Prop("Film indisi", "Sabun 1.33, yağ 1.47, titanyum oksit 2.4");
+            float n = d->thinFilmIor();
+            if (ui::SliderF("##tfn", &n, 1.0f, 3.0f, "%.2f")) {
+                undoPoint(*this, ImGui::GetID("tfn"));
+                editLive([&] { d->setThinFilm(d->thinFilmThickness(), n); });
+            }
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_SPARKLES, "Metalik pullar", d->flakeDensity() > 0.0f)) {
+        if (ui::BeginProps("flk")) {
+            ui::Prop("Yoğunluk", "Araç boyasındaki metal pulların oranı. 0 = kapalı. Kaplama (vernik) ile birlikte kullanın");
+            float den = d->flakeDensity(), size = d->flakeSize(), rough = d->flakeRoughness();
+            Color3f col = d->flakeColor();
+            bool fchanged = false;
+            if (ui::SliderF("##fd", &den, 0.0f, 1.0f, "%.2f")) { undoPoint(*this, ImGui::GetID("fd")); fchanged = true; }
+            if (den > 0.0f) {
+                ui::Prop("Pul boyu", "Sahne birimi (metre). Gerçek boyada ~0.02–0.1 mm; uzak çekimde büyütün");
+                if (ui::SliderF("##fs", &size, 1e-5f, 0.05f, "%.5f", ImGuiSliderFlags_Logarithmic)) {
+                    undoPoint(*this, ImGui::GetID("fs"));
+                    fchanged = true;
+                }
+                ui::Prop("Dağınıklık", "Pulların eğimi: 0 hepsi yüzeye paralel, 1 her yöne ışıltı");
+                if (ui::SliderF("##fr", &rough, 0.0f, 1.0f, "%.2f")) { undoPoint(*this, ImGui::GetID("fr")); fchanged = true; }
+                ui::Prop("Pul rengi");
+                if (colorEdit("##fc", col)) { undoPoint(*this, ImGui::GetID("fc")); fchanged = true; }
+            }
+            if (fchanged) editLive([&] { d->setFlakes(den, size, rough, col); });
             ui::EndProps();
         }
     }

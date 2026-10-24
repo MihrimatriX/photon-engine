@@ -30,7 +30,21 @@ public:
     float ior() const { return m_ior; }
     const Color3f& tint() const { return m_tint; }
     float roughness() const { return m_roughness; }
-    bool isDelta() const override { return m_roughness <= 1e-3f; } // dielectric.cpp: sharp()
+    bool isDelta() const override { return m_thinWalled || m_roughness <= 1e-3f; } // dielectric.cpp: sharp()
+
+    // ── İnce duvar ve ince film ─────────────────────────────────────────────
+    /// İnce duvarlı: yüzey kalınlığı olmayan bir zar (pencere camı, sabun köpüğü, ampul).
+    /// Işık kırılmadan geçer (iki yüzün kırılması birbirini sıfırlar), içerde ortam yok,
+    /// gölge ışınları da renkli olarak geçer. Pürüzlülük yok sayılır.
+    void setThinWalled(bool v) { m_thinWalled = v; }
+    bool thinWalled() const { return m_thinWalled; }
+    /// İnce duvarın kendisi bir girişim filmi olsun (sabun köpüğü): kalınlık nm, 0 = yok.
+    void setThinFilm(float thicknessNm) { m_filmThickness = thicknessNm > 0.0f ? thicknessNm : 0.0f; }
+    float thinFilmThickness() const { return m_filmThickness; }
+    bool transmitsShadows() const override { return m_thinWalled; }
+    Color3f shadowTransmittance(const SurfaceInteraction& si, const Vec3f& dir) const override;
+    bool sampleFull(const Vec3f& wo, const SurfaceInteraction& si, float uc, const Vec2f& u,
+                    BSDFSample& out) const override;
 
     // ── Hacim: renkli cam/sıvı soğurması ve bulanıklık ──────────────────────
     /// Beer–Lambert soğurması, sanatçı dostu biçimde: ışık camın içinde @p distance
@@ -47,8 +61,10 @@ public:
     const Color3f& scatterColor() const { return m_scatterColor; }
     float scatterAnisotropy() const { return m_scatterAniso; }
 
-    bool isVolumeBoundary() const override { return true; }
-    const Medium* interiorMedium() const override { return m_medium.empty() ? nullptr : &m_medium; }
+    bool isVolumeBoundary() const override { return !m_thinWalled; }
+    const Medium* interiorMedium() const override {
+        return (m_thinWalled || m_medium.empty()) ? nullptr : &m_medium;
+    }
 
     // ── Dispersiyon ─────────────────────────────────────────────────────────
     /// Abbe sayısı (0 = dispersiyon yok). Küçüldükçe beyaz ışık daha çok renge ayrılır.
@@ -71,6 +87,11 @@ private:
     Color3f m_scatterColor{1.0f};
     float m_scatterAniso = 0.0f;
     Medium m_medium;
+    bool m_thinWalled = false;
+    float m_filmThickness = 0.0f;
+
+    /// İnce duvarın yansıtması (kanal başına): girişim filmi ya da iki yüzlü levha.
+    Color3f thinWallReflectance(float cosTheta) const;
 };
 
 } // namespace photon
