@@ -1,0 +1,408 @@
+{
+ "format": "photon-project",
+ "version": 2,
+ "camera": {
+  "target": [
+   0.0,
+   0.5,
+   0.0
+  ],
+  "radius": 4.419642857142857,
+  "theta": 1.28,
+  "phi": 1.5707963267948966,
+  "fov": 30.0,
+  "orthographic": false,
+  "aperture": 0.0
+ },
+ "render": {
+  "denoise": true,
+  "exposure": 0.0,
+  "maxBounces": 12,
+  "toneMap": 5
+ },
+ "environment": {
+  "background": {
+   "color": [
+    0.18,
+    0.18,
+    0.18
+   ],
+   "mode": "environment"
+  },
+  "ground": {
+   "color": [
+    0.42,
+    0.42,
+    0.42
+   ],
+   "enabled": true,
+   "roughness": 0.55
+  },
+  "hdr": "../../assets/environments/studio_small_09_1k.hdr",
+  "intensity": 1.0,
+  "rotation": 0.0,
+  "horizon": [
+   0.55,
+   0.55,
+   0.58
+  ],
+  "zenith": [
+   0.75,
+   0.8,
+   0.95
+  ]
+ },
+ "lights": [
+  {
+   "type": "area",
+   "name": "Ana ışık",
+   "enabled": true,
+   "color": [
+    1.0,
+    0.97,
+    0.92
+   ],
+   "intensity": 7.0,
+   "position": [
+    -1.4779956238847276,
+    3.161586474400637,
+    2.5599635139328103
+   ],
+   "target": [
+    0.0,
+    0.5,
+    0.0
+   ],
+   "width": 1.9888392857142856,
+   "height": 1.9888392857142856,
+   "azimuth": 120,
+   "elevation": 42
+  },
+  {
+   "type": "area",
+   "name": "Dolgu",
+   "enabled": true,
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 1.5,
+   "position": [
+    3.115591964548008,
+    2.554603959980454,
+    3.1155919645480075
+   ],
+   "target": [
+    0.0,
+    0.5,
+    0.0
+   ],
+   "width": 2.651785714285714,
+   "height": 2.651785714285714,
+   "azimuth": 45,
+   "elevation": 25
+  },
+  {
+   "type": "area",
+   "name": "Kontur",
+   "enabled": true,
+   "color": [
+    1,
+    1,
+    1
+   ],
+   "intensity": 9.0,
+   "position": [
+    -0.5029350611631956,
+    2.528002399955484,
+    -2.8522864688231526
+   ],
+   "target": [
+    0.0,
+    0.5,
+    0.0
+   ],
+   "width": 1.325892857142857,
+   "height": 1.325892857142857,
+   "azimuth": 260,
+   "elevation": 35
+  }
+ ],
+ "materials": [
+  {
+   "type": "disney",
+   "baseColor": [
+    0.86,
+    0.86,
+    0.85
+   ],
+   "metallic": 0,
+   "roughness": 0.18,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    0.86,
+    0.86,
+    0.85
+   ],
+   "metallic": 0,
+   "roughness": 0.18,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ],
+   "roundEdges": 0.04
+  },
+  {
+   "type": "glass",
+   "ior": 1.33,
+   "roughness": 0,
+   "tint": [
+    1,
+    1,
+    1
+   ],
+   "thinFilm": {
+    "thickness": 420
+   },
+   "thinWalled": true
+  },
+  {
+   "type": "glass",
+   "ior": 1.52,
+   "roughness": 0,
+   "tint": [
+    0.93,
+    0.97,
+    0.95
+   ],
+   "thinWalled": true
+  }
+ ],
+ "nodes": [
+  {
+   "name": "Keskin küp",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/cube.obj",
+   "xf": [
+    0.56568,
+    0,
+    0.56568,
+    -1.5,
+    0,
+    0.8,
+    0,
+    0.0,
+    -0.56568,
+    0,
+    0.56568,
+    0.0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 0,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Yuvarlatılmış küp",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/cube.obj",
+   "xf": [
+    0.56568,
+    0,
+    0.56568,
+    -0.3,
+    0,
+    0.8,
+    0,
+    0.0,
+    -0.56568,
+    0,
+    0.56568,
+    0.0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 1,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Sabun köpüğü",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/sphere.obj",
+   "xf": [
+    1.1,
+    0,
+    0,
+    0.9,
+    0,
+    1.1,
+    0,
+    0.55,
+    0,
+    0,
+    1.1,
+    0.2,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 2,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Pencere",
+   "type": "group",
+   "visible": true,
+   "source": "../../assets/models/floor.obj",
+   "xf": [
+    0.12,
+    0,
+    0,
+    2.1,
+    0,
+    0,
+    -0.12,
+    0.72,
+    0,
+    0.12,
+    0,
+    -0.4,
+    0,
+    0,
+    0,
+    1
+   ],
+   "children": [
+    {
+     "name": "Parça 1",
+     "type": "mesh",
+     "visible": true,
+     "sourceIndex": 0,
+     "material": 3,
+     "xf": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1
+     ]
+    }
+   ]
+  }
+ ]
+}

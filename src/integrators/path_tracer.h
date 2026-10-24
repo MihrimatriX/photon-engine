@@ -7,6 +7,7 @@
 
 #include "integrators/integrator.h"
 #include "geometry/surface_interaction.h"
+#include "materials/material.h"
 
 namespace photon {
 
@@ -25,6 +26,13 @@ public:
     struct PrimaryHit {
         bool hit = false;
         SurfaceInteraction isect;
+        /// Kamera ışını gölge yakalayıcıya çarptıysa ≥ 0: gölgenin opaklığı (1 − görünürlük).
+        /// Şeffaf arka planda alfa budur; renk kanalı arka plan × görünürlüktür.
+        float catcherAlpha = -1.0f;
+        Color3f catcherBackground; ///< yakalayıcının yerine görünen arka plan (AOV albedo)
+        /// ≥ 0: kamera ışını ince duvarlı camlardan düz geçip şeffaf arka plana ulaştı;
+        /// kapsama (alfa) = camın geçirmediği oran.
+        float coverage = -1.0f;
     };
 
     Color3f Li(const Ray& ray, const Scene& scene, Sampler& sampler) const override {
@@ -36,7 +44,25 @@ public:
     /// Böylece AOV için ayrı bir birincil ışın atmaya gerek kalmaz.
     Color3f Li(const Ray& ray, const Scene& scene, Sampler& sampler, PrimaryHit* primary) const;
 
+    /// Yüzey altı rastgele yürüyüşü (Chiang 2016 / Cycles): @p entry noktasından @p dir
+    /// yönünde cismin içine girilir; homojen ortamda serbest uçuş + Henyey–Greenstein
+    /// saçılmalarıyla ilerlenir, bir yüzeye ulaşınca çıkılır. Çıkış bulunursa true döner,
+    /// @p exitSi o noktanın kesişim kaydıdır (normal İÇE bakar), @p throughput yürüyüşün
+    /// ağırlığıyla çarpılmıştır. Kaçış (açık mesh) ya da soğrulma → false.
+    static bool randomWalkSubsurface(const Scene& scene, const SurfaceInteraction& entry, const Vec3f& dir,
+                                     const SubsurfaceCoeffs& coeffs, Sampler& sampler, Color3f& throughput,
+                                     SurfaceInteraction& exitSi);
+
+    /// Test kancası: yuvarlatılmış kenar normali (integratörün ilk köşelerde kullandığı hesap).
+    static Vec3f roundedEdgeNormalForTest(const Scene& scene, const SurfaceInteraction& isect, float radius,
+                                          Sampler& sampler);
+
+    /// Dolaylı katkıları (ışık ikinci ve sonraki köşelerden bulunduysa) en büyük bileşeni
+    /// @p limit olacak şekilde kırpar. 0 = kapalı. Yanlıdır ama kostik parlamaları söndürür.
+    void setClampIndirect(float limit) { m_clampIndirect = limit > 0.0f ? limit : 0.0f; }
+
 private:
+    float m_clampIndirect = 0.0f;
     int m_maxDepth;
     int m_russianRouletteDepth;
     float m_aoStrength;

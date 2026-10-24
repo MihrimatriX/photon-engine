@@ -21,7 +21,12 @@ struct RenderSettings {
     ToneMapOperator tmo = ToneMapOperator::PBRNeutral; ///< Ton eşleme operatörü
     float exposure = 0.0f;             ///< Exposure value (EV stops)
 
-    bool adaptiveSampling = false;     ///< Extra samples on high-variance pixels
+    bool adaptiveSampling = false;     ///< Temizlenen pikseller erken durur (gürültü eşiği)
+    float noiseThreshold = 0.02f;      ///< Uyarlamalı: göreli standart hata hedefi (0.01 çok temiz)
+    int minAdaptiveSamples = 16;       ///< Uyarlamalı: karar vermeden önce en az bu kadar örnek
+    /// Dolaylı katkı sınırı (parlama/"firefly" kesici). 0 = kapalı (yansız). Örn. 10:
+    /// ikinci ve sonraki sekmelerden gelen tek bir örnek en fazla bu parlaklıkta olur.
+    float clampIndirect = 0.0f;
     bool denoiseEnabled = false;       ///< Apply OIDN when available; else soft blur fallback
     float aoStrength = 0.0f;           ///< Contact AO strength (short-range; not full GI)
     int shadowQuality = 1;             ///< NEE / AO sample multiplier (1–4)

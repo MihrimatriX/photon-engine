@@ -7,6 +7,8 @@
 
 #include "materials/disney.h"
 #include "materials/material.h"
+#include <nlohmann/json_fwd.hpp>
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -42,7 +44,38 @@ struct MaterialPreset {
     std::string roughnessMap;
     bool boxMapping = false; ///< UV yerine kutu (triplanar) eşleme
     float texScale = 1.0f;
+
+    // ── Gelişmiş: cam hacmi ve dispersiyon (yalnız cam) ──
+    Color3f absorbColor{1.0f};     ///< absorbDistance kadar yol alınca ulaşılan renk
+    float absorbDistance = 1.0f;   ///< sahne birimi
+    float scatterDensity = 0.0f;   ///< bulanıklık (1/birim); 0 = berrak
+    Color3f scatterColor{1.0f};
+    float scatterAnisotropy = 0.0f;
+    float abbe = 0.0f;             ///< 0 = dispersiyon yok
+
+    // ── Gelişmiş: Principled ──
+    float subsurface = 0.0f;
+    Color3f subsurfaceRadius{1.0f, 0.2f, 0.1f};
+    float subsurfaceScale = 0.05f;
+    float subsurfaceAnisotropy = 0.0f;
+    Color3f edgeTint{1.0f};        ///< metal: sıyırma açısındaki renk (F82 tonu)
+    float thinFilmThickness = 0.0f;///< nm; 0 = ince film yok
+    float thinFilmIor = 1.4f;
+    float flakeDensity = 0.0f;     ///< metalik boya pulları; 0 = yok
+    float flakeSize = 0.004f;      ///< sahne birimi
+    float flakeRoughness = 0.3f;   ///< pul yönlerinin dağınıklığı
+    Color3f flakeColor{0.9f};
+    float roundEdges = 0.0f;       ///< yuvarlatılmış kenar yarıçapı (her tür)
+    bool thinWalled = false;       ///< cam: ince duvar (pencere, köpük); film kalınlığı thinFilmThickness
 };
+
+/// Gelişmiş alanları JSON'a yaz / JSON'dan oku (yalnız varsayılandan farklı olanlar yazılır).
+/// Preset dosyaları ve proje dosyası aynı anahtarları kullanır.
+void presetAdvancedToJson(const MaterialPreset& p, nlohmann::json& j);
+void presetAdvancedFromJson(const nlohmann::json& j, MaterialPreset& p);
+
+/// Tüm parametrelerin kararlı metin özeti (küçük resim önbelleği, değişiklik algılama).
+std::string presetSignature(const MaterialPreset& p);
 
 class MaterialLibrary {
 public:
@@ -55,6 +88,10 @@ public:
 
     /// Preset'ten yeni, bağımsız bir Material nesnesi.
     static std::shared_ptr<Material> createMaterial(const MaterialPreset& p);
+
+    /// Preset'in gelişmiş alanlarını (SSS, hacim, dispersiyon, kenar tonu, ince film,
+    /// pullar) var olan bir malzemeye uygula. Tür uyuşmayan alanlar yok sayılır.
+    static void applyAdvanced(const MaterialPreset& p, Material& m);
 
     /// Var olan bir malzemenin parametrelerini preset'e çevir (kütüphaneye kaydetmek için).
     static MaterialPreset presetFromMaterial(const Material& m, const std::string& name);

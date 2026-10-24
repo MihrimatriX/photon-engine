@@ -1,0 +1,17 @@
+{
+  "id": "soap_bubble",
+  "name": "Sabun Köpüğü",
+  "category": "Cam",
+  "type": "glass",
+  "baseColor": [
+    1,
+    1,
+    1
+  ],
+  "roughness": 0,
+  "ior": 1.33,
+  "thinWalled": true,
+  "thinFilm": {
+    "thickness": 420
+  }
+}

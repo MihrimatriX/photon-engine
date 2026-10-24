@@ -121,6 +121,7 @@ void Application::drawMenuBar() {
         if (ImGui::MenuItem(ICON_LAMP_CEILING "  Alan ışığı (softbox)")) addLight(LightDesc::Type::Area);
         if (ImGui::MenuItem(ICON_SUN "  Güneş (yönlü)")) addLight(LightDesc::Type::Directional);
         if (ImGui::MenuItem(ICON_LIGHTBULB "  Nokta ışık")) addLight(LightDesc::Type::Point);
+        if (ImGui::MenuItem(ICON_FLASHLIGHT "  Spot ışık (IES)")) addLight(LightDesc::Type::Spot);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Görünüm")) {

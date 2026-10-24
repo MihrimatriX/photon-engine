@@ -12,6 +12,7 @@
 // Aynı malzemeyi paylaşan düğümler "materials" tablosunda tek kayda işaret eder.
 #include "scene/project_io.h"
 #include "scene/model_import.h"
+#include "scene/material_library.h"
 #include "materials/disney.h"
 #include "materials/dielectric.h"
 #include "materials/lambertian.h"
@@ -108,11 +109,13 @@ json materialJson(const Material& mat, const fs::path& base) {
         if (!maps.empty()) j["maps"] = maps;
         j["mapping"] = d->textureMapping() == DisneyMaterial::TextureMapping::Box ? "box" : "uv";
         j["texScale"] = d->textureScale();
+        presetAdvancedToJson(MaterialLibrary::presetFromMaterial(mat, ""), j);
     } else if (const auto* g = dynamic_cast<const Dielectric*>(&mat)) {
         j["type"] = "glass";
         j["ior"] = g->ior();
         j["tint"] = col3(g->tint());
         j["roughness"] = g->roughness();
+        presetAdvancedToJson(MaterialLibrary::presetFromMaterial(mat, ""), j);
     } else if (const auto* l = dynamic_cast<const Lambertian*>(&mat)) {
         j["type"] = "lambert";
         j["albedo"] = col3(l->albedo());
@@ -128,9 +131,17 @@ json materialJson(const Material& mat, const fs::path& base) {
 
 std::shared_ptr<Material> materialFromJson(const json& j, const fs::path& base) {
     const std::string type = j.value("type", std::string("disney"));
+    // Gelişmiş alanlar (SSS, cam hacmi, dispersiyon, ince film, pullar) preset ile aynı anahtarlar.
+    auto applyAdvanced = [&j](Material& m) {
+        MaterialPreset p = MaterialLibrary::presetFromMaterial(m, "");
+        presetAdvancedFromJson(j, p);
+        MaterialLibrary::applyAdvanced(p, m);
+    };
     if (type == "glass") {
-        return std::make_shared<Dielectric>(j.value("ior", 1.5f), readCol3(j, "tint", Color3f(1.0f)),
-                                            j.value("roughness", 0.0f));
+        auto g = std::make_shared<Dielectric>(j.value("ior", 1.5f), readCol3(j, "tint", Color3f(1.0f)),
+                                              j.value("roughness", 0.0f));
+        applyAdvanced(*g);
+        return g;
     }
     if (type == "lambert") {
         return std::make_shared<Lambertian>(readCol3(j, "albedo", Color3f(0.8f)),
@@ -156,6 +167,7 @@ std::shared_ptr<Material> materialFromJson(const json& j, const fs::path& base) 
         if (maps->contains("roughness")) d->setRoughnessMap(resolvePath((*maps)["roughness"].get<std::string>(), base));
         if (maps->contains("metalness")) d->setMetalnessMap(resolvePath((*maps)["metalness"].get<std::string>(), base));
     }
+    applyAdvanced(*d);
     return d;
 }
 
@@ -304,9 +316,19 @@ std::unique_ptr<SceneNode> nodeFromJson(const json& j, LoadCtx& ctx) {
 
 // ── Işık ve ortam ────────────────────────────────────────────────────────
 
-json lightJson(const LightDesc& d) {
+const char* lightTypeName(LightDesc::Type t) {
+    switch (t) {
+        case LightDesc::Type::Directional: return "directional";
+        case LightDesc::Type::Point: return "point";
+        case LightDesc::Type::Spot: return "spot";
+        case LightDesc::Type::Area: break;
+    }
+    return "area";
+}
+
+json lightJson(const LightDesc& d, const fs::path& base) {
     json j;
-    j["type"] = d.type == LightDesc::Type::Area ? "area" : d.type == LightDesc::Type::Directional ? "directional" : "point";
+    j["type"] = lightTypeName(d.type);
     j["name"] = d.name;
     j["enabled"] = d.enabled;
     j["color"] = col3(d.color);
@@ -317,13 +339,22 @@ json lightJson(const LightDesc& d) {
     j["height"] = d.height;
     j["azimuth"] = d.azimuthDeg;
     j["elevation"] = d.elevationDeg;
+    j["visibleToCamera"] = d.visibleToCamera;
+    if (d.type == LightDesc::Type::Spot) {
+        j["coneAngle"] = d.coneAngleDeg;
+        j["coneBlend"] = d.coneBlend;
+        if (!d.iesPath.empty()) j["ies"] = relPath(d.iesPath, base);
+    }
     return j;
 }
 
-LightDesc lightFromJson(const json& j) {
+LightDesc lightFromJson(const json& j, const fs::path& base) {
     LightDesc d;
     const std::string t = j.value("type", std::string("area"));
-    d.type = t == "directional" ? LightDesc::Type::Directional : t == "point" ? LightDesc::Type::Point : LightDesc::Type::Area;
+    d.type = t == "directional" ? LightDesc::Type::Directional
+           : t == "point"       ? LightDesc::Type::Point
+           : t == "spot"        ? LightDesc::Type::Spot
+                                : LightDesc::Type::Area;
     d.name = j.value("name", d.name);
     d.enabled = j.value("enabled", true);
     d.color = readCol3(j, "color", d.color);
@@ -334,6 +365,11 @@ LightDesc lightFromJson(const json& j) {
     d.height = j.value("height", d.height);
     d.azimuthDeg = j.value("azimuth", d.azimuthDeg);
     d.elevationDeg = j.value("elevation", d.elevationDeg);
+    // 0.2 öncesi projelerde alan ışıkları kameraya hep görünürdü; anahtar yoksa öyle kalır.
+    d.visibleToCamera = j.value("visibleToCamera", true);
+    d.coneAngleDeg = j.value("coneAngle", d.coneAngleDeg);
+    d.coneBlend = j.value("coneBlend", d.coneBlend);
+    d.iesPath = resolvePath(j.value("ies", std::string()), base);
     return d;
 }
 
@@ -347,7 +383,17 @@ json environmentJson(const EnvironmentDesc& e, const fs::path& base) {
     const char* mode = e.background.mode == Background::Mode::Color ? "color"
                      : e.background.mode == Background::Mode::Transparent ? "transparent" : "environment";
     j["background"] = {{"mode", mode}, {"color", col3(e.background.color)}};
-    j["ground"] = {{"enabled", e.groundEnabled}, {"color", col3(e.groundColor)}, {"roughness", e.groundRoughness}};
+    j["ground"] = {{"enabled", e.groundEnabled}, {"color", col3(e.groundColor)}, {"roughness", e.groundRoughness},
+                   {"shadowCatcher", e.groundShadowOnly}};
+    if (e.kind == EnvironmentDesc::Kind::Sky) {
+        j["kind"] = "sky";
+        j["sky"] = {{"elevation", e.sky.sunElevationDeg}, {"azimuth", e.sky.sunAzimuthDeg},
+                    {"turbidity", e.sky.turbidity}, {"ozone", e.sky.ozone}, {"groundAlbedo", e.sky.groundAlbedo},
+                    {"sunSize", e.sky.sunSizeDeg}, {"sunStrength", e.sky.sunStrength},
+                    {"fromLocation", e.skyFromLocation}, {"latitude", e.latitude}, {"longitude", e.longitude},
+                    {"dayOfYear", e.dayOfYear}, {"hour", e.hour}, {"utcOffset", e.utcOffset},
+                    {"northOffset", e.northOffsetDeg}};
+    }
     return j;
 }
 
@@ -368,6 +414,25 @@ EnvironmentDesc environmentFromJson(const json& j, const fs::path& base) {
         e.groundEnabled = g->value("enabled", true);
         e.groundColor = readCol3(*g, "color", e.groundColor);
         e.groundRoughness = g->value("roughness", e.groundRoughness);
+        e.groundShadowOnly = g->value("shadowCatcher", false);
+    }
+    if (j.value("kind", std::string("image")) == "sky") {
+        e.kind = EnvironmentDesc::Kind::Sky;
+        const json sk = j.value("sky", json::object());
+        e.sky.sunElevationDeg = sk.value("elevation", e.sky.sunElevationDeg);
+        e.sky.sunAzimuthDeg = sk.value("azimuth", e.sky.sunAzimuthDeg);
+        e.sky.turbidity = sk.value("turbidity", e.sky.turbidity);
+        e.sky.ozone = sk.value("ozone", e.sky.ozone);
+        e.sky.groundAlbedo = sk.value("groundAlbedo", e.sky.groundAlbedo);
+        e.sky.sunSizeDeg = sk.value("sunSize", e.sky.sunSizeDeg);
+        e.sky.sunStrength = sk.value("sunStrength", e.sky.sunStrength);
+        e.skyFromLocation = sk.value("fromLocation", e.skyFromLocation);
+        e.latitude = sk.value("latitude", e.latitude);
+        e.longitude = sk.value("longitude", e.longitude);
+        e.dayOfYear = sk.value("dayOfYear", e.dayOfYear);
+        e.hour = sk.value("hour", e.hour);
+        e.utcOffset = sk.value("utcOffset", e.utcOffset);
+        e.northOffsetDeg = sk.value("northOffset", e.northOffsetDeg);
     }
     return e;
 }
@@ -387,7 +452,7 @@ bool saveProject(const std::string& path, const SceneGraph& graph, const Project
     root["render"] = data.render;
     root["environment"] = environmentJson(data.environment, ctx.base);
     json lights = json::array();
-    for (const auto& l : data.lights) lights.push_back(lightJson(l));
+    for (const auto& l : data.lights) lights.push_back(lightJson(l, ctx.base));
     root["lights"] = std::move(lights);
     json nodes = json::array();
     for (const auto& c : graph.root()->children) nodes.push_back(nodeJson(*c, ctx, false));
@@ -444,7 +509,7 @@ bool loadProjectJson(const std::string& text, const std::string& baseDir, SceneG
         data.camera = root.value("camera", json::object());
         data.render = root.value("render", json::object());
         if (root.contains("environment")) data.environment = environmentFromJson(root["environment"], ctx.base);
-        for (const auto& l : root.value("lights", json::array())) data.lights.push_back(lightFromJson(l));
+        for (const auto& l : root.value("lights", json::array())) data.lights.push_back(lightFromJson(l, ctx.base));
     } catch (const std::exception& e) {
         if (error) *error = std::string("Proje okunamadı: ") + e.what();
         return false;

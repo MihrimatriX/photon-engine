@@ -41,6 +41,8 @@ struct EnvAsset {
     std::string path;  ///< Boş = prosedürel
     Color3f zenith{0.75f, 0.8f, 0.95f};
     Color3f horizon{0.55f, 0.55f, 0.58f};
+    bool sky = false;      ///< Fiziksel gök (path ve renkler kullanılmaz)
+    SkyParams skyParams;
 };
 
 /// Son render (dosyaya) ayarları.
@@ -86,6 +88,7 @@ struct AppState {
     // ── Görünüm ──
     OrbitCamera camera;
     RenderSettings settings;
+    ImagerSettings imager;      ///< Bloom, glare, beyaz dengesi... (viewport ve son render)
     float resolutionScale = 1.0f;  ///< Viewport render çözünürlüğü / ekran pikseli
     int previewSpp = 0;            ///< 0 = sınırsız
     bool denoise = true;

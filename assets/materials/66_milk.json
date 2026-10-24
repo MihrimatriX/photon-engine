@@ -1,0 +1,24 @@
+{
+  "category": "Yarı Saydam",
+  "type": "generic",
+  "metallic": 0,
+  "specular": 0.5,
+  "id": "milk",
+  "name": "Süt",
+  "baseColor": [
+    0.95,
+    0.94,
+    0.9
+  ],
+  "roughness": 0.08,
+  "subsurface": {
+    "weight": 1.0,
+    "radius": [
+      1.0,
+      0.8,
+      0.55
+    ],
+    "scale": 0.02,
+    "anisotropy": 0.0
+  }
+}

@@ -3,8 +3,17 @@
   "name": "Titanyum",
   "category": "Metal",
   "type": "generic",
-  "baseColor": [0.54, 0.5, 0.45],
+  "baseColor": [
+    0.605,
+    0.582,
+    0.542
+  ],
   "roughness": 0.3,
   "metallic": 1,
-  "specular": 0.5
+  "specular": 0.5,
+  "edgeTint": [
+    0.77,
+    0.788,
+    0.829
+  ]
 }

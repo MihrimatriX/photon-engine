@@ -1,0 +1,19 @@
+{
+  "baseColor": [
+    0.678,
+    0.643,
+    0.595
+  ],
+  "edgeTint": [
+    0.79,
+    0.819,
+    0.854
+  ],
+  "metallic": 1,
+  "id": "platinum",
+  "name": "Platin",
+  "category": "Metal",
+  "type": "generic",
+  "roughness": 0.08,
+  "specular": 0.5
+}

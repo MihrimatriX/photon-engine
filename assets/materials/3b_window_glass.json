@@ -1,0 +1,14 @@
+{
+  "id": "window_glass",
+  "name": "Pencere Camı (ince)",
+  "category": "Cam",
+  "type": "glass",
+  "baseColor": [
+    0.93,
+    0.97,
+    0.95
+  ],
+  "roughness": 0,
+  "ior": 1.52,
+  "thinWalled": true
+}

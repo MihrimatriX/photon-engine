@@ -1,0 +1,26 @@
+{
+  "category": "Boya",
+  "type": "generic",
+  "metallic": 0,
+  "specular": 0.5,
+  "clearCoat": 1.0,
+  "clearCoatRoughness": 0.02,
+  "id": "candy_red",
+  "name": "Şeker Kırmızı (pullu)",
+  "baseColor": [
+    0.32,
+    0.0,
+    0.01
+  ],
+  "roughness": 0.35,
+  "flakes": {
+    "density": 0.6,
+    "size": 0.001,
+    "roughness": 0.25,
+    "color": [
+      1.0,
+      0.2,
+      0.15
+    ]
+  }
+}

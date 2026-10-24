@@ -169,3 +169,30 @@ TEST(SceneEdit, CopiedAndMovedSourcePartsSurviveProjectRoundTrip) {
     EXPECT_TRUE(back.root()->children[1]->mesh);
     fs::remove_all(dir);
 }
+
+// Regresyon: 0.2 öncesi projelerde "visibleToCamera" anahtarı yok; alan ışıkları o zaman
+// kameraya görünürdü ve öyle kalmalı. Yeni kaydedilen projede değer olduğu gibi döner.
+TEST(ProjectIo, LightCameraVisibilityDefaultsAndRoundTrip) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "photon_vis_test";
+    fs::create_directories(dir);
+    const std::string oldFile = (dir / "eski.photon").string();
+    {
+        std::ofstream(oldFile) << R"({"format":"photon-project","version":2,"lights":[{"type":"area","name":"L"}],"nodes":[]})";
+    }
+    SceneGraph g;
+    ProjectData d;
+    std::string err;
+    ASSERT_TRUE(loadProject(oldFile, g, d, &err)) << err;
+    ASSERT_EQ(d.lights.size(), 1u);
+    EXPECT_TRUE(d.lights[0].visibleToCamera);
+
+    d.lights[0].visibleToCamera = false;
+    const std::string newFile = (dir / "yeni.photon").string();
+    ASSERT_TRUE(saveProject(newFile, g, d, &err)) << err;
+    SceneGraph g2;
+    ProjectData d2;
+    ASSERT_TRUE(loadProject(newFile, g2, d2, &err)) << err;
+    EXPECT_FALSE(d2.lights[0].visibleToCamera);
+    fs::remove_all(dir);
+}

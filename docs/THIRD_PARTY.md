@@ -14,7 +14,7 @@ vcpkg paketleri `vcpkg.json` (builtin-baseline `eb2d3a3279fd019cb7733072d86900d0
 | googletest | `v1.14.0` | BSD-3-Clause | statik, yalnız testler |
 | glfw3 | vcpkg 3.5.1 (yedek: 3.4) | Zlib | dinamik (`glfw3.dll`) |
 | Dear ImGui (docking) | vcpkg 1.92.9 | MIT | statik |
-| ImGuizmo | vcpkg 1.10 (yedek: 1.91.3) | MIT | statik |
+| ImGuizmo | vcpkg 1.10 (yedek: master `105e4fde…`, `src/` düzeni) | MIT | statik |
 | Intel Embree | vcpkg 4.4.x (`geometry-triangle`, `geometry-user`; TBB'siz) | Apache-2.0 | dinamik (`embree4.dll`) |
 | Intel Open Image Denoise | 2.5.1, resmi Windows paketi (`scripts/fetch_deps.ps1` → `third_party/oidn`) | Apache-2.0 (oneTBB: Apache-2.0) | dinamik (`OpenImageDenoise*.dll`, `tbb12.dll`) |
 
@@ -27,5 +27,22 @@ vcpkg paketleri `vcpkg.json` (builtin-baseline `eb2d3a3279fd019cb7733072d86900d0
 | HDRI'lar: studio_small_09, brown_photostudio_02, photo_studio_01, kloppenheim_06, sunflowers_puresky (1k) | Poly Haven | CC0 |
 | Dokular: wood_table_001, leather_red_03, fabric_pattern_07, metal_plate, rubber_tiles (1k; renk, normal GL, pürüzlülük) | Poly Haven | CC0 |
 | Örnek modeller (`assets/models`) | `scripts/gen_sample_models.py` ile depoda üretildi | CC0 |
+| IES profilleri (`assets/ies`) | `scripts/gen_ies_profiles.py` ile depoda üretildi (prosedürel) | CC0 |
+
+## Yalnız formül / veri olarak kullanılanlar (kod alınmadı)
+
+| Ne | Kaynak |
+| --- | --- |
+| CIE 1931 renk eşleme yaklaşımı | Wyman, Sloan, Shirley 2013, JCGT 2(2) |
+| Planck ve gün ışığı kromatiklik eğrileri, Bradford matrisi | Kim vd. 2002; CIE 15; Lam 1985 |
+| Atmosfer katsayıları (Rayleigh, Mie, ozon) | Nishita 1993; Bruneton & Neyret 2008 |
+| Güneş konumu | NOAA General Solar Position Calculations |
+| Metal n, k değerleri (preset'lerin F0 ve F82 tonu) | refractiveindex.info (Johnson & Christy 1972, Rakić 1995) |
+
+## Geliştirme araçları (dağıtılmaz)
+
+| Ad | Lisans | Kullanım |
+| --- | --- | --- |
+| OpenEXR Python modülü | BSD-3-Clause | `scripts/compare_exr.py` (relMSE ölçümü) |
 
 Kaldırılan: glm (2026-10-02, hiçbir dosya kullanmıyordu); GL raster önizleme modülü (`src/preview`, 2026-10-06, yerini çözünürlük merdivenli path-traced viewport aldı).

@@ -3,6 +3,7 @@
 #include "lights/area_light.h"
 #include "lights/directional_light.h"
 #include "lights/point_light.h"
+#include "lights/spot_light.h"
 #include "core/image/image_io.h"
 #include "core/math/constants.h"
 #include "core/platform/path.h"
@@ -12,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -52,7 +54,20 @@ std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& de
                 u = u * std::max(1e-4f, d.width);
                 v = v * std::max(1e-4f, d.height);
                 const Vec3f corner = d.position - u * 0.5f - v * 0.5f;
-                out.push_back(std::make_shared<AreaLight>(corner, u, v, L));
+                auto area = std::make_shared<AreaLight>(corner, u, v, L);
+                area->setVisibleToCamera(d.visibleToCamera);
+                out.push_back(std::move(area));
+                break;
+            }
+            case LightDesc::Type::Spot: {
+                std::shared_ptr<const IesProfile> ies;
+                if (!d.iesPath.empty()) {
+                    std::string err;
+                    ies = loadIes(d.iesPath, &err);
+                    if (!ies) std::cerr << err << std::endl;
+                }
+                out.push_back(std::make_shared<SpotLight>(d.position, d.target - d.position, L, d.coneAngleDeg,
+                                                          d.coneBlend, std::move(ies)));
                 break;
             }
             case LightDesc::Type::Directional:
@@ -104,12 +119,75 @@ std::shared_ptr<const Image> EnvironmentCache::get(const std::string& path) {
     return shared;
 }
 
+std::shared_ptr<const SkyResult> EnvironmentCache::sky(const SkyParams& p) {
+    char key[256];
+    std::snprintf(key, sizeof(key), "%.4f|%.4f|%.4f|%.4f|%.4f|%.4f|%.4f|%d", p.sunElevationDeg, p.sunAzimuthDeg,
+                  p.turbidity, p.ozone, p.groundAlbedo, p.sunSizeDeg, p.sunStrength, p.width);
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (const auto& [k, v] : m_skies)
+            if (k == key) return v;
+    }
+    // Hesap kilit dışında (~0.1 s); aynı anda iki iş parçacığı hesaplarsa biri boşa gider.
+    auto result = std::make_shared<const SkyResult>(buildPhysicalSky(p));
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_skies.emplace_back(key, result);
+    if (m_skies.size() > 4) m_skies.erase(m_skies.begin());
+    return result;
+}
+
 void EnvironmentCache::clear() {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_images.clear();
+    m_skies.clear();
 }
 
-std::shared_ptr<EnvironmentLight> buildEnvironment(const EnvironmentDesc& desc, EnvironmentCache& cache) {
+nlohmann::json imagerToJson(const ImagerSettings& s) {
+    return {{"bloom", s.bloomIntensity}, {"bloomRadius", s.bloomRadius}, {"bloomThreshold", s.bloomThreshold},
+            {"glare", s.glareIntensity}, {"glareBlades", s.glareBlades}, {"glareAngle", s.glareAngleDeg},
+            {"glareLength", s.glareLength}, {"whiteBalance", s.whiteBalanceK}, {"tint", s.tint},
+            {"saturation", s.saturation}, {"contrast", s.contrast}, {"vignette", s.vignette},
+            {"chromaticAberration", s.chromaticAberration}};
+}
+
+ImagerSettings imagerFromJson(const nlohmann::json& j) {
+    ImagerSettings s;
+    if (!j.is_object()) return s;
+    s.bloomIntensity = j.value("bloom", s.bloomIntensity);
+    s.bloomRadius = j.value("bloomRadius", s.bloomRadius);
+    s.bloomThreshold = j.value("bloomThreshold", s.bloomThreshold);
+    s.glareIntensity = j.value("glare", s.glareIntensity);
+    s.glareBlades = j.value("glareBlades", s.glareBlades);
+    s.glareAngleDeg = j.value("glareAngle", s.glareAngleDeg);
+    s.glareLength = j.value("glareLength", s.glareLength);
+    s.whiteBalanceK = j.value("whiteBalance", s.whiteBalanceK);
+    s.tint = j.value("tint", s.tint);
+    s.saturation = j.value("saturation", s.saturation);
+    s.contrast = j.value("contrast", s.contrast);
+    s.vignette = j.value("vignette", s.vignette);
+    s.chromaticAberration = j.value("chromaticAberration", s.chromaticAberration);
+    return s;
+}
+
+void resolveSunPosition(EnvironmentDesc& env) {
+    if (!env.skyFromLocation) return;
+    float el = 0.0f, compass = 0.0f;
+    solarPosition(env.latitude, env.longitude, env.dayOfYear, env.hour, env.utcOffset, el, compass);
+    env.sky.sunElevationDeg = el;
+    env.sky.sunAzimuthDeg = compassToSceneAzimuth(compass, env.northOffsetDeg);
+}
+
+std::shared_ptr<EnvironmentLight> buildEnvironment(const EnvironmentDesc& descIn, EnvironmentCache& cache) {
+    if (descIn.kind == EnvironmentDesc::Kind::Sky) {
+        EnvironmentDesc desc = descIn;
+        resolveSunPosition(desc);
+        auto sky = cache.sky(desc.sky);
+        // Gök dünya uzayında kurulur (güneş azimutu mutlak): döndürme uygulanmaz.
+        auto light = std::make_shared<EnvironmentLight>(sky->image, 0.0f, desc.intensity);
+        if (desc.sky.sunElevationDeg > -1.0f) light->setSun(sky->sunDirection, sky->sunCosMax, sky->sunRadiance);
+        return light;
+    }
+    const EnvironmentDesc& desc = descIn;
     std::shared_ptr<const Image> image;
     if (!desc.hdrPath.empty()) image = cache.get(desc.hdrPath);
     if (!image) image = makeProceduralSky(desc.zenith, desc.horizon);
@@ -149,6 +227,7 @@ std::vector<StudioPreset> loadStudioPresets(const std::string& dir) {
             const std::string type = l.value("type", std::string("area"));
             r.type = type == "directional" ? LightDesc::Type::Directional
                    : type == "point"       ? LightDesc::Type::Point
+                   : type == "spot"        ? LightDesc::Type::Spot
                                            : LightDesc::Type::Area;
             r.name = l.value("name", std::string("Işık"));
             r.azimuthDeg = l.value("azimuth", 0.0f);
@@ -221,6 +300,7 @@ std::shared_ptr<Scene> buildRenderScene(const SceneGraph& graph, const std::vect
                 std::vector<uint32_t>{0, 2, 1, 0, 3, 2}, mat.get());
             scene->retainMaterial(mat);
             scene->tagShape(mesh.get(), kGroundNodeUid);
+            if (env.groundShadowOnly) scene->setShadowCatcher(mesh.get());
             scene->addShape(mesh);
         }
     }

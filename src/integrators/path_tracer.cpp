@@ -4,6 +4,7 @@
 
 #include "integrators/path_tracer.h"
 #include "materials/material.h"
+#include "materials/lambertian.h"
 #include "lights/light.h"
 #include "lights/area_light.h"
 #include "lights/environment_light.h"
@@ -12,6 +13,8 @@
 #include "core/math/frame.h"
 #include "core/math/utils.h"
 #include "core/sampling/sampling.h"
+#include "core/sampling/phase.h"
+#include "core/color/spectral.h"
 #include <algorithm>
 #include <cmath>
 
@@ -23,18 +26,13 @@ Vec3f offsetRayOrigin(const Vec3f& p, const Vec3f& n, const Vec3f& dir) {
     return p + n * (dir.dot(n) > 0.0f ? 1e-4f : -1e-4f);
 }
 
-float areaLightSolidAnglePdf(const std::vector<const Light*>& lights,
-                             const Vec3f& ref, const Vec3f& pLight) {
-    for (const Light* light : lights) {
-        if (const auto* area = dynamic_cast<const AreaLight*>(light)) {
-            float pdf = area->pdfLi(ref, pLight);
-            if (pdf > 0.0f) return pdf;
-        } else if (const auto* mesh = dynamic_cast<const MeshLight*>(light)) {
-            float pdf = mesh->pdfLi(ref, pLight);
-            if (pdf > 0.0f) return pdf;
-        }
-    }
-    return 0.0f;
+/// Yüzeyden çıkan ışının başlangıcı: ofset GEOMETRİK normal boyunca, ışının gittiği tarafa.
+/// Gölgelendirme normali (yumuşatılmış, normal haritalı) yüzeyin gerçek yönünü bilmez; ona
+/// göre itmek, kırılan/yansıyan ışını yüzeyin yanlış tarafından başlatıp aynı yüzeye
+/// yeniden çarptırabilir (yumuşak normalli camda enerji sızıntısı). [F5.9'un ilk adımı]
+Vec3f spawnOrigin(const SurfaceInteraction& isect, const Vec3f& dir) {
+    const Vec3f& n = isect.ng.lengthSquared() > 0.0f ? isect.ng : isect.normal;
+    return offsetRayOrigin(isect.point, n, dir);
 }
 
 float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sampler,
@@ -47,7 +45,7 @@ float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sam
     for (int i = 0; i < samples; ++i) {
         Vec3f local = cosineSampleHemisphere(sampler.get2D());
         Vec3f dir = frame.toWorld(local).normalized();
-        Ray aoRay(offsetRayOrigin(isect.point, isect.normal, dir), dir, 1e-4f, maxDist);
+        Ray aoRay(spawnOrigin(isect, dir), dir, 1e-4f, maxDist);
         if (scene.intersectAny(aoRay)) occ += 1.0f;
     }
     float visibility = 1.0f - (occ / static_cast<float>(samples));
@@ -55,6 +53,266 @@ float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sam
 }
 
 } // namespace
+
+namespace {
+
+/// Yoğun ortamda (süt, mum) tek yolun saçılma olayı sınırı: sonsuz döngü sigortası.
+constexpr int kMaxMediumEvents = 1024;
+constexpr int kMaxWalkSteps = 256;
+
+/// Rastgele yürüyüşün çıkış köşesi: Cycles gibi yürüyüşten çıkan ışık, çıkış noktasında
+/// beyaz bir Lambert yüzeyiyle (normal DIŞA) saçılır; renk zaten yürüyüşte uygulandı.
+const Lambertian& subsurfaceExitMaterial() {
+    static const Lambertian m(Color3f(1.0f));
+    return m;
+}
+
+/// Kırılan yolun hangi cismin içinde olduğunu izleyen küçük yığın. İç içe hacimler
+/// (camın içinde sıvı) için en üstteki geçerlidir. Taşma sessizce yok sayılır.
+struct MediumStack {
+    struct Entry {
+        const Material* owner;
+        const Medium* medium;
+    };
+    Entry e[4]{};
+    int n = 0;
+
+    const Medium* current() const { return n > 0 ? e[n - 1].medium : nullptr; }
+    void enter(const Material* m) {
+        if (n < 4) e[n++] = {m, m->interiorMedium()};
+    }
+    void leave(const Material* m) {
+        for (int i = n - 1; i >= 0; --i) {
+            if (e[i].owner != m) continue;
+            for (int j = i; j < n - 1; ++j) e[j] = e[j + 1];
+            --n;
+            return;
+        }
+    }
+};
+
+Color3f expNeg(const Color3f& sigma, float t) {
+    return Color3f(std::exp(-sigma.r * t), std::exp(-sigma.g * t), std::exp(-sigma.b * t));
+}
+
+/// Homojen ortamda serbest uçuş örneklemesi, spektral MIS ile (PBRT-v4 §14.2, Cycles).
+///
+/// σt kanaldan kanala değişir (renkli ortam). Bir kanal c, @p channelWeights'e orantılı
+/// olasılıkla seçilir; mesafe o kanalın üstel dağılımından çekilir: t = −ln(1−u)/σt[c].
+/// Birleşik pdf tüm kanalların karışımıdır, böylece tahminci yansızdır:
+///   saçılma (t < tMax):  pdf = Σ p_c σt_c e^{−σt_c t},  ağırlık = σs · e^{−σt t} / pdf
+///   yüzeye ulaşma:       P   = Σ p_c e^{−σt_c tMax},    ağırlık = e^{−σt tMax} / P
+/// @return true → t = @p tScatter'da saçılma oldu; false → yüzeye (ya da sonsuza) ulaşıldı.
+bool sampleFreeFlight(const Color3f& sigmaT, const Color3f& sigmaS, float tMax, bool hitSurface,
+                      Color3f channelWeights, Sampler& sampler, Color3f& throughput, float& tScatter) {
+    float wsum = channelWeights.r + channelWeights.g + channelWeights.b;
+    if (!(wsum > 0.0f)) {
+        channelWeights = Color3f(1.0f);
+        wsum = 3.0f;
+    }
+    const Color3f pc = channelWeights / wsum;
+    const float uc = sampler.get1D();
+    const int c = uc < pc.r ? 0 : (uc < pc.r + pc.g ? 1 : 2);
+    const float u = sampler.get1D();
+    const float st = sigmaT[c];
+    const float t = st > 0.0f ? -std::log(std::max(1.0f - u, 1e-12f)) / st : INFINITY_F;
+
+    if (t < tMax) {
+        const Color3f Tr = expNeg(sigmaT, t);
+        const float pdf = pc.r * sigmaT.r * Tr.r + pc.g * sigmaT.g * Tr.g + pc.b * sigmaT.b * Tr.b;
+        if (!(pdf > 0.0f)) {
+            throughput = Color3f::black();
+            return false;
+        }
+        throughput *= sigmaS * Tr / pdf;
+        tScatter = t;
+        return true;
+    }
+    // Yüzeye ulaşıldı. Iskalayan ışında (tMax = ∞) σt > 0 olan kanallar tamamen söner.
+    Color3f Tr;
+    for (int k = 0; k < 3; ++k) Tr[k] = hitSurface ? std::exp(-sigmaT[k] * tMax) : (sigmaT[k] > 0.0f ? 0.0f : 1.0f);
+    const float P = pc.r * Tr.r + pc.g * Tr.g + pc.b * Tr.b;
+    throughput = P > 0.0f ? throughput * Tr / P : Color3f::black();
+    return false;
+}
+
+/// Rus ruleti (en büyük bileşene göre). false → yol öldü.
+bool russianRoulette(Color3f& throughput, Sampler& sampler) {
+    const float m = std::max({throughput.r, throughput.g, throughput.b});
+    if (m >= 1.0f) return true;
+    if (!(m > 0.0f) || sampler.get1D() >= m) return false;
+    throughput /= m;
+    return true;
+}
+
+/// NEE gölge ışını. Başlangıç alıcının yüzeyinden ofsetlenir; ışık örneği alıcıya göre
+/// ölçüldüğü için wi boyunca gidilirse ışığın düzlemi örnekten ÖNCE kesilir ve alan ışığının
+/// kendi dörtgeni kendi örneğini örter (yakın ışıkta tam karanlık). Bu yüzden yüzeyli
+/// ışıklarda ışın ofsetli başlangıçtan örnek noktasına yönelir ve biraz önce durur.
+/// false → ışın kurulamadı (örnek alıcıya fazla yakın).
+bool makeShadowRay(const SurfaceInteraction& isect, const LightSample& ls, bool pointOnSurface, Ray& out) {
+    const Vec3f origin = spawnOrigin(isect, ls.wi);
+    Vec3f dir = ls.wi;
+    float end = ls.distance < INFINITY_F ? ls.distance - 1e-4f : 1e30f;
+    if (pointOnSurface) {
+        const Vec3f pLight = isect.point + ls.wi * ls.distance;
+        const Vec3f delta = pLight - origin;
+        const float dist = delta.length();
+        if (dist > 1e-4f) {
+            dir = delta / dist;
+            // ponytail: stop short of the sample; a contact occluder inside the slop is missed until shadow rays skip light prims
+            end = dist - std::max(1e-4f, dist * 1e-4f);
+        }
+    }
+    if (end <= 1e-4f) return false;
+    out = Ray(origin, dir, 1e-4f, end);
+    return true;
+}
+
+/// Gölge ışınının geçirgenliği: ince duvarlı camlar (doğrultu değiştirmeyen yüzeyler)
+/// renkli geçirgenlikle aşılır, başka her yüzey ışığı tamamen keser. Sahnede böyle bir
+/// malzeme yoksa hızlı "herhangi bir isabet" testi kullanılır.
+Color3f shadowTransmittance(const Scene& scene, const Ray& shadow) {
+    if (!scene.hasShadowTransmitters()) return scene.intersectAny(shadow) ? Color3f::black() : Color3f(1.0f);
+    Color3f T(1.0f);
+    Vec3f origin = shadow.origin;
+    const Vec3f dir = shadow.direction;
+    float remaining = shadow.tMax;
+    for (int i = 0; i < 16; ++i) {
+        Ray r(origin, dir, shadow.tMin, remaining);
+        SurfaceInteraction hit;
+        if (!scene.intersect(r, hit)) return T;
+        if (!hit.material || !hit.material->transmitsShadows()) return Color3f::black();
+        T *= hit.material->shadowTransmittance(hit, dir);
+        if (T.isBlack()) return T;
+        origin = hit.point;
+        remaining -= hit.t;
+        if (remaining <= shadow.tMin) return T;
+    }
+    return Color3f::black();
+}
+
+/// Yuvarlatılmış kenar normali (Cycles "Bevel" düğümünün sadeleştirilmiş hali). Nokta
+/// etrafında R yarıçaplı bir diskte örnek noktalar seçilir; her birinden üç eksenden biri
+/// boyunca (normal ya da iki teğet) 2R uzunluğunda kısa ışın atılır. Aynı nesneye R'nin
+/// içinde çarpan ışınların yüzey normalleri ortalanır: düz yüzde sonuç değişmez, kenarın
+/// R yakınında komşu yüzün normali karışır ve keskin kenar yumuşak bir pah gibi parlar.
+Vec3f roundedEdgeNormal(const Scene& scene, const SurfaceInteraction& isect, float radius, Sampler& sampler) {
+    const Vec3f N = isect.normal;
+    const Frame f(N);
+    Vec3f sum = N * 0.25f; // hiç isabet yoksa (ince parça) orijinal normal kalır
+    constexpr int kSamples = 6;
+    for (int i = 0; i < kSamples; ++i) {
+        const float ua = sampler.get1D();
+        const Vec2f d = uniformSampleDisk(sampler.get2D()) * radius;
+        Vec3f axis, s, t;
+        if (ua < 0.5f) { axis = f.n; s = f.s; t = f.t; }
+        else if (ua < 0.75f) { axis = f.s; s = f.t; t = f.n; }
+        else { axis = f.t; s = f.n; t = f.s; }
+        // Eksenin iki yönünü de dene: kenarın hangi tarafta olduğunu bilmiyoruz.
+        for (float sign : {1.0f, -1.0f}) {
+            const Vec3f origin = isect.point + s * d.x + t * d.y + axis * (sign * radius);
+            Ray r(origin, axis * -sign, 0.0f, 2.0f * radius);
+            SurfaceInteraction hit;
+            if (!scene.intersect(r, hit) || hit.hitObject != isect.hitObject) continue;
+            if ((hit.point - isect.point).lengthSquared() > 2.25f * radius * radius) continue;
+            const Vec3f outward = hit.frontFace ? hit.normal : -hit.normal;
+            sum += outward * std::abs(outward.dot(axis)); // eksene dik yüzleri az say (izdüşüm)
+        }
+    }
+    // Ortalama dış normal; çarpılan yüzün ışına bakan tarafına çevrilir.
+    Vec3f n = sum.normalized();
+    const Vec3f outwardN = isect.frontFace ? N : -N;
+    if (n.dot(outwardN) < 0.0f) n = -n;
+    return isect.frontFace ? n : -n;
+}
+
+/// Bir köşede ışık seçme dağılımı. Her ışığın o noktaya tahmini katkısı (Light::importance)
+/// ile orantılı + %15 düzgün taban: tahmin kötüyse (gölge, parlak yüzey) bile hiçbir ışık
+/// aç kalmaz ve tahminci yansız kalır. Sıra: lights() sonra ortam. 32'den çok ışıkta
+/// (yayıcı mesh kalabalığı) O(N) maliyet yerine düzgün seçime dönülür.
+struct LightPicker {
+    static constexpr int kMaxAdaptive = 33;
+    float pmfs[kMaxAdaptive]{};
+    int count = 0;
+    bool uniform = true;
+
+    void build(const std::vector<const Light*>& lights, const EnvironmentLight* env, const Vec3f& p, const Vec3f& n) {
+        count = static_cast<int>(lights.size()) + (env ? 1 : 0);
+        uniform = count <= 1 || count > kMaxAdaptive;
+        if (uniform) return;
+        float sum = 0.0f;
+        for (int i = 0; i < count; ++i) {
+            const Light* l = i < static_cast<int>(lights.size()) ? lights[static_cast<size_t>(i)] : env;
+            const float w = l->importance(p, n);
+            pmfs[i] = (w > 0.0f && std::isfinite(w)) ? w : 0.0f;
+            sum += pmfs[i];
+        }
+        if (!(sum > 0.0f) || !std::isfinite(sum)) {
+            uniform = true;
+            return;
+        }
+        const float a = 0.85f / sum, b = 0.15f / static_cast<float>(count);
+        for (int i = 0; i < count; ++i) pmfs[i] = pmfs[i] * a + b;
+    }
+
+    float pmf(int i) const { return uniform ? 1.0f / static_cast<float>(count) : pmfs[i]; }
+
+    int sample(float u, float& pmfOut) const {
+        if (uniform) {
+            pmfOut = 1.0f / static_cast<float>(count);
+            return std::min(static_cast<int>(u * static_cast<float>(count)), count - 1);
+        }
+        float acc = 0.0f;
+        for (int i = 0; i < count - 1; ++i) {
+            acc += pmfs[i];
+            if (u < acc) {
+                pmfOut = pmfs[i];
+                return i;
+            }
+        }
+        pmfOut = pmfs[count - 1];
+        return count - 1;
+    }
+};
+
+} // namespace
+
+Vec3f PathTracer::roundedEdgeNormalForTest(const Scene& scene, const SurfaceInteraction& isect, float radius,
+                                           Sampler& sampler) {
+    return roundedEdgeNormal(scene, isect, radius, sampler);
+}
+
+bool PathTracer::randomWalkSubsurface(const Scene& scene, const SurfaceInteraction& entry, const Vec3f& dir,
+                                      const SubsurfaceCoeffs& coeffs, Sampler& sampler, Color3f& throughput,
+                                      SurfaceInteraction& exitSi) {
+    const Color3f sigmaS = coeffs.albedo * coeffs.sigmaT;
+    Vec3f d = dir.normalized();
+    // Giriş: yüzeyin hemen içinden başla (normal ışığın geldiği tarafa bakar).
+    Vec3f origin = spawnOrigin(entry, d);
+    for (int step = 0; step < kMaxWalkSteps; ++step) {
+        Ray r(origin, d);
+        SurfaceInteraction hit;
+        const bool h = scene.intersect(r, hit);
+        const float tMax = h ? hit.t : INFINITY_F;
+        float t = 0.0f;
+        // Kanal seçimi throughput · albedo ile (Cycles): sönmekte olan kanalı seçmek boşa iş.
+        const bool scattered =
+            sampleFreeFlight(coeffs.sigmaT, sigmaS, tMax, h, throughput * coeffs.albedo, sampler, throughput, t);
+        if (!throughput.isFinite() || throughput.isBlack()) return false;
+        if (!scattered) {
+            if (!h) return false; // açık geometriden kaçtı
+            exitSi = hit;
+            return true;
+        }
+        origin = r.at(t);
+        d = sampleHenyeyGreenstein(d, coeffs.g, sampler.get2D());
+        if (step >= 8 && !russianRoulette(throughput, sampler)) return false;
+    }
+    return false;
+}
+
+
 
 /// Bir kamera ışını boyunca gelen radyansın tek örnekli tahmini.
 ///
@@ -70,6 +328,17 @@ float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sam
 /// Son saçılmada NEE yapılır ve BSDF yönü de izlenir; o yöndeki ışık yayımı bir sonraki
 /// turda MIS ağırlığıyla eklenip döngü biter. Eskiden son noktada NEE yapılıyor ama
 /// tamamlayıcı BSDF ışını hiç izlenmiyordu, enerji kayboluyordu (bulgu lighting-m1).
+///
+/// Hacimler: kırılan yol bir cismin içine girince (cam, sıvı) o cismin ortamı yığına
+/// itilir; içerideki her doğru parçasında soğurma (Beer–Lambert) ve gerekirse saçılma
+/// örneklenir. İçeride NEE yapılmaz: ışıklar kırıcı sınırın dışında, gölge ışını sınıra
+/// takılır; bu yüzden saçılmadan sonra bulunan ışık yayımı tam ağırlık alır.
+///
+/// Yüzey altı (SSS): malzeme "subsurface" lobunu seçerse rastgele yürüyüş yapılır ve yol
+/// çıkış noktasında beyaz Lambert ile devam eder (NEE dahil). Yürüyüş sekme sayılmaz.
+///
+/// Dispersiyon: yol dalga boyuna bağlı bir cama ilk çarptığında tek bir λ seçilir;
+/// throughput λ'nın RGB ağırlığıyla çarpılır ve yolun geri kalanı bu λ ile izlenir.
 Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, PrimaryHit* primary) const {
     Color3f L = Color3f::black();
     Color3f throughput = Color3f::white();
@@ -78,68 +347,193 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
     float lastBsdfPdf = 0.0f;
     Vec3f lastNormal(0, 1, 0);
     Vec3f lastPoint = ray.origin;
+    MediumStack media;
+    float lambda = 0.0f;       // 0 = RGB; > 0 = dispersiyon nedeniyle tek dalga boylu yol
+    int mediumEvents = 0;
+    bool firstSegment = true;
+    bool pendingExit = false;  // SSS çıkış köşesi: isect yürüyüş tarafından dolduruldu
+    SurfaceInteraction isect;
+    int depth = 0;
 
     // Environment participates in NEE when present (product-studio IBL).
     const EnvironmentLight* env = scene.environment();
     const auto& lights = scene.lights();
     const int explicitLights = static_cast<int>(lights.size());
     const int lightCount = explicitLights + (env ? 1 : 0);
-    // Düzgün ışık seçimi: her ışığın seçilme olasılığı 1/lightCount.
-    const float lightPmf = lightCount > 0 ? 1.0f / static_cast<float>(lightCount) : 0.0f;
+    // Işık seçimi köşeye özeldir (bkz. LightPicker); MIS'te bir önceki köşenin dağılımı lazım,
+    // bu yüzden picker yalnız NEE yapılan köşede yeniden kurulur ve sonraki isabete kadar kalır.
+    LightPicker picker;
     const int shadowSamples = m_shadowQuality;
+    bool cameraRay = true; // birincil ışın ya da yalnız delta kırılmalarla devamı
 
     // Tek bir NaN/Inf katkı ilerleyen (progressive) pikseli kalıcı olarak bozar;
     // böyle bir katkıyı atlarız (bulgu lighting-10). Sonlu değerler aynen eklenir.
     auto accumulate = [&L](const Color3f& c) {
         if (c.isFinite()) L += c;
     };
-
-    for (int depth = 0;; ++depth) {
-        SurfaceInteraction isect;
-        bool hit = scene.intersect(currentRay, isect);
-        if (depth == 0 && primary) {
-            primary->hit = hit;
-            if (hit) primary->isect = isect;
-        }
-
-        if (!hit) {
-            // Kameradan doğrudan görülen arka plan (yalnız birincil ışın; yansımalar ve
-            // cam arkası her zaman ortamı görür). Şeffafta katkı 0, alfa da 0 olur.
-            if (depth == 0 && primary && scene.background().mode != Background::Mode::Environment) {
-                if (scene.background().mode == Background::Mode::Color) L = scene.background().color;
-                break;
+    // Delta olmayan (difüz/parlak/yüzey altı) saçılma sayısı: kırpma "doğrudan"ı (ilk böyle
+    // köşeden görülen ışık) korur; cam ve ayna zinciri doğrudanlığı bozmaz.
+    int diffuseBounces = 0;
+    int passThroughs = 0;
+    // Dolaylı katkı: ışığa ikinci ya da sonraki köşeden ulaşan yol (isteğe bağlı kırpma).
+    auto accumulateIndirect = [&](const Color3f& c) {
+        if (m_clampIndirect > 0.0f) {
+            const float m = std::max({c.r, c.g, c.b});
+            if (m > m_clampIndirect) {
+                accumulate(c * (m_clampIndirect / m));
+                return;
             }
-            if (env) {
-                Color3f Le = env->eval(currentRay.direction);
-                float weight = 1.0f;
-                if (!specularBounce) {
-                    // BSDF örneği ortama kaçtı: NEE'nin aynı yönü bulma pdf'i ile MIS.
-                    float lightPdf = lightPmf * env->pdfLi(currentRay.direction, lastNormal);
-                    weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
+        }
+        accumulate(c);
+    };
+
+    for (;;) {
+        bool hit = true;
+        Vec3f wo;
+        const bool pendingExitVertex = pendingExit;
+        if (pendingExit) {
+            pendingExit = false;
+            wo = isect.normal; // Lambert çıkışı: wo yalnız yarıküre testi için
+        } else {
+            isect = SurfaceInteraction{};
+            const Vec3f segmentStart = currentRay.origin;
+            hit = scene.intersect(currentRay, isect);
+            // Kameraya görünmez ışık dörtgenleri: kamera ışını içinden geçip devam eder.
+            for (int skip = 0; hit && cameraRay && skip < 8 && scene.cameraInvisible(isect); ++skip) {
+                currentRay = Ray(isect.point, currentRay.direction);
+                isect = SurfaceInteraction{};
+                hit = scene.intersect(currentRay, isect);
+            }
+            if (firstSegment && primary) {
+                primary->hit = hit;
+                if (hit) primary->isect = isect;
+            }
+            firstSegment = false;
+
+            // Işın bir cismin içinde ilerliyorsa: soğurma ve (varsa) saçılma.
+            if (const Medium* med = media.current()) {
+                const float dirLen = currentRay.direction.length();
+                const float segment = hit ? (isect.point - segmentStart).length() : INFINITY_F;
+                if (med->scatters()) {
+                    float t = 0.0f;
+                    if (sampleFreeFlight(med->sigmaT(), med->sigmaS, segment, hit, throughput, sampler, throughput, t)) {
+                        if (++mediumEvents > kMaxMediumEvents || !throughput.isFinite()) break;
+                        const Vec3f d = currentRay.direction / dirLen;
+                        currentRay = Ray(segmentStart + d * t, sampleHenyeyGreenstein(d, med->g, sampler.get2D()));
+                        cameraRay = false;
+                        specularBounce = true; // içeride NEE yok → bulunan yayım tam ağırlık
+                        if (mediumEvents > 8 && !russianRoulette(throughput, sampler)) break;
+                        continue;
+                    }
+                } else if (hit) {
+                    throughput *= expNeg(med->sigmaA, segment);
+                } else if (!med->sigmaA.isBlack()) {
+                    break; // açık mesh: sonsuz soğurucu yol
                 }
-                accumulate(throughput * Le * weight);
+                if (throughput.isBlack() || !throughput.isFinite()) break;
             }
-            break;
-        }
+            wo = -currentRay.direction;
 
-        if (isect.material) {
-            Color3f emitted = isect.material->emitted(isect);
-            if (!emitted.isBlack()) {
-                float weight = 1.0f;
-                if (!specularBounce) {
-                    // Diffuse/glossy hit of an emissive quad: complement of NEE's weight.
-                    // Kayıtlı ışık değilse (lightPdf = 0) NEE onu bulamaz → ağırlık 1.
-                    float lightPdf = lightPmf * areaLightSolidAnglePdf(lights, lastPoint, isect.point);
-                    if (lightPdf > 0.0f && lastBsdfPdf > 0.0f) {
+            if (!hit) {
+                // Kameradan doğrudan görülen arka plan (birincil ışın ya da ince duvardan düz geçen
+                // devamı; yansımalar ve kırıcı cam arkası her zaman ortamı görür). İnce camın tonu
+                // throughput'ta olduğu için arka plan onunla çarpılır. Şeffafta renk katkısı 0;
+                // kapsama, camın geçirmediği orandır (yalnız düz geçiş varsa ≠ 1).
+                if (depth == 0 && primary && scene.background().mode != Background::Mode::Environment) {
+                    if (scene.background().mode == Background::Mode::Color) accumulate(throughput * scene.background().color);
+                    else if (passThroughs > 0) primary->coverage = std::max(0.0f, 1.0f - throughput.luminance());
+                    break;
+                }
+                if (env) {
+                    Color3f Le = env->eval(currentRay.direction);
+                    float weight = 1.0f;
+                    if (!specularBounce) {
+                        // BSDF örneği ortama kaçtı: NEE'nin aynı yönü bulma pdf'i ile MIS.
+                        float lightPdf = picker.pmf(explicitLights) * env->pdfLi(currentRay.direction, lastNormal);
                         weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                     }
+                    if (diffuseBounces >= 2) accumulateIndirect(throughput * Le * weight);
+                    else accumulate(throughput * Le * weight);
                 }
-                accumulate(throughput * emitted * weight);
+                break;
+            }
+
+            // Gölge yakalayıcı: kamera zemin yerine arka planı görür, üzerine zemine düşen
+            // gölgenin oranı biner. Oran = örneklenen doğrudan ışığın görünen payı (Cycles'ın
+            // "shadow catcher"ı gibi oran tahmini). Dolaylı ışınlar zemini normal yüzey görür:
+            // nesneler zeminden sekme ışığı alır ve onu yansıtır.
+            if (cameraRay && scene.isShadowCatcher(isect)) {
+                const Background& bgd = scene.background();
+                Color3f bg;
+                if (bgd.mode == Background::Mode::Color) bg = bgd.color;
+                else if (bgd.mode == Background::Mode::Environment && env) bg = env->eval(currentRay.direction);
+                float visible = 0.0f, total = 0.0f;
+                if (lightCount > 0) {
+                    picker.build(lights, env, isect.point, isect.normal);
+                    const int n = 4 * shadowSamples;
+                    for (int k = 0; k < n; ++k) {
+                        float pmf = 0.0f;
+                        const int li = picker.sample(sampler.get1D(), pmf);
+                        const LightSample ls = li < explicitLights ? lights[static_cast<size_t>(li)]->sampleLi(isect, sampler.get2D())
+                                                                   : env->sampleLi(isect, sampler.get2D());
+                        const float cosT = ls.wi.dot(isect.normal);
+                        if (!ls.isValid() || cosT <= 0.0f) continue;
+                        const float c = ls.Li.luminance() * cosT / (pmf * ls.pdf);
+                        if (!(c > 0.0f) || !std::isfinite(c)) continue;
+                        total += c;
+                        const bool onSurface = li < explicitLights && !lights[static_cast<size_t>(li)]->isDelta();
+                        Ray shadow;
+                        if (makeShadowRay(isect, ls, onSurface, shadow))
+                            visible += c * shadowTransmittance(scene, shadow).luminance();
+                    }
+                }
+                const float ratio = total > 0.0f ? std::clamp(visible / total, 0.0f, 1.0f) : 1.0f;
+                if (primary && depth == 0) {
+                    primary->catcherAlpha = 1.0f - ratio;
+                    primary->catcherBackground = bg;
+                }
+                accumulate(throughput * bg * ratio);
+                break;
+            }
+
+            if (isect.material) {
+                Color3f emitted = isect.material->emitted(isect);
+                if (!emitted.isBlack()) {
+                    float weight = 1.0f;
+                    if (!specularBounce) {
+                        // Diffuse/glossy hit of an emissive quad: complement of NEE's weight.
+                        // Kayıtlı ışık değilse (lightPdf = 0) NEE onu bulamaz → ağırlık 1.
+                        const int li = scene.emitterIndex(isect);
+                        float lightPdf = li >= 0 ? picker.pmf(li) * lights[static_cast<size_t>(li)]->pdfLiHit(lastPoint, isect)
+                                                 : 0.0f;
+                        if (lightPdf > 0.0f && lastBsdfPdf > 0.0f) {
+                            weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
+                        }
+                    }
+                    if (diffuseBounces >= 2) accumulateIndirect(throughput * emitted * weight);
+                    else accumulate(throughput * emitted * weight);
+                }
             }
         }
 
         if (!isect.material || depth >= m_maxDepth) {
             break;
+        }
+
+        // Dispersiyon: ilk dalga boyuna bağlı yüzeyde λ seçilir, yol tek renkli olur.
+        if (lambda == 0.0f && isect.material->isDispersive()) {
+            Color3f w;
+            lambda = sampleWavelength(sampler.get1D(), w);
+            throughput *= w;
+        }
+        isect.wavelength = lambda;
+
+        // Yuvarlatılmış kenarlar: gölgelendirme normali komşu yüzeylerle harmanlanır (ilk üç
+        // köşede; daha derin sekmelerde görünmez, maliyete değmez). wo'yu arkada bırakan bir
+        // eğim siyah kenar yapacağından o durumda orijinal normal korunur.
+        if (depth <= 2 && isect.material->roundEdgeRadius() > 0.0f && !pendingExitVertex) {
+            const Vec3f n = roundedEdgeNormal(scene, isect, isect.material->roundEdgeRadius(), sampler);
+            if (n.dot(wo) > 0.02f) isect.normal = n;
         }
 
         // Approximate contact AO (multiplies remaining path; cheap studio polish).
@@ -148,12 +542,12 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             throughput *= approxAo(scene, isect, sampler, m_aoStrength, m_shadowQuality);
         }
 
-        const Vec3f wo = -currentRay.direction;
         const bool isSpecular = isect.material->isDelta();
-
         if (lightCount > 0 && !isSpecular) {
+            picker.build(lights, env, isect.point, isect.normal);
             for (int s = 0; s < shadowSamples; ++s) {
-                int lightIndex = std::min(static_cast<int>(sampler.get1D() * lightCount), lightCount - 1);
+                float lightPmf = 0.0f;
+                const int lightIndex = picker.sample(sampler.get1D(), lightPmf);
                 LightSample ls;
                 bool fromEnv = false;
 
@@ -166,27 +560,11 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                     if (!ls.isValid()) continue;
                 }
 
-                Vec3f shadowOrigin = offsetRayOrigin(isect.point, isect.normal, ls.wi);
-                Vec3f shadowDir = ls.wi;
-                float shadowEnd = ls.distance - 1e-4f;
-                if (!fromEnv && !lights[lightIndex]->isDelta()) {
-                    // Origin is pushed off the receiver, so a ray along wi meets the
-                    // light plane early and the quad occludes its own NEE sample.
-                    Vec3f pLight = isect.point + ls.wi * ls.distance;
-                    Vec3f delta = pLight - shadowOrigin;
-                    float dist = delta.length();
-                    if (dist > 1e-4f) {
-                        shadowDir = delta / dist;
-                        // ponytail: stop short of the sample; a contact occluder inside the slop is missed until shadow rays skip light prims
-                        float slop = std::max(1e-4f, dist * 1e-4f);
-                        shadowEnd = dist - slop;
-                    }
-                }
+                Ray shadowRay;
+                if (!makeShadowRay(isect, ls, !fromEnv && !lights[lightIndex]->isDelta(), shadowRay)) continue;
+                const Color3f vis = shadowTransmittance(scene, shadowRay);
 
-                if (shadowEnd <= 1e-4f) continue;
-                Ray shadowRay(shadowOrigin, shadowDir, 1e-4f, shadowEnd);
-
-                if (!scene.intersectAny(shadowRay)) {
+                if (!vis.isBlack()) {
                     float bsdfPdf = 0.0f;
                     Color3f f = isect.material->evalPdf(wo, ls.wi, isect, bsdfPdf);
                     // |cos|: ışık yüzeyin arkasında olabilir; BSDF geçirgense (kaba cam,
@@ -204,51 +582,85 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                             weight = powerHeuristic(shadowSamples, lightPdf, 1, bsdfPdf);
                         }
                         // Tahminci: f·Li·|cos| / (n_l · pdf_l), MIS ağırlığıyla.
-                        accumulate(throughput * f * ls.Li
-                                   * (cosTheta * weight / (lightPdf * static_cast<float>(shadowSamples))));
+                        const Color3f c = throughput * f * ls.Li * vis
+                                          * (cosTheta * weight / (lightPdf * static_cast<float>(shadowSamples)));
+                        if (diffuseBounces >= 1) accumulateIndirect(c);
+                        else accumulate(c);
                     }
                 }
             }
         }
 
-        // BSDF örneklemesi: uc lob seçimi (yansıma/kırılma), u yön için.
-        float uc = sampler.get1D();
-        Vec2f u = sampler.get2D();
-        Vec3f wi;
-        Color3f f;
-        float pdf = 0.0f;
-        if (!isect.material->sampleWithLobe(wo, isect, uc, u, wi, f, pdf)) {
+        // BSDF örneklemesi: uc lob seçimi (yansıma/kırılma/yüzey altı), u yön için.
+        BSDFSample bs;
+        const float uc = sampler.get1D();
+        const Vec2f u = sampler.get2D();
+        if (!isect.material->sampleFull(wo, isect, uc, u, bs)) {
             break;
         }
 
-        if (pdf <= 0.0f || f.isBlack()) {
+        if (bs.subsurface) {
+            SubsurfaceCoeffs coeffs;
+            if (!isect.material->subsurfaceCoeffs(isect, coeffs)) break;
+            throughput *= bs.weight; // yüzey altı ışığı "doğrudan" sayılır: kırpılmaz
+            SurfaceInteraction exitSi;
+            if (!randomWalkSubsurface(scene, isect, bs.wi, coeffs, sampler, throughput, exitSi)) break;
+            // Çıkış köşesi: normal dışa, malzeme beyaz Lambert. Derinlik artmaz.
+            exitSi.normal = -exitSi.normal;
+            exitSi.material = &subsurfaceExitMaterial();
+            isect = exitSi;
+            pendingExit = true;
+            cameraRay = false;
+            continue;
+        }
+
+        if (bs.pdf <= 0.0f || bs.f.isBlack()) {
             break;
         }
 
+        if (bs.passThrough) {
+            // İnce duvardan düz geçiş: yol bir önceki köşenin MIS durumunu korur (lastPoint,
+            // lastBsdfPdf, specularBounce değişmez). Aynı ışık gölge ışınıyla da (geçirgenlikle)
+            // bulunduğu için iki strateji böylece tutarlı tartılır.
+            throughput *= bs.f * (std::abs(bs.wi.dot(isect.normal)) / bs.pdf);
+            if (!throughput.isFinite()) break;
+            currentRay = Ray(spawnOrigin(isect, bs.wi), bs.wi);
+            if (++passThroughs > 64) break; // sonsuz cam yığınına karşı sigorta (sekme sayılmaz)
+            continue;
+        }
+
+        const Vec3f wi = bs.wi;
         float cosTheta = std::abs(wi.dot(isect.normal));
-        throughput *= f * (cosTheta / pdf);
+        throughput *= bs.f * (cosTheta / bs.pdf);
         if (!throughput.isFinite()) break;
-        lastBsdfPdf = pdf;
+        lastBsdfPdf = bs.pdf;
         lastNormal = isect.normal;
         lastPoint = isect.point;
-        specularBounce = isect.material->isDelta();
+        specularBounce = bs.delta;
+        if (!bs.delta) ++diffuseBounces;
+        cameraRay = cameraRay && bs.delta && wi.dot(isect.normal) < 0.0f; // yalnız delta kırılma
 
-        Vec3f nextRayOrigin = offsetRayOrigin(isect.point, isect.normal, wi);
+        // Hacim sınırından geçiş: wo ve wi geometrik normalin farklı taraflarındaysa ışın
+        // kırıldı. Dışarıdan geldiyse cismin ortamına gir, içeriden geldiyse çık.
+        if (isect.material->isVolumeBoundary()) {
+            const float a = wo.dot(isect.ng);
+            const float b = wi.dot(isect.ng);
+            if (a * b < 0.0f) {
+                if (a > 0.0f) media.enter(isect.material);
+                else media.leave(isect.material);
+            }
+        }
+
+        Vec3f nextRayOrigin = spawnOrigin(isect, wi);
         currentRay = Ray(nextRayOrigin, wi);
+        ++depth;
 
         // Rus ruleti (PBRT-v4): hayatta kalma olasılığı = throughput'un EN BÜYÜK bileşeni.
         // q = 1 - max; q > 0 ise ölçek 1/(1-q) ile tahminci yansız kalır. max ≥ 1 ise
         // yol hiç kesilmez (q ≤ 0) ve rastgele sayı da tüketilmez. Eskiden luminans
         // kullanılıyordu: doygun renkli (ör. saf mavi) yollar haksız yere öldürülüyordu.
-        if (depth >= m_russianRouletteDepth) {
-            float maxComponent = std::max({throughput.r, throughput.g, throughput.b});
-            float q = std::max(0.0f, 1.0f - maxComponent);
-            if (q > 0.0f) {
-                if (sampler.get1D() < q) {
-                    break;
-                }
-                throughput /= (1.0f - q);
-            }
+        if (depth > m_russianRouletteDepth && !russianRoulette(throughput, sampler)) {
+            break;
         }
     }
 

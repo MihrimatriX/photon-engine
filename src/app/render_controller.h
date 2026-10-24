@@ -16,6 +16,7 @@
 #include "engine/renderer.h"
 #include "engine/denoiser.h"
 #include "engine/render_settings.h"
+#include "core/image/imager.h"
 #include "core/image/image.h"
 #include "core/math/vec.h"
 
@@ -39,12 +40,15 @@ struct CameraParams {
     float orthoHeight = 2.0f;
     float apertureRadius = 0.0f;
     float focusDistance = 5.0f;
+    int apertureBlades = 0;
+    float bladeRotationDeg = 0.0f;
 
     bool operator==(const CameraParams& o) const {
         return eye.x == o.eye.x && eye.y == o.eye.y && eye.z == o.eye.z && target.x == o.target.x &&
                target.y == o.target.y && target.z == o.target.z && fovDeg == o.fovDeg &&
                orthographic == o.orthographic && orthoHeight == o.orthoHeight &&
-               apertureRadius == o.apertureRadius && focusDistance == o.focusDistance;
+               apertureRadius == o.apertureRadius && focusDistance == o.focusDistance &&
+               apertureBlades == o.apertureBlades && bladeRotationDeg == o.bladeRotationDeg;
     }
     bool operator!=(const CameraParams& o) const { return !(*this == o); }
 };
@@ -88,6 +92,8 @@ public:
     void setSettings(const RenderSettings& rs);
     /// Yalnız ekran dönüşümü (ton eşleme, pozlama): birikim korunur.
     void setDisplay(ToneMapOperator tmo, float exposureEV);
+    /// Görüntüleyici (bloom, glare, renk) ekran görüntüsüne ton eşlemeden önce uygulanır.
+    void setImager(const ImagerSettings& imager);
     void setViewport(int width, int height, float resolutionScale);
     void setDenoise(bool enabled);
     void setTargetSpp(int spp);  ///< 0 = sınırsız; artırmak birikimi sıfırlamaz
@@ -142,6 +148,7 @@ private:
     bool m_transparent = false;
     ToneMapOperator m_tmo = ToneMapOperator::PBRNeutral;
     float m_exposure = 0.0f;
+    ImagerSettings m_imager;
     Clock::time_point m_lastInteraction{};
 
     // ── iptal / sahne kilidi ──

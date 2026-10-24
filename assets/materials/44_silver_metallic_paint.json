@@ -1,0 +1,26 @@
+{
+  "category": "Boya",
+  "type": "generic",
+  "metallic": 0,
+  "specular": 0.5,
+  "clearCoat": 1.0,
+  "clearCoatRoughness": 0.02,
+  "id": "silver_metallic_paint",
+  "name": "Gümüş Metalik Boya",
+  "baseColor": [
+    0.28,
+    0.29,
+    0.3
+  ],
+  "roughness": 0.45,
+  "flakes": {
+    "density": 0.7,
+    "size": 0.0012,
+    "roughness": 0.3,
+    "color": [
+      0.92,
+      0.92,
+      0.93
+    ]
+  }
+}

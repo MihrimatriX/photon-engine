@@ -424,6 +424,38 @@
     </div>
   </section>
 
+  <section id="gercekcilik" class="chapter" style="padding-top:0">
+    <div class="wrap">
+      <h2>0.2: Işığın her davranışı</h2>
+      <p class="lead">Işık yalnız yüzeyden sekmez: mumun içinde dolaşır, kalın camda renk kazanır, elmasta renklerine ayrılır, sabun köpüğünde kendisiyle girişim yapar. 0.2 sürümü bunların hepsini fiziksel modelleriyle izler; görüntülerin hiçbirinde boyama ya da sahte efekt yok.</p>
+      <figure class="shot reveal">
+        <img src="img/v2-volume.jpg" alt="Yan yana altı küre: mum, yeşim ve ten yüzey altı saçılımıyla yumuşak; kırmızı şarap kalın yerlerinde koyu; opal cam bulanık; elmas kenarlarında renkli." width="1200" height="500" loading="lazy">
+        <figcaption>Rastgele yürüyüşlü yüzey altı saçılımı (mum, yeşim, ten), Beer–Lambert soğurmalı şarap, saçan ortamlı opal cam ve Abbe dispersiyonlu elmas.</figcaption>
+      </figure>
+      <figure class="shot reveal">
+        <img src="img/v2-metal.jpg" alt="Yedi küre: krom, altın, bakır, ısıl renk almış yeşil titanyum, pullu gümüş boya, sedef ve pullu şeker kırmızısı." width="1200" height="500" loading="lazy">
+        <figcaption>Ölçülmüş kırılma indislerinden metaller (F82 kenar tonu, çoklu saçılma telafisi), ince film girişimi ve metalik boya pulları.</figcaption>
+      </figure>
+      <figure class="shot reveal">
+        <img src="img/v2-sky.jpg" alt="Beyaz fonda üç küre; altın saat güneşi uzun, yumuşak gölgeler düşürüyor." width="1200" height="500" loading="lazy">
+        <figcaption>Fiziksel gök ve güneş (Nishita, konum + saat) ile gölge yakalayıcı zemin: ürün, yalnız gölgesiyle beyaz fona yerleşir.</figcaption>
+      </figure>
+      <figure class="shot reveal">
+        <img src="img/v2-bokeh.jpg" alt="Krom ve altın küre; arkada odak dışı renkli ışıklar altıgen bokeh ve yıldız parlaması veriyor." width="1200" height="500" loading="lazy">
+        <figcaption>Altı kanatlı diyafram bokeh'i, bloom, yıldız parlaması ve vinyet: görüntüleyici render'ın doğrusal sonucunda çalışır.</figcaption>
+      </figure>
+      <figure class="shot reveal">
+        <img src="img/v2-misc.jpg" alt="Keskin ve kenarları yuvarlatılmış iki beyaz küp ile gökkuşağı renkli bir sabun köpüğü." width="1200" height="500" loading="lazy">
+        <figcaption>Yuvarlatılmış kenarlar (geometriye dokunmadan) ve ince duvarlı camda sabun filmi.</figcaption>
+      </figure>
+      <div class="facts">
+        <div><strong>2× daha az gürültü</strong>Noktaya özel ışık seçimi ve küresel dikdörtgen örneklemesiyle, eşit örnekte (<code>bench/BASELINE.md</code>).</div>
+        <div><strong>133 test</strong>Fırın testleri dahil: saçan ortam, dispersiyonlu cam ve beyaz pürüzlü metal enerjiyi korur.</div>
+        <div><strong>Yalnız CPU</strong>Bu kareler 4 vCPU'lu bir Linux kabında, Embree ve OIDN olmadan render edildi.</div>
+      </div>
+    </div>
+  </section>
+
   <section id="gorunumler" class="chapter" style="padding-top:0">
     <div class="wrap">
       <h2>Düzenlerken farklı gözlerle bakın</h2>
@@ -540,7 +572,7 @@
             <span class="state">Planlandı</span>
           </div>
           <ul>
-            <li><strong>Faz 5: Örnekleme <em>2 / 14</em></strong><span>Sobol, BSDFSample bayrakları, alias tablosu. Kanıt: eşit sürede varyans düşüşü.</span><div class="bar"><i style="width:14%"></i></div></li>
+            <li><strong>Faz 5: Örnekleme <em>7 / 14</em></strong><span>Sobol, noktaya özel ışık seçimi, küresel dikdörtgen, uyarlamalı örnekleme. Kanıt: eşit örnekte relMSE yarıya indi.</span><div class="bar"><i style="width:50%"></i></div></li>
             <li><strong>Faz 6: Hızlandırma <em>0 / 11</em></strong><span>Yalın BVH, BLAS/TLAS, Embree 4. Kanıt: Mrays/s artışı.</span><div class="bar"><i style="width:0%"></i></div></li>
           </ul>
         </article>
@@ -553,7 +585,7 @@
             <span class="state">Planlandı</span>
           </div>
           <ul>
-            <li><strong>Faz 7: Malzeme ve renk <em>0 / 12</em></strong><span>VNDF, Kulla–Conty, OpenPBR. Kanıt: fırın ≈ 1, Mitsuba relMSE &lt; %1.</span><div class="bar"><i style="width:0%"></i></div></li>
+            <li><strong>Faz 7: Malzeme ve renk <em>4 / 12</em></strong><span>Çoklu saçılma telafisi, F82, Beer–Lambert, yuvarlatılmış kenar bitti; OpenPBR sırada. Kanıt: fırın ≈ 1.</span><div class="bar"><i style="width:33%"></i></div></li>
             <li><strong>Faz 8: Rasterizasyon <em>0 / 6</em></strong><span>Split-sum IBL, gölge haritası. Kanıt: fark haritası.</span><div class="bar"><i style="width:0%"></i></div></li>
           </ul>
         </article>
@@ -567,7 +599,7 @@
           </div>
           <ul>
             <li><strong>Faz 9: GTX 1080'de CUDA <em>0 / 9</em></strong><span>En büyük faz. Kanıt: CPU ile GPU eşleşme testi.</span><div class="bar"><i style="width:0%"></i></div></li>
-            <li><strong>Faz 10: İleri konular <em>0 / 8</em></strong><span>Seçmeli.</span><div class="bar"><i style="width:0%"></i></div></li>
+            <li><strong>Faz 10: İleri konular <em>4 / 12</em></strong><span>Hacimler ve SSS, dispersiyon, ince duvar, görüntüleyici bitti.</span><div class="bar"><i style="width:33%"></i></div></li>
           </ul>
         </article>
       </div>

@@ -94,6 +94,11 @@ inline Vec3f ggxSampleVisibleNormal(Vec3f wo, float ax, float ay, float u1, floa
     return Vec3f(ax * nh.x, ay * nh.y, std::max(1e-6f, nh.z)).normalized();
 }
 
+/// Tek saçılmalı GGX'in yönlü albedosu E(μo, α) (F = 1): kaç enerjinin mikro-yüzeyler
+/// arasında birden çok sekip "kaybolduğunu" söyler (1 − E). Pürüzlü metallerin kararmasını
+/// telafi etmek için kullanılır (Turquin 2019, Kulla–Conty 2017). Ön hesaplı tablo.
+float ggxDirectionalAlbedo(float cosTheta, float alpha);
+
 /// x⁵ — std::pow(x, 5) yerine iki çarpma + bir çarpma (Schlick için).
 inline float pow5(float x) {
     float x2 = x * x;

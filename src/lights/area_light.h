@@ -8,6 +8,7 @@
 /// @brief Rectangular area light source in PhotonEngine.
 
 #include "lights/light.h"
+#include <cmath>
 #include <vector>
 
 namespace photon {
@@ -23,14 +24,31 @@ public:
         Vec3f normal = u.cross(v);
         m_area = normal.length();
         m_normal = normal.normalized();
+        // Küresel dikdörtgen örneklemesi dik kenarlar ister (paralelkenarda alan örneklemesi).
+        const float lu = u.length(), lv = v.length();
+        m_rectangle = lu > 0.0f && lv > 0.0f && std::abs(u.dot(v)) <= 1e-4f * lu * lv;
     }
 
+    /// Örnekleme: alıcıdan görülen dikdörtgen bir küresel dörtgendir; nokta o katı açı
+    /// içinde DÜZGÜN seçilir (Ureña, Fajardo, King 2013). Alan örneklemesinin 1/r² ve
+    /// kenar açısı kaynaklı gürültüsü yok olur: yakındaki büyük softbox'lar çok daha
+    /// temiz çıkar. Çok küçük görünen ışıkta (Ω < 1e-4 sr) alan örneklemesine dönülür.
     LightSample sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const override;
     bool isDelta() const override { return false; }
     Color3f power() const override;
+    float importance(const Vec3f& p, const Vec3f& n) const override;
+    float pdfLiHit(const Vec3f& ref, const SurfaceInteraction& hit) const override { return pdfLi(ref, hit.point); }
 
     /// Solid-angle PDF of @p pLight as seen from @p ref. Matches sampleLi. 0 if @p pLight is off the quad.
     float pdfLi(const Vec3f& ref, const Vec3f& pLight) const;
+
+    /// @p ref'ten görülen katı açı (sr); dikdörtgen değilse 0.
+    float solidAngle(const Vec3f& ref) const;
+
+    /// Kamera ışınları ışığın dörtgenini görsün mü? (KeyShot "kameraya görünür").
+    /// Görünmezse yansımalarda ve aydınlatmada yine vardır; yalnız doğrudan bakışta yoktur.
+    void setVisibleToCamera(bool v) { m_visibleToCamera = v; }
+    bool visibleToCamera() const { return m_visibleToCamera; }
 
     const Vec3f& position() const { return m_position; }
     const Vec3f& u() const { return m_u; }
@@ -48,6 +66,8 @@ private:
     
     Vec3f m_normal;
     float m_area;
+    bool m_rectangle = false;
+    bool m_visibleToCamera = true;
 };
 
 /// Emissive triangle mesh for next-event estimation. Does not own the mesh.
@@ -58,6 +78,9 @@ public:
     LightSample sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const override;
     bool isDelta() const override { return false; }
     Color3f power() const override;
+    float importance(const Vec3f& p, const Vec3f& n) const override;
+    /// O(1): çarpılan nokta mesh üzerindedir, geometrik normali kesişim kaydındadır.
+    float pdfLiHit(const Vec3f& ref, const SurfaceInteraction& hit) const override;
     /// Solid-angle PDF of a point on this mesh. 0 if @p pLight is off every triangle.
     float pdfLi(const Vec3f& ref, const Vec3f& pLight) const;
 
@@ -70,6 +93,7 @@ private:
     // m_cdf[i] = 0..i üçgenlerinin alan toplamı (normalize edilmemiş CDF, son eleman = m_area).
     std::vector<float> m_cdf;
     float m_area = 0.0f;
+    Vec3f m_center;
 };
 
 } // namespace photon

@@ -311,11 +311,7 @@ void Application::drawMaterialProps() {
         MaterialPreset preview = MaterialLibrary::presetFromMaterial(*mat, "önizleme");
         static std::string lastSig;
         static std::string lastKey;
-        char sig[256];
-        std::snprintf(sig, sizeof(sig), "%d %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
-                      static_cast<int>(preview.kind), preview.baseColor.r, preview.baseColor.g, preview.baseColor.b,
-                      preview.metallic, preview.roughness, preview.specular, preview.clearCoat, preview.anisotropy,
-                      preview.sheen, preview.emissive, preview.ior, preview.diffuseTransmission);
+        const std::string sig = presetSignature(preview);
         if (key != lastKey || sig != lastSig) {
             m_s.thumbs.requestMaterial(key, preview, true);
             lastKey = key;
@@ -388,33 +384,94 @@ void Application::drawMaterialProps() {
     ImGui::Spacing();
 
     if (auto g = std::dynamic_pointer_cast<Dielectric>(mat)) {
-        // Dielectric değişmez alanlı; düzenleme = yeni nesne + değiştir (yerinde set yok).
-        float ior = g->ior(), rough = g->roughness();
-        Color3f tint = g->tint();
+        // Dielectric değişmez alanlı; düzenleme = preset üzerinden yeni nesne + değiştir.
+        // (Preset tüm gelişmiş alanları taşır: soğurma, bulanıklık, dispersiyon kaybolmaz.)
+        MaterialPreset p = MaterialLibrary::presetFromMaterial(*g, "cam");
         bool changed = false;
+        auto glassSlider = [&](const char* label, const char* id, float& v, float lo, float hi, const char* fmt,
+                               const char* tip = nullptr, ImGuiSliderFlags flags = 0) {
+            ui::Prop(label, tip);
+            if (ui::SliderF(id, &v, lo, hi, fmt, flags)) {
+                undoPoint(*this, ImGui::GetID(id));
+                changed = true;
+            }
+        };
         if (ui::BeginProps("glass")) {
-            ui::Prop("Renk (geçirgenlik)");
-            if (colorEdit("##tint", tint)) { undoPoint(*this, ImGui::GetID("tint")); changed = true; }
-            ui::Prop("Kırılma indisi", "Işığın camda ne kadar büküleceği. Su 1.33, cam 1.5, elmas 2.42");
-            if (ui::SliderF("##ior", &ior, 1.0f, 2.6f, "%.3f")) { undoPoint(*this, ImGui::GetID("ior")); changed = true; }
-            ui::Prop("Pürüzlülük", "0 = berrak cam, yükseldikçe buzlu cam");
-            if (ui::SliderF("##gr", &rough, 0.0f, 1.0f, "%.3f")) { undoPoint(*this, ImGui::GetID("gr")); changed = true; }
+            ui::Prop("Yüzey rengi", "Her yüzey geçişinde uygulanan renk. Kalınlığa bağlı gerçek renk için "
+                                    "Hacim → Renk kullanın");
+            if (colorEdit("##tint", p.baseColor)) { undoPoint(*this, ImGui::GetID("tint")); changed = true; }
+            glassSlider("Kırılma indisi", "##ior", p.ior, 1.0f, 2.6f, "%.3f", "Işığın camda ne kadar büküleceği. Su 1.33, cam 1.5, elmas 2.42");
+            glassSlider("Pürüzlülük", "##gr", p.roughness, 0.0f, 1.0f, "%.3f", "0 = berrak cam, yükseldikçe buzlu cam");
             ui::EndProps();
         }
         ImGui::Spacing();
         ImGui::TextColored(pal.textFaint, "Hazır:");
-        struct IorPreset { const char* n; float v; };
-        const IorPreset presets[] = {{"Su", 1.333f}, {"Cam", 1.5f}, {"Kristal", 1.6f}, {"Safir", 1.77f}, {"Elmas", 2.42f}};
-        for (const auto& p : presets) {
+        struct IorPreset { const char* n; float v; float abbe; };
+        const IorPreset presets[] = {{"Su", 1.333f, 0.0f}, {"Cam", 1.5f, 0.0f}, {"Kristal", 1.62f, 34.0f},
+                                     {"Safir", 1.77f, 72.0f}, {"Elmas", 2.42f, 55.0f}};
+        for (const auto& pr : presets) {
             ImGui::SameLine();
-            if (ui::GhostButton(p.n)) {
+            if (ui::GhostButton(pr.n)) {
                 pushUndo();
-                ior = p.v;
+                p.ior = pr.v;
+                p.abbe = pr.abbe;
                 changed = true;
             }
         }
+        const bool hasVolume = p.absorbColor != Color3f(1.0f) || p.scatterDensity > 0.0f;
+        if (ui::Section(ICON_DROPLET, "Hacim (renk ve bulanıklık)", hasVolume)) {
+            if (ui::BeginProps("vol")) {
+                ui::Prop("Renk", "Işık camın içinde 'Mesafe' kadar ilerleyince bu renge döner (Beer–Lambert). "
+                                 "Kalın yerler koyu, ince yerler açık görünür: şarap, bal, renkli şişe");
+                if (colorEdit("##abs", p.absorbColor)) { undoPoint(*this, ImGui::GetID("abs")); changed = true; }
+                glassSlider("Mesafe", "##absd", p.absorbDistance, 1e-4f, 10.0f, "%.4f", "Sahne birimi (metre)",
+                            ImGuiSliderFlags_Logarithmic);
+                glassSlider("Bulanıklık", "##sd", p.scatterDensity, 0.0f, 500.0f, "%.2f",
+                            "İçeride saçılma yoğunluğu (1/birim): süt, sabunlu su, opal", ImGuiSliderFlags_Logarithmic);
+                if (p.scatterDensity > 0.0f) {
+                    ui::Prop("Saçılma rengi");
+                    if (colorEdit("##sc", p.scatterColor)) { undoPoint(*this, ImGui::GetID("sc")); changed = true; }
+                    glassSlider("Anizotropi", "##sg", p.scatterAnisotropy, -0.9f, 0.9f, "%.2f", "> 0 ileri saçılma (sis, süt)");
+                }
+                ui::EndProps();
+            }
+        }
+        if (ui::Section(ICON_SQUARE_DASHED, "İnce duvar", p.thinWalled)) {
+            if (ui::BeginProps("thin")) {
+                ui::Prop("İnce duvar", "Kalınlığı olmayan zar: pencere camı, sabun köpüğü, ampul. Işık kırılmadan "
+                                       "geçer, gölgeler renkli ve hızlı (kostik gürültüsü yok)");
+                if (ui::Toggle("thinw", &p.thinWalled)) {
+                    pushUndo();
+                    changed = true;
+                }
+                if (p.thinWalled) {
+                    glassSlider("Film kalınlığı", "##tfg", p.thinFilmThickness, 0.0f, 1500.0f,
+                                p.thinFilmThickness > 0.0f ? "%.0f nm" : "kapalı",
+                                "Duvarın kendisi bir girişim filmi: sabun köpüğü ~300–700 nm (indis = kırılma indisi)");
+                }
+                ui::EndProps();
+            }
+        }
+        if (ui::Section(ICON_GEM, "Dispersiyon", p.abbe > 0.0f)) {
+            if (ui::BeginProps("disp")) {
+                glassSlider("Abbe sayısı", "##abbe", p.abbe, 0.0f, 90.0f, p.abbe > 0.0f ? "%.1f" : "kapalı",
+                            "Beyaz ışığın renklere ayrılması (elmas ateşi, prizma). Küçük sayı = güçlü "
+                            "dispersiyon: flint ~30, crown ~60, elmas 55. 0 = kapalı");
+                ui::EndProps();
+            }
+            ui::Hint("Dispersiyonlu yollar tek dalga boyunda izlenir: renkli kostikler daha çok örnek ister.");
+        }
+        if (ui::Section(ICON_CIRCLE, "Yuvarlatılmış kenarlar", p.roundEdges > 0.0f)) {
+            if (ui::BeginProps("rnd")) {
+                glassSlider("Yarıçap", "##rndg", p.roundEdges, 0.0f, 0.05f, p.roundEdges > 0.0f ? "%.4f" : "kapalı",
+                            "Keskin kenarlar gölgelendirmede bu yarıçapla yuvarlanır (sahne birimi)",
+                            ImGuiSliderFlags_Logarithmic);
+                ui::EndProps();
+            }
+        }
         if (changed) {
-            auto fresh = std::make_shared<Dielectric>(ior, tint, rough <= 0.005f ? 0.0f : rough);
+            if (p.roughness <= 0.005f) p.roughness = 0.0f;
+            auto fresh = MaterialLibrary::createMaterial(p);
             replaceMaterial(*m_s.graph.root(), mat.get(), fresh);
             markDocumentChanged(true);
         }
@@ -451,6 +508,15 @@ void Application::drawMaterialProps() {
                    "0 = ayna gibi parlak, 1 = tamamen mat");
             slider("Yansıma", "##spec", d->specular(), 0, 1, [&](float v) { d->setSpecular(v); },
                    "Yalıtkanlarda dik açıdaki yansıma gücü (0.5 ≈ %4)");
+            if (d->metallic() > 0.0f) {
+                ui::Prop("Kenar tonu", "Metalin sıyırma açısındaki rengi (F82). Beyaz = standart; altın ve "
+                                       "bakırda ölçülmüş metaller kenarda hafif renk değiştirir");
+                Color3f et = d->edgeTint();
+                if (colorEdit("##et", et)) {
+                    undoPoint(*this, ImGui::GetID("et"));
+                    editLive([&] { d->setEdgeTint(et); });
+                }
+            }
             ui::EndProps();
         }
     }
@@ -471,6 +537,83 @@ void Application::drawMaterialProps() {
                    "Kadife/kumaş kenarlarındaki yumuşak parlama (sheen)");
             slider("Işık geçirgenliği", "##dt", d->diffuseTransmission(), 0, 1,
                    [&](float v) { d->setDiffuseTransmission(v); }, "İnce yüzeylerde arkadan gelen ışık (silikon, kağıt)");
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_DROPLET, "Yüzey altı saçılımı (SSS)", d->subsurface() > 0.0f)) {
+        if (ui::BeginProps("sss")) {
+            slider("Ağırlık", "##ssw", d->subsurface(), 0, 1, [&](float v) { d->setSubsurface(v); },
+                   "Işığın yüzeyin altına girip başka yerden çıkması: mum, yeşim, ten, sabun, süt, mermer. "
+                   "Renk taban rengidir");
+            if (d->subsurface() > 0.0f) {
+                ui::Prop("Yarıçap (renk)", "Kanal başına ışığın içeride gittiği göreli mesafe. Tende kırmızı "
+                                           "en uzağa gider: (1, 0.2, 0.1)");
+                Color3f rad = d->subsurfaceRadius();
+                if (colorEdit("##ssr", rad)) {
+                    undoPoint(*this, ImGui::GetID("ssr"));
+                    editLive([&] { d->setSubsurfaceRadius(rad); });
+                }
+                ui::Prop("Ölçek", "Yarıçap çarpanı (sahne birimi, metre). Nesne boyutuna göre ayarlayın");
+                float sc = d->subsurfaceScale();
+                if (ui::SliderF("##sss", &sc, 1e-4f, 2.0f, "%.4f", ImGuiSliderFlags_Logarithmic)) {
+                    undoPoint(*this, ImGui::GetID("sss"));
+                    editLive([&] { d->setSubsurfaceScale(sc); });
+                }
+                slider("Anizotropi", "##ssg", d->subsurfaceAnisotropy(), -0.9f, 0.9f,
+                       [&](float v) { d->setSubsurfaceAnisotropy(v); }, "> 0 ileri saçılma (ten, yaprak)");
+            }
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_CIRCLE, "Yuvarlatılmış kenarlar", d->roundEdgeRadius() > 0.0f)) {
+        if (ui::BeginProps("rnd")) {
+            ui::Prop("Yarıçap", "CAD modellerindeki jilet keskinliğindeki kenarlar gölgelendirmede bu yarıçapla "
+                                "yuvarlanır (geometri değişmez). Sahne birimi; 1–5 mm tipik");
+            float r = d->roundEdgeRadius();
+            if (ui::SliderF("##rnd", &r, 0.0f, 0.05f, r > 0.0f ? "%.4f" : "kapalı", ImGuiSliderFlags_Logarithmic)) {
+                undoPoint(*this, ImGui::GetID("rnd"));
+                editLive([&] { d->setRoundEdgeRadius(r); });
+            }
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_SPARKLES, "İnce film (iridesans)", d->thinFilmThickness() > 0.0f)) {
+        if (ui::BeginProps("tf")) {
+            ui::Prop("Kalınlık", "Nanometre. 0 = kapalı. 200–800 nm arası gökkuşağı renkleri: sabun köpüğü, "
+                                 "yağ tabakası, ısıl renk almış titanyum, mercek kaplaması");
+            float t = d->thinFilmThickness();
+            if (ui::SliderF("##tft", &t, 0.0f, 1500.0f, t > 0.0f ? "%.0f nm" : "kapalı")) {
+                undoPoint(*this, ImGui::GetID("tft"));
+                editLive([&] { d->setThinFilm(t, d->thinFilmIor()); });
+            }
+            ui::Prop("Film indisi", "Sabun 1.33, yağ 1.47, titanyum oksit 2.4");
+            float n = d->thinFilmIor();
+            if (ui::SliderF("##tfn", &n, 1.0f, 3.0f, "%.2f")) {
+                undoPoint(*this, ImGui::GetID("tfn"));
+                editLive([&] { d->setThinFilm(d->thinFilmThickness(), n); });
+            }
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_SPARKLES, "Metalik pullar", d->flakeDensity() > 0.0f)) {
+        if (ui::BeginProps("flk")) {
+            ui::Prop("Yoğunluk", "Araç boyasındaki metal pulların oranı. 0 = kapalı. Kaplama (vernik) ile birlikte kullanın");
+            float den = d->flakeDensity(), size = d->flakeSize(), rough = d->flakeRoughness();
+            Color3f col = d->flakeColor();
+            bool fchanged = false;
+            if (ui::SliderF("##fd", &den, 0.0f, 1.0f, "%.2f")) { undoPoint(*this, ImGui::GetID("fd")); fchanged = true; }
+            if (den > 0.0f) {
+                ui::Prop("Pul boyu", "Sahne birimi (metre). Gerçek boyada ~0.02–0.1 mm; uzak çekimde büyütün");
+                if (ui::SliderF("##fs", &size, 1e-5f, 0.05f, "%.5f", ImGuiSliderFlags_Logarithmic)) {
+                    undoPoint(*this, ImGui::GetID("fs"));
+                    fchanged = true;
+                }
+                ui::Prop("Dağınıklık", "Pulların eğimi: 0 hepsi yüzeye paralel, 1 her yöne ışıltı");
+                if (ui::SliderF("##fr", &rough, 0.0f, 1.0f, "%.2f")) { undoPoint(*this, ImGui::GetID("fr")); fchanged = true; }
+                ui::Prop("Pul rengi");
+                if (colorEdit("##fc", col)) { undoPoint(*this, ImGui::GetID("fc")); fchanged = true; }
+            }
+            if (fchanged) editLive([&] { d->setFlakes(den, size, rough, col); });
             ui::EndProps();
         }
     }
@@ -536,15 +679,18 @@ void Application::drawEnvironmentProps() {
 
     // Etkin HDRI'ın önizlemesi.
     {
-        std::string key, name = "Prosedürel gökyüzü";
+        std::string key, name = e.kind == EnvironmentDesc::Kind::Sky ? "Fiziksel gök" : "Prosedürel gökyüzü";
         for (const auto& a : m_s.environments) {
-            if ((!e.hdrPath.empty() && a.path == e.hdrPath) ||
-                (e.hdrPath.empty() && a.path.empty() && a.zenith.r == e.zenith.r && a.horizon.r == e.horizon.r)) {
+            if (a.sky != (e.kind == EnvironmentDesc::Kind::Sky)) continue;
+            if ((a.sky && a.skyParams.turbidity == e.sky.turbidity &&
+                 a.skyParams.sunElevationDeg == e.sky.sunElevationDeg) ||
+                (!a.sky && !e.hdrPath.empty() && a.path == e.hdrPath) ||
+                (!a.sky && e.hdrPath.empty() && a.path.empty() && a.zenith.r == e.zenith.r && a.horizon.r == e.horizon.r)) {
                 key = "env:" + a.id;
                 name = a.name;
             }
         }
-        if (key.empty() && !e.hdrPath.empty()) name = ui::fileName(e.hdrPath);
+        if (key.empty() && !e.hdrPath.empty() && e.kind == EnvironmentDesc::Kind::Image) name = ui::fileName(e.hdrPath);
         const float wImg = ImGui::GetContentRegionAvail().x;
         ui::ThumbCard("envprev", key.empty() ? 0 : m_s.thumbs.texture(key), name.c_str(), ImVec2(wImg, wImg * 0.42f),
                       false, ImVec4(e.horizon.r, e.horizon.g, e.horizon.b, 1));
@@ -552,23 +698,97 @@ void Application::drawEnvironmentProps() {
         ui::Tooltip("Ortamı değiştirmek için Kütüphane → Ortam");
     }
     ImGui::Spacing();
+    {
+        int kind = e.kind == EnvironmentDesc::Kind::Sky ? 1 : 0;
+        const char* kinds[] = {"HDRI / stüdyo", "Fiziksel gök"};
+        if (ui::Segmented("envkind", &kind, kinds, 2)) {
+            pushUndo();
+            e.kind = kind == 1 ? EnvironmentDesc::Kind::Sky : EnvironmentDesc::Kind::Image;
+            changed = true;
+        }
+    }
+    if (e.kind == EnvironmentDesc::Kind::Sky && ui::Section(ICON_SUN, "Güneş ve gök")) {
+        if (ui::BeginProps("sky")) {
+            ui::Prop("Konum ve saat", "Güneşin yerini tarih, saat ve coğrafi konumdan hesapla");
+            bool loc = e.skyFromLocation;
+            if (ui::Toggle("skyloc", &loc)) {
+                pushUndo();
+                e.skyFromLocation = loc;
+                changed = true;
+            }
+            auto skySlider = [&](const char* label, const char* id, float& v, float lo, float hi, const char* fmt,
+                                 const char* tip = nullptr, ImGuiSliderFlags flags = 0) {
+                ui::Prop(label, tip);
+                if (ui::SliderF(id, &v, lo, hi, fmt, flags)) {
+                    undoPoint(*this, ImGui::GetID(id));
+                    changed = interactive = true;
+                }
+            };
+            if (e.skyFromLocation) {
+                skySlider("Enlem", "##lat", e.latitude, -89.0f, 89.0f, "%.2f°", "Kuzey +, güney − (İstanbul 41.0)");
+                skySlider("Boylam", "##lon", e.longitude, -180.0f, 180.0f, "%.2f°", "Doğu +, batı − (İstanbul 29.0)");
+                ui::Prop("Gün", "Yılın günü (1 = 1 Ocak, 172 = 21 Haziran)");
+                static const char* kMonths[] = {"Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"};
+                static const int kStart[] = {1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366};
+                int m = 0;
+                while (m < 11 && e.dayOfYear >= kStart[m + 1]) ++m;
+                char dayLabel[32];
+                std::snprintf(dayLabel, sizeof(dayLabel), "%d %s", e.dayOfYear - kStart[m] + 1, kMonths[m]);
+                int day = e.dayOfYear;
+                if (ImGui::SliderInt("##doy", &day, 1, 365, dayLabel)) {
+                    undoPoint(*this, ImGui::GetID("doy"));
+                    e.dayOfYear = day;
+                    changed = interactive = true;
+                }
+                ui::Prop("Saat");
+                char hourLabel[16];
+                const int hh = static_cast<int>(e.hour), mm = static_cast<int>((e.hour - static_cast<float>(hh)) * 60.0f);
+                std::snprintf(hourLabel, sizeof(hourLabel), "%02d:%02d", hh, mm);
+                if (ui::SliderF("##hour", &e.hour, 0.0f, 23.99f, hourLabel)) {
+                    undoPoint(*this, ImGui::GetID("hour"));
+                    changed = interactive = true;
+                }
+                skySlider("UTC farkı", "##utc", e.utcOffset, -12.0f, 14.0f, "%+.1f sa");
+                skySlider("Kuzey yönü", "##north", e.northOffsetDeg, -180.0f, 180.0f, "%.0f°",
+                          "Sahnenin kuzeyini döndürür (varsayılan: kuzey −Z)");
+                EnvironmentDesc tmp = e;
+                resolveSunPosition(tmp);
+                ui::Prop("Güneş");
+                ImGui::TextColored(pal.textDim, "yükseklik %.1f°  yön %.0f°", tmp.sky.sunElevationDeg, tmp.sky.sunAzimuthDeg);
+            } else {
+                skySlider("Yükseklik", "##sel", e.sky.sunElevationDeg, -5.0f, 90.0f, "%.1f°",
+                          "Güneşin ufuktan açısı: küçük değerler uzun gölge ve kızıl ışık verir");
+                skySlider("Yön", "##saz", e.sky.sunAzimuthDeg, -180.0f, 180.0f, "%.0f°");
+            }
+            skySlider("Pus", "##turb", e.sky.turbidity, 1.0f, 10.0f, "%.1f",
+                      "Atmosferdeki toz/nem: 2 berrak, 5+ puslu (güneş çevresinde geniş hale)");
+            skySlider("Güneş boyutu", "##ssz", e.sky.sunSizeDeg, 0.1f, 10.0f, "%.2f°",
+                      "Gerçek güneş 0.53°. Büyütmek gölgeleri yumuşatır", ImGuiSliderFlags_Logarithmic);
+            skySlider("Güneş gücü", "##sstr", e.sky.sunStrength, 0.0f, 30.0f, "%.2f", nullptr, ImGuiSliderFlags_Logarithmic);
+            skySlider("Ozon", "##oz", e.sky.ozone, 0.0f, 3.0f, "%.2f", "Alacakaranlıkta gökyüzünün maviliği");
+            skySlider("Yer yansıtması", "##galb", e.sky.groundAlbedo, 0.0f, 1.0f, "%.2f");
+            ui::EndProps();
+        }
+    }
     if (ui::Section(ICON_GLOBE, "Aydınlatma")) {
         if (ui::BeginProps("env")) {
-            ui::Prop("Parlaklık", "HDRI'ın ışık katkısı (çarpan)");
+            ui::Prop("Parlaklık", "Ortamın (HDRI ya da gök + güneş) ışık katkısı (çarpan)");
             float inten = e.intensity;
             if (ui::SliderF("##ei", &inten, 0.0f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic)) {
                 undoPoint(*this, ImGui::GetID("ei"));
                 e.intensity = inten;
                 changed = interactive = true;
             }
-            ui::Prop("Döndürme", "Işığın geldiği yönü değiştirir (yansımaları da kaydırır)");
-            float rot = e.rotationDeg;
-            if (ui::SliderF("##er", &rot, -180.0f, 180.0f, "%.0f°")) {
-                undoPoint(*this, ImGui::GetID("er"));
-                e.rotationDeg = rot;
-                changed = interactive = true;
+            if (e.kind == EnvironmentDesc::Kind::Image) {
+                ui::Prop("Döndürme", "Işığın geldiği yönü değiştirir (yansımaları da kaydırır)");
+                float rot = e.rotationDeg;
+                if (ui::SliderF("##er", &rot, -180.0f, 180.0f, "%.0f°")) {
+                    undoPoint(*this, ImGui::GetID("er"));
+                    e.rotationDeg = rot;
+                    changed = interactive = true;
+                }
             }
-            if (e.hdrPath.empty()) {
+            if (e.kind == EnvironmentDesc::Kind::Image && e.hdrPath.empty()) {
                 ui::Prop("Gökyüzü");
                 if (colorEdit("##zen", e.zenith)) { undoPoint(*this, ImGui::GetID("zen")); changed = interactive = true; }
                 ui::Prop("Ufuk");
@@ -618,17 +838,26 @@ void Application::drawEnvironmentProps() {
                     e.groundRoughness = r;
                     changed = interactive = true;
                 }
+                ui::Prop("Gölge yakalayıcı", "Kamera zemini değil arka planı görür; yalnız gölgeler arka planın "
+                                             "üstüne biner. Şeffaf arka planla gölgeli PNG (kompozisyon için)");
+                bool sc = e.groundShadowOnly;
+                if (ui::Toggle("gsc", &sc)) {
+                    pushUndo();
+                    e.groundShadowOnly = sc;
+                    changed = true;
+                }
             }
             ui::EndProps();
         }
-        ui::Hint("Zemin, sahnedeki modellerin altına otomatik yerleşir ve gölgeleri taşır.");
+        ui::Hint(e.groundShadowOnly ? "Gölge yakalayıcı açık: yansımalar ve sekme ışığı için zemin hâlâ vardır."
+                                    : "Zemin, sahnedeki modellerin altına otomatik yerleşir ve gölgeleri taşır.");
     }
     if (changed) markDocumentChanged(interactive);
 }
 
 void Application::drawLightProps() {
     const ui::Palette& pal = ui::palette();
-    const float bw = (ImGui::GetContentRegionAvail().x - 8.0f) / 3.0f;
+    const float bw = (ImGui::GetContentRegionAvail().x - 12.0f) / 4.0f;
     if (ui::GhostButton(ICON_LAMP_CEILING " Alan", ImVec2(bw, 0))) addLight(LightDesc::Type::Area);
     ui::Tooltip("Softbox: yumuşak gölgeli dikdörtgen ışık");
     ImGui::SameLine(0, 4);
@@ -636,6 +865,9 @@ void Application::drawLightProps() {
     ui::Tooltip("Sonsuz uzaktaki yönlü ışık: keskin gölgeler");
     ImGui::SameLine(0, 4);
     if (ui::GhostButton(ICON_LIGHTBULB " Nokta", ImVec2(bw, 0))) addLight(LightDesc::Type::Point);
+    ImGui::SameLine(0, 4);
+    if (ui::GhostButton(ICON_FLASHLIGHT " Spot", ImVec2(bw, 0))) addLight(LightDesc::Type::Spot);
+    ui::Tooltip("Koni içinde ışıyan spot; IES dosyasıyla gerçek armatür dağılımı");
     ImGui::Spacing();
 
     if (m_s.lights.empty()) {
@@ -647,7 +879,8 @@ void Application::drawLightProps() {
     for (int i = 0; i < static_cast<int>(m_s.lights.size()); ++i) {
         const LightDesc& l = m_s.lights[static_cast<size_t>(i)];
         const char* icon = l.type == LightDesc::Type::Area ? ICON_LAMP_CEILING
-                         : l.type == LightDesc::Type::Directional ? ICON_SUN : ICON_LIGHTBULB;
+                         : l.type == LightDesc::Type::Directional ? ICON_SUN
+                         : l.type == LightDesc::Type::Spot ? ICON_FLASHLIGHT : ICON_LIGHTBULB;
         char label[160];
         std::snprintf(label, sizeof(label), "%s  %s##l%d", icon, l.name.c_str(), i);
         if (ImGui::Selectable(label, m_s.selKind == SelectionKind::Light && m_s.selLight == i)) selectLight(i);
@@ -678,7 +911,7 @@ void Application::drawLightProps() {
         if (colorEdit("##lc", l.color)) { undoPoint(*this, ImGui::GetID("lc")); changed = true; }
         ui::Prop("Güç");
         float inten = l.intensity;
-        const float maxI = l.type == LightDesc::Type::Point ? 1e5f : 200.0f;
+        const float maxI = (l.type == LightDesc::Type::Point || l.type == LightDesc::Type::Spot) ? 1e5f : 200.0f;
         if (ui::SliderF("##li", &inten, 0.0f, maxI, "%.2f", ImGuiSliderFlags_Logarithmic)) {
             undoPoint(*this, ImGui::GetID("li"));
             l.intensity = inten;
@@ -707,7 +940,45 @@ void Application::drawLightProps() {
                 l.position = l.target + Vec3f(std::cos(e2) * std::cos(a), std::sin(e2), std::cos(e2) * std::sin(a)) * dist;
                 changed = true;
             }
+            if (l.type == LightDesc::Type::Spot) {
+                ui::Prop("Koni açısı", "Huzmenin tam açısı. 180° = koni yok, yalnız IES dağılımı");
+                if (ui::SliderF("##cone", &l.coneAngleDeg, 1.0f, 180.0f, "%.0f°")) { undoPoint(*this, ImGui::GetID("cone")); changed = true; }
+                ui::Prop("Kenar yumuşaklığı");
+                if (ui::SliderF("##blend", &l.coneBlend, 0.0f, 1.0f, "%.2f")) { undoPoint(*this, ImGui::GetID("blend")); changed = true; }
+                ui::Prop("IES profili", "Üreticinin yayımladığı .ies dosyası: armatürün gerçek ışık dağılımı");
+                ImGui::PushID("ies");
+                const float clearW = l.iesPath.empty() ? 0.0f : ImGui::GetFrameHeight() + 4.0f;
+                const std::string text = l.iesPath.empty() ? std::string(ICON_PLUS "  IES seç…")
+                                                           : std::string(ICON_FLASHLIGHT "  ") + ui::fileName(l.iesPath);
+                if (ImGui::Button(text.c_str(), ImVec2(ImGui::GetContentRegionAvail().x - clearW, 0))) {
+                    std::string path = l.iesPath;
+                    FileDialogFilter f[] = {{"IES profilleri", "*.ies;*.IES"}};
+                    if (showFileDialog(path, FileDialogMode::Open, "IES profili", f, 1)) {
+                        pushUndo();
+                        l.iesPath = path;
+                        changed = true;
+                    }
+                }
+                if (!l.iesPath.empty()) {
+                    ui::Tooltip(l.iesPath.c_str());
+                    ImGui::SameLine(0, 4);
+                    if (ui::IconButton(ICON_X, "Profili kaldır")) {
+                        pushUndo();
+                        l.iesPath.clear();
+                        changed = true;
+                    }
+                }
+                ImGui::PopID();
+            }
             if (l.type == LightDesc::Type::Area) {
+                ui::Prop("Kameraya görünür", "Kapalıyken softbox doğrudan bakışta görünmez; yansımalarda ve "
+                                             "aydınlatmada yine vardır (ürün çekimi için önerilir)");
+                bool vis = l.visibleToCamera;
+                if (ui::Toggle("lvis", &vis)) {
+                    pushUndo();
+                    l.visibleToCamera = vis;
+                    changed = true;
+                }
                 ui::Prop("Genişlik");
                 if (ImGui::DragFloat("##w", &l.width, std::max(1e-3f, l.width * 0.01f), 1e-3f, 1e5f, "%.3f")) { undoPoint(*this, ImGui::GetID("w")); changed = true; }
                 ui::Prop("Yükseklik ");
@@ -717,7 +988,7 @@ void Application::drawLightProps() {
         ui::EndProps();
     }
     ImGui::Spacing();
-    if (l.type == LightDesc::Type::Area) {
+    if (l.type == LightDesc::Type::Area || l.type == LightDesc::Type::Spot) {
         if (ui::GhostButton(ICON_CROSSHAIR "  Seçili parçaya yönelt")) {
             if (SceneNode* n = selectedNode()) {
                 pushUndo();
@@ -780,6 +1051,12 @@ void Application::drawCameraProps() {
                 ui::Prop("f-durağı", "Küçük sayı = büyük açıklık = daha çok bulanıklık");
                 if (ui::SliderF("##fs", &c.fStop, 0.7f, 32.0f, "f/%.1f", ImGuiSliderFlags_Logarithmic))
                     c.aperture = apertureFromFStop(c.focalLengthMm, c.fStop);
+                ui::Prop("Diyafram kanatları", "0 = yuvarlak bokeh; 5–9 kanat çokgen bokeh verir");
+                ui::SliderI("##blades", &c.apertureBlades, 0, 12);
+                if (c.apertureBlades >= 3) {
+                    ui::Prop("Kanat açısı");
+                    ui::SliderF("##brot", &c.bladeRotationDeg, 0.0f, 360.0f / static_cast<float>(c.apertureBlades), "%.0f°");
+                }
                 ui::Prop("Odak mesafesi");
                 float fd = effectiveFocusDistance(c);
                 if (ImGui::DragFloat("##fd", &fd, std::max(1e-3f, fd * 0.005f), 1e-3f, 1e6f, "%.3f")) {
@@ -876,12 +1153,72 @@ void Application::drawImageProps() {
             ui::EndProps();
         }
     }
-    if (ui::Section(ICON_GAUGE, "Işık taşıma", false)) {
+    ImagerSettings& im = m_s.imager;
+    if (ui::Section(ICON_SPARKLES, "Parlama (bloom ve yıldız)", im.bloomIntensity > 0.0f || im.glareIntensity > 0.0f)) {
+        if (ui::BeginProps("bloom")) {
+            ui::Prop("Bloom", "Parlak noktaların mercekte saçılan halesi (ışık kaynakları, güneş yansıması)");
+            ui::SliderF("##bl", &im.bloomIntensity, 0.0f, 1.0f, "%.2f");
+            if (im.bloomIntensity > 0.0f) {
+                ui::Prop("Yarıçap");
+                ui::SliderF("##blr", &im.bloomRadius, 0.005f, 0.2f, "%.3f", ImGuiSliderFlags_Logarithmic);
+                ui::Prop("Eşik", "Bu parlaklığın üstü parlar (1 = beyaz)");
+                ui::SliderF("##blt", &im.bloomThreshold, 0.0f, 10.0f, "%.2f");
+            }
+            ui::Prop("Yıldız", "Diyafram kanatlarının ışın demetleri (glare)");
+            ui::SliderF("##gl", &im.glareIntensity, 0.0f, 1.0f, "%.2f");
+            if (im.glareIntensity > 0.0f) {
+                ui::Prop("Işın sayısı");
+                ui::SliderI("##glb", &im.glareBlades, 2, 16);
+                ui::Prop("Açı");
+                ui::SliderF("##gla", &im.glareAngleDeg, 0.0f, 180.0f, "%.0f°");
+                ui::Prop("Uzunluk");
+                ui::SliderF("##gll", &im.glareLength, 0.01f, 0.5f, "%.2f");
+            }
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_PALETTE, "Renk", im.whiteBalanceK != 6500.0f || im.saturation != 1.0f || im.contrast != 1.0f)) {
+        if (ui::BeginProps("color")) {
+            ui::Prop("Beyaz dengesi", "Sahne ışığının renk sıcaklığı: düşük değer sıcak ışığı nötrler (görüntü soğur)");
+            ui::SliderF("##wb", &im.whiteBalanceK, 2000.0f, 12000.0f, "%.0f K");
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) im.whiteBalanceK = 6500.0f;
+            ui::Prop("Ton", "Yeşil (−) ↔ macenta (+)");
+            ui::SliderF("##tint", &im.tint, -1.0f, 1.0f, "%+.2f");
+            ui::Prop("Doygunluk");
+            ui::SliderF("##sat", &im.saturation, 0.0f, 2.0f, "%.2f");
+            ui::Prop("Kontrast", "Orta gri etrafında: gölgeleri koyulaştırır, ışıkları açar");
+            ui::SliderF("##con", &im.contrast, 0.5f, 2.0f, "%.2f");
+            ui::EndProps();
+        }
+        if (ui::GhostButton("Sıfırla")) {
+            im.whiteBalanceK = 6500.0f;
+            im.tint = 0.0f;
+            im.saturation = im.contrast = 1.0f;
+        }
+    }
+    if (ui::Section(ICON_APERTURE, "Lens efektleri", im.vignette > 0.0f || im.chromaticAberration > 0.0f)) {
+        if (ui::BeginProps("lensfx")) {
+            ui::Prop("Vinyet", "Köşelerin kararması");
+            ui::SliderF("##vig", &im.vignette, 0.0f, 1.0f, "%.2f");
+            ui::Prop("Renk sapması", "Köşelerde kırmızı/mavi kanal kayması (ucuz objektif hissi)");
+            ui::SliderF("##ca", &im.chromaticAberration, 0.0f, 5.0f, "%.2f");
+            ui::EndProps();
+        }
+    }
+    if (ui::Section(ICON_GAUGE, "Işık taşıma ve kalite", false)) {
         if (ui::BeginProps("lt")) {
             ui::Prop("Sekme sayısı", "Işının en çok kaç kez yansıyacağı. Cam ve iç mekân için yüksek tutun.");
             ui::SliderI("##mb", &m_s.settings.maxBounces, 1, 32);
-            ui::Prop("Uyarlamalı örnekleme", "Düz bölgelerde örnek atlar (deneysel)");
+            ui::Prop("Uyarlamalı örnekleme", "Temizlenen pikseller örneklemeyi bırakır; bütçe gürültülü yerlere gider");
             ui::Toggle("ad", &m_s.settings.adaptiveSampling);
+            if (m_s.settings.adaptiveSampling) {
+                ui::Prop("Gürültü eşiği", "Göreli standart hata hedefi: 0.01 çok temiz, 0.05 hızlı");
+                ui::SliderF("##nt", &m_s.settings.noiseThreshold, 0.002f, 0.2f, "%.3f", ImGuiSliderFlags_Logarithmic);
+            }
+            ui::Prop("Parlama sınırı", "Dolaylı ışıktaki tekil parlak noktaları (firefly) keser. 0 = kapalı "
+                                       "(fiziksel olarak doğru); 5–20 arası kostik gürültüsünü bastırır");
+            ui::SliderF("##clamp", &m_s.settings.clampIndirect, 0.0f, 100.0f, m_s.settings.clampIndirect > 0.0f ? "%.1f" : "kapalı",
+                        ImGuiSliderFlags_Logarithmic);
             ui::EndProps();
         }
     }

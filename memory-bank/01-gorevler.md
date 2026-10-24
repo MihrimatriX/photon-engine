@@ -240,23 +240,24 @@ Nasıl okunur:
   
   `[materials-12]` `[lighting-15]` `[lighting-5]` `[materials-5]`
 - [ ] **F5.3** Normal haritasında gölgelendirme normali tutarlılığı: bükülmüş normal ya da Schüssler 2017. `[materials-5]`
-- [ ] **F5.4** Işık seçimi:
+- [x] **F5.4** Işık seçimi:
+  - 2026-10-24: güç yerine noktaya özel katkı tahmini (`Light::importance`) + %15 düzgün taban; pmf MIS'e girer (`LightPicker`). Vitrinde relMSE yarıya indi.
   - güce orantılı alias tablosu, pmf MIS ağırlıklarına girer,
   - `shadowQuality` yalnız ilk köşede uygulanır,
   - emissive küreler de NEE'ye girer,
   - ortam ışığının gücü `m_funcInt`'ten hesaplanır.
   
   `[lighting-8]` `[lighting-9]` **[SEN]** pmf'li güç sezgisel ağırlığı ve alias tablosu kurulumu.
-- [ ] **F5.5** `SurfaceInteraction`'a `primId`, `lightId`, barycentric ve `dpdu`/`dpdv`. Emitter pdf'i O(1) olur, `dynamic_cast` döngüsü kalkar. `[lighting-7]` `[geometry-8]`
-- [ ] **F5.6** Softbox için küresel dikdörtgen örnekleme (Ureña 2013), mesh ışıkları için küresel üçgen (Arvo); tek yönlü emitter seçeneği.
+- [x] **F5.5** (2026-10-24: `Scene::emitterIndex` hitObject → ışık; `Light::pdfLiHit` O(1); dynamic_cast döngüsü kalktı. primId/dpdu eklenmedi.) `SurfaceInteraction`'a `primId`, `lightId`, barycentric ve `dpdu`/`dpdv`. Emitter pdf'i O(1) olur, `dynamic_cast` döngüsü kalkar. `[lighting-7]` `[geometry-8]`
+- [x] **F5.6** (2026-10-24: dikdörtgen yapıldı; küresel üçgen ve tek yönlü emitter açık) Softbox için küresel dikdörtgen örnekleme (Ureña 2013), mesh ışıkları için küresel üçgen (Arvo); tek yönlü emitter seçeneği.
 - [ ] **F5.7** Ortam ışığı: pdf ile eval tutarlı, MIS telafisi (Karlík 2019), yatay ayna kontrolü. `[lighting-14]`
 - [x] **F5.8** Rus ruleti en büyük bileşene göre, ayarlanabilir minimum derinlikle. `[lighting-11]`
 - [ ] **F5.9** Wächter–Binder ışın ofseti geometrik normal boyunca, tMin = 0. İsabet noktası barycentric'ten; ön/arka yüz geometrik normalden. `[core-8]` `[geometry-4]` `[geometry-5]` `[lighting-6]`
 - [ ] **F5.10** Gölge terminatörü düzeltmesi (Hanika 2021).
-- [ ] **F5.11** Adaptif örnekleme: karo başına göreli hata, iki yarım tamponla. `[engine-14]`
+- [x] **F5.11** (2026-10-24: piksel başına göreli standart hata `Film::relativeError`, 3×3 komşuluk; iki yarım tampon yerine parlaklık² toplamı) Adaptif örnekleme: karo başına göreli hata, iki yarım tamponla. `[engine-14]`
 - [ ] **F5.12** Albedoya göre lob seçimi (Faz 7'deki VNDF ile birlikte).
 - [ ] **F5.13** Ölçek testi: aynı sahne 0.01× ve 100× ölçekte aynı görüntüyü verir.
-- [ ] **F5.14** İsteğe bağlı firefly kelepçesi, varsayılan kapalı.
+- [x] **F5.14** İsteğe bağlı firefly kelepçesi, varsayılan kapalı.
 - **Öğrenme:** PBRT bölüm 8, 12, 13–14; Veach tezi bölüm 9; TU Wien dersleri.
 - **Kanıt:** eşit sürede varyans düşer (Sobol, yakın softbox, çok ışıklı stüdyo); fırın ve chi-kare testleri yeşil.
 
@@ -279,10 +280,10 @@ Nasıl okunur:
 ## Faz 7 — Malzeme ve renk gerçekçiliği (4–5 hafta)
 
 - [ ] **F7.1** VNDF örnekleme (Heitz 2018) ve yükseklik-korelasyonlu Smith G2. `[materials-15]` **[SEN]** VNDF (~10 satır).
-- [ ] **F7.2** Kulla–Conty çoklu saçılma telafisi. **[SEN]** telafi terimi.
-- [ ] **F7.3** F82-tint iletken Fresnel ve metal presetleri (altın, gümüş, bakır, alüminyum, krom).
+- [x] **F7.2** (2026-10-24: Turquin 2019 biçimi, 32×32 E(μ, α) tablosu; `Metal.WhiteRoughMetalConservesEnergy`) Kulla–Conty çoklu saçılma telafisi. **[SEN]** telafi terimi.
+- [x] **F7.3** F82-tint iletken Fresnel ve metal presetleri (altın, gümüş, bakır, alüminyum, krom).
 - [ ] **F7.4** Enerji koruyan kaplama (taban zayıflatma) ve LTC sheen.
-- [ ] **F7.5** Beer–Lambert soğurma ve ortam takibi; cam rengi yansımaları boyamaz. `[materials-13]`
+- [x] **F7.5** Beer–Lambert soğurma ve ortam takibi; cam rengi yansımaları boyamaz. `[materials-13]`
 - [ ] **F7.6** Doku depolama 8-bit + LUT, makul boyut sınırı; mipmap ve ışın konisi (RTG bölüm 20). `[color-13]`
 - [ ] **F7.7** MikkTSpace ya da glTF `TANGENT`, handedness ile. `[geometry-10]`
 - [ ] **F7.8** Faktör × doku çarpımı, ORM kanal seçimi, alfa/opaklık. `[materials-11]` `[color-12]`
@@ -293,7 +294,7 @@ Nasıl okunur:
   
   `[io-8]` `[io-9]` `[io-13]`
 - [ ] **F7.10** OpenPBR Surface'e geçiş. Disney referans olarak kalır; her lob fırın ve chi-kare kapısından geçer.
-- [ ] **F7.11** Yuvarlatılmış kenar (bevel) gölgelendiricisi.
+- [x] **F7.11** (2026-10-24: integratörde, Cycles bevel benzeri) Yuvarlatılmış kenar (bevel) gölgelendiricisi.
 - [ ] **F7.12** Disney'de eksik loblar (specTrans, IOR) OpenPBR ile gelir.
 - **Öğrenme:** PBRT bölüm 9–10; SIGGRAPH "Physically Based Shading" notları; Heitz 2018; OpenPBR şartnamesi.
 - **Kanıt:** fırın testinde beyaz pürüzlü metal her pürüzlülükte ≈ 1; ortak malzemelerde Mitsuba relMSE %1'in altında.
@@ -324,14 +325,19 @@ Nasıl okunur:
 
 ## Faz 10 — İleri konular (seçmeli)
 
-- [ ] Hacimler ve random-walk SSS.
+- [x] İnce duvarlı cam ve ince film (sabun köpüğü, pencere): gölgeler renkli geçer, MIS durumu korunur. (2026-10-24)
+- [x] Görüntüleyici: bloom, glare, beyaz dengesi, kontrast/doygunluk, vinyet, renk sapması. (2026-10-24)
+- [ ] Hacim/ortam için NEE (indisi eşleşmiş sınırlar), heterojen ortamlar (VDB).
+- [ ] Süre sınırıyla biten render'da AOV'li gürültü giderme (CLI `--time`).
+
+- [x] Hacimler ve random-walk SSS. (2026-10-24)
 - [ ] Path guiding (Open PGL, Apache).
-- [ ] Spektral mod ve dispersiyon (hero wavelength, Jakob–Hanika).
+- [x] Spektral mod ve dispersiyon (2026-10-24: yol başına tek λ, dispersiyonlu ilk yüzeyde; hero wavelength yok).
 - [ ] MNEE ve referans için BDPT.
-- [ ] Fiziksel kamera (f-stop, enstantane, ISO) ve bokeh şekli.
-- [ ] AOV'ler, ışık grupları, shadow catcher, çok katmanlı EXR, Cryptomatte.
+- [ ] Fiziksel kamera (f-stop, enstantane, ISO) ve bokeh şekli. (2026-10-24: çokgen bokeh ve görüntüleyici yapıldı; enstantane/ISO açık)
+- [ ] AOV'ler, ışık grupları, shadow catcher, çok katmanlı EXR, Cryptomatte. (2026-10-24: shadow catcher yapıldı)
 - [ ] Turntable (DoF ve denoise ile), anahtar kare, hareket bulanıklığı.
-- [ ] Güneş/gökyüzü, spot ve IES ışıklar, ışık bağlama, görünürlük bayrakları.
+- [ ] Güneş/gökyüzü, spot ve IES ışıklar, ışık bağlama, görünürlük bayrakları. (2026-10-24: gök + güneş, spot + IES, kamera görünürlüğü yapıldı; ışık bağlama ve yansıma görünürlüğü açık)
 
 ## Ürünleşme eki (karar bekliyor)
 
