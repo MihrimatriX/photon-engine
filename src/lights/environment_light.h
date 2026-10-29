@@ -57,7 +57,16 @@ public:
     void setSun(const Vec3f& direction, float cosMax, const Color3f& radiance);
     bool hasSun() const { return m_sunPdfWeight > 0.0f; }
 
+    /// Işık örneklemesi (NEE), MIS telafili dağılımdan (Karlík vd. 2019): radyanstan katı açı
+    /// ortalaması çıkarılır, max(0, L − L̄)·sinθ. Ortamın düzgün (sönük) kısmını BSDF örneklemesi
+    /// zaten iyi bulur; ışık örnekleri parlak bölgelere (pencere, softbox, güneşli gök) gider.
+    /// MIS ağırlıkları (pdfLi) aynı dağılımı kullanır, tahmin yansızdır.
     LightSample sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const override;
+    /// Telafisiz (tam) dağılımdan örnek: MIS'siz kullanımlar için (gölge yakalayıcının görünürlük
+    /// oranı tüm gökyüzü üzerinden ölçülmeli).
+    LightSample sampleLiFull(const Vec2f& sample) const;
+    /// sampleLiFull'un katı açı pdf'i.
+    float pdfLiFull(const Vec3f& wi) const;
     bool isDelta() const override { return false; }
     Color3f power() const override;
     /// Düzgün bir ortamın bir yüzeye verdiği ışınım π·L̄ (yarıküre ∫cos dω = π) + güneş.
@@ -73,16 +82,33 @@ public:
 
     /// Son marjinal CDF değeri. Haritada enerji varsa ~1, yoksa 0.
     float distributionIntegral() const {
-        return m_marginalCdf.empty() ? 0.0f : m_marginalCdf.back();
+        return m_full.marginalCdf.empty() ? 0.0f : m_full.marginalCdf.back();
     }
+
+    /// MIS telafisi açık mı (görüntüde ortalamanın üstünde kalan bölge var)?
+    bool misCompensated() const { return m_misCompensated; }
+    /// Sonra kurulan ortam ışıklarında telafiyi aç/kapat (karşılaştırma ve testler için; varsayılan açık).
+    static void setMisCompensation(bool enabled);
 
     const std::shared_ptr<const Image>& image() const { return m_envMap; }
     float rotation() const { return m_rotation; }
     float intensity() const { return m_intensity; }
 
 private:
+    /// Equirect görüntü üzerinde parçalı sabit 2B dağılım: satır marjinali × satır içi koşullu.
+    struct Distribution {
+        float funcInt = 0.0f;
+        std::vector<float> func;          // piksel başına ağırlık (parlaklık · sinθ)
+        std::vector<float> marginalCdf;   // height + 1 eleman, önek toplamı, son = 1
+        std::vector<float> condCdf;       // satır başına width + 1
+        bool valid() const { return funcInt > 0.0f && !marginalCdf.empty(); }
+    };
+
     void buildDistribution();
-    float solidAnglePdf(const Vec3f& wi) const;
+    void buildCdf(Distribution& d) const;
+    LightSample sampleImage(const Distribution& d, const Vec2f& sample) const;
+    float solidAnglePdf(const Distribution& d, const Vec3f& wi) const;
+    float solidAnglePdf(const Vec3f& wi) const { return solidAnglePdf(m_mis, wi); }
 
     std::shared_ptr<const Image> m_envMap;
     float m_rotation; // radyan
@@ -97,10 +123,9 @@ private:
     float imagePdf(const Vec3f& wi) const;
     int m_width = 0;
     int m_height = 0;
-    float m_funcInt = 0.0f;
-    std::vector<float> m_func;          // piksel başına parlaklık * sin(theta)
-    std::vector<float> m_marginalCdf;   // height + 1 eleman, önek toplamı, son = 1
-    std::vector<float> m_condCdf;       // satır başına width + 1
+    Distribution m_full; ///< parlaklık · sinθ
+    Distribution m_mis;  ///< max(0, L − L̄)·sinθ; telafi anlamsızsa m_full'un kopyası
+    bool m_misCompensated = false;
 };
 
 } // namespace photon

@@ -1,15 +1,19 @@
 // environment_light.cpp — HDRI ortam ışığının örneklenmesi ve değerlendirilmesi.
 #include "lights/environment_light.h"
+
 #include "core/math/utils.h"
 #include "core/sampling/sampling.h"
 #include "core/math/frame.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 
 namespace photon {
+
 namespace {
 
+std::atomic<bool> gMisCompensation{true};
 
 struct CdfPick {
     int index = 0;
@@ -33,6 +37,8 @@ CdfPick sampleCdf(const float* cdf, int n, float u) {
 }
 
 } // namespace
+
+void EnvironmentLight::setMisCompensation(bool enabled) { gMisCompensation = enabled; }
 
 Color3f sampleEquirect(const Image& img, float u, float v) {
     const int w = img.width();
@@ -66,52 +72,92 @@ EnvironmentLight::EnvironmentLight(std::shared_ptr<const Image> envMap, float ro
 // yüzden fonksiyon f(x, y) = parlaklık · sin(θ) alınır. Önce her satırın kendi
 // koşullu CDF'i (o satırda hangi sütun), sonra satır toplamlarından marjinal CDF
 // (hangi satır) kurulur: 2B dağılım = p(satır) · p(sütun | satır).
+//
+// MIS telafisi (Karlík, Šik, Vévoda, Skřivan, Křivánek 2019): NEE ile BSDF örneklemesi MIS
+// ile birleşince, ışık örneklemesinin "düzgün" kısmı boşa harcanır (BSDF onu zaten iyi
+// örnekler). Radyanstan katı açı ağırlıklı ortalaması çıkarılır: f' = max(0, L − L̄)·sinθ
+// (sinθ yalnız equirect parametrizasyonunun Jakobiyeni; ondan çıkarmak düzgün bir haritayı
+// ekvatora yığardı). Tamamen düzgün haritada f' ≡ 0 olur; o zaman tam dağılıma dönülür.
+// Not: telafili NEE tek başına yansız DEĞİLDİR (sönük yönlerde pdf = 0), yalnız BSDF
+// örneklemesiyle MIS içinde yansızdır; MIS'siz kullanımlar sampleLiFull'u çağırır.
 void EnvironmentLight::buildDistribution() {
     m_width = 0;
     m_height = 0;
-    m_funcInt = 0.0f;
-    m_func.clear();
-    m_marginalCdf.clear();
-    m_condCdf.clear();
+    m_full = Distribution{};
+    m_mis = Distribution{};
+    m_misCompensated = false;
     if (!m_envMap || m_envMap->width() <= 0 || m_envMap->height() <= 0) return;
 
     const int w = m_envMap->width();
     const int h = m_envMap->height();
     m_width = w;
     m_height = h;
-    m_func.assign(static_cast<size_t>(w) * static_cast<size_t>(h), 0.0f);
-    m_marginalCdf.assign(static_cast<size_t>(h) + 1, 0.0f);
-    m_condCdf.assign(static_cast<size_t>(h) * static_cast<size_t>(w + 1), 0.0f);
-
+    m_full.func.assign(static_cast<size_t>(w) * static_cast<size_t>(h), 0.0f);
+    std::vector<float> sinRow(static_cast<size_t>(h));
+    double weighted = 0.0, weights = 0.0;
     for (int y = 0; y < h; ++y) {
-        float theta = PI * (static_cast<float>(y) + 0.5f) / static_cast<float>(h);
-        float sinTheta = std::sin(theta);
-        float* row = m_condCdf.data() + static_cast<size_t>(y) * static_cast<size_t>(w + 1);
-        row[0] = 0.0f;
+        const float sinTheta = std::sin(PI * (static_cast<float>(y) + 0.5f) / static_cast<float>(h));
+        sinRow[static_cast<size_t>(y)] = sinTheta;
         for (int x = 0; x < w; ++x) {
-            float f = m_envMap->getPixel(x, y).luminance() * sinTheta;
-            if (!(f > 0.0f)) f = 0.0f; // NaN ve negatifleri ele
-            m_func[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = f;
-            row[x + 1] = row[x] + f;
+            float L = m_envMap->getPixel(x, y).luminance();
+            if (!(L > 0.0f)) L = 0.0f; // NaN ve negatifleri ele
+            m_full.func[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] = L * sinTheta;
+            weighted += static_cast<double>(L) * sinTheta;
+            weights += sinTheta;
         }
-        m_marginalCdf[static_cast<size_t>(y) + 1] =
-            m_marginalCdf[static_cast<size_t>(y)] + row[w];
     }
+    buildCdf(m_full);
+    if (!m_full.valid()) return;
 
-    m_funcInt = m_marginalCdf[static_cast<size_t>(h)];
-    if (m_funcInt <= 0.0f) {
-        m_funcInt = 0.0f;
-        m_marginalCdf.clear();
+    const float meanL = weights > 0.0 ? static_cast<float>(weighted / weights) : 0.0f;
+    m_mis.func.resize(m_full.func.size());
+    double misTotal = 0.0, fullTotal = 0.0;
+    for (int y = 0; y < h; ++y) {
+        const float s = sinRow[static_cast<size_t>(y)];
+        for (int x = 0; x < w; ++x) {
+            const size_t i = static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x);
+            float L = m_envMap->getPixel(x, y).luminance();
+            if (!(L > 0.0f)) L = 0.0f;
+            // Ortalamaya yuvarlama hatası kadar yakın pikseller düzgün sayılır.
+            const float excess = L - meanL;
+            m_mis.func[i] = excess > 1e-4f * meanL ? excess * s : 0.0f;
+            misTotal += m_mis.func[i];
+            fullTotal += m_full.func[i];
+        }
+    }
+    // Ortalamanın üstünde kalan enerji ihmal edilebilirse (neredeyse düzgün harita) telafi
+    // kazandırmaz; parlak bölgeyi kaçırma riskine girmeden tam dağılım kullanılır.
+    m_misCompensated = gMisCompensation.load() && misTotal > 1e-3 * fullTotal;
+    if (m_misCompensated) {
+        buildCdf(m_mis);
+        m_misCompensated = m_mis.valid();
+    }
+    if (!m_misCompensated) m_mis = m_full;
+}
+
+void EnvironmentLight::buildCdf(Distribution& d) const {
+    const int w = m_width, h = m_height;
+    d.marginalCdf.assign(static_cast<size_t>(h) + 1, 0.0f);
+    d.condCdf.assign(static_cast<size_t>(h) * static_cast<size_t>(w + 1), 0.0f);
+    for (int y = 0; y < h; ++y) {
+        float* row = d.condCdf.data() + static_cast<size_t>(y) * static_cast<size_t>(w + 1);
+        row[0] = 0.0f;
+        for (int x = 0; x < w; ++x) row[x + 1] = row[x] + d.func[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)];
+        d.marginalCdf[static_cast<size_t>(y) + 1] = d.marginalCdf[static_cast<size_t>(y)] + row[w];
+    }
+    d.funcInt = d.marginalCdf[static_cast<size_t>(h)];
+    if (!(d.funcInt > 0.0f)) {
+        d.funcInt = 0.0f;
+        d.marginalCdf.clear();
         return;
     }
-
-    float inv = 1.0f / m_funcInt;
-    for (float& c : m_marginalCdf) c *= inv;
+    const float inv = 1.0f / d.funcInt;
+    for (float& c : d.marginalCdf) c *= inv;
     for (int y = 0; y < h; ++y) {
-        float* row = m_condCdf.data() + static_cast<size_t>(y) * static_cast<size_t>(w + 1);
-        float rowSum = row[w];
+        float* row = d.condCdf.data() + static_cast<size_t>(y) * static_cast<size_t>(w + 1);
+        const float rowSum = row[w];
         if (rowSum <= 0.0f) continue;
-        float invRow = 1.0f / rowSum;
+        const float invRow = 1.0f / rowSum;
         for (int x = 0; x <= w; ++x) row[x] *= invRow;
     }
 }
@@ -132,7 +178,7 @@ void EnvironmentLight::setSun(const Vec3f& direction, float cosMax, const Color3
     }
     // Güce orantılı, ama ikisi de aç kalmasın (gölgede gök, açıkta güneş önemli).
     m_sunPdfWeight = std::clamp(sunPower / (sunPower + skyPower), 0.15f, 0.85f);
-    if (m_funcInt <= 0.0f) m_sunPdfWeight = 1.0f;
+    if (!m_full.valid()) m_sunPdfWeight = 1.0f;
 }
 
 float EnvironmentLight::importance(const Vec3f& /*p*/, const Vec3f& n) const {
@@ -164,15 +210,22 @@ LightSample EnvironmentLight::sampleLi(const SurfaceInteraction& si, const Vec2f
     }
     (void)si;
 
-    if (m_marginalCdf.empty() || m_funcInt <= 0.0f || m_width <= 0) {
+    LightSample img = sampleImage(m_mis, sample);
+    if (m_sunPdfWeight > 0.0f && img.pdf > 0.0f) img.pdf = pdfLi(img.wi); // karışım pdf'i (güneş + görüntü)
+    return img;
+}
+
+LightSample EnvironmentLight::sampleImage(const Distribution& d, const Vec2f& sample) const {
+    LightSample ls;
+    ls.distance = INFINITY_F;
+    if (!d.valid() || m_width <= 0) {
         ls.wi = uniformSampleSphere(sample);
         ls.pdf = uniformSpherePdf();
         ls.Li = eval(ls.wi);
         return ls;
     }
-
-    CdfPick row = sampleCdf(m_marginalCdf.data(), m_height, sample.y);
-    const float* cond = m_condCdf.data() + static_cast<size_t>(row.index) * static_cast<size_t>(m_width + 1);
+    CdfPick row = sampleCdf(d.marginalCdf.data(), m_height, sample.y);
+    const float* cond = d.condCdf.data() + static_cast<size_t>(row.index) * static_cast<size_t>(m_width + 1);
     CdfPick col = sampleCdf(cond, m_width, sample.x);
 
     float theta = row.coord * PI;
@@ -180,12 +233,35 @@ LightSample EnvironmentLight::sampleLi(const SurfaceInteraction& si, const Vec2f
     ls.wi = equirectDirection(col.coord, row.coord, m_rotation).normalized();
     ls.pdf = (row.pdf * col.pdf) * static_cast<float>(m_width * m_height) / (TWO_PI * PI * sinTheta);
     ls.Li = eval(ls.wi);
-    if (m_sunPdfWeight > 0.0f) ls.pdf = pdfLi(ls.wi); // karışım pdf'i (güneş + görüntü)
     return ls;
 }
 
-float EnvironmentLight::solidAnglePdf(const Vec3f& wi) const {
-    if (m_funcInt <= 0.0f || m_width <= 0 || m_height <= 0) return uniformSpherePdf();
+LightSample EnvironmentLight::sampleLiFull(const Vec2f& sample) const {
+    // Güneş + tam görüntü dağılımı. Güneş varsa önce koni seçimi (sampleLi ile aynı karışım).
+    if (m_sunPdfWeight > 0.0f && sample.x < m_sunPdfWeight) {
+        SurfaceInteraction dummy;
+        return sampleLi(dummy, sample); // güneş dalı telafiden etkilenmez
+    }
+    Vec2f s = sample;
+    if (m_sunPdfWeight > 0.0f) {
+        if (m_sunPdfWeight >= 1.0f) return LightSample{};
+        s.x = std::min((sample.x - m_sunPdfWeight) / (1.0f - m_sunPdfWeight), 0.99999994f);
+    }
+    LightSample ls = sampleImage(m_full, s);
+    if (m_sunPdfWeight > 0.0f && ls.pdf > 0.0f) ls.pdf = pdfLiFull(ls.wi);
+    return ls;
+}
+
+float EnvironmentLight::pdfLiFull(const Vec3f& wi) const {
+    if (m_sunPdfWeight <= 0.0f) return solidAnglePdf(m_full, wi);
+    float pdf = 0.0f;
+    if (wi.normalized().dot(m_sunDir) >= m_sunCosMax) pdf += m_sunPdfWeight / (TWO_PI * (1.0f - m_sunCosMax));
+    if (m_sunPdfWeight < 1.0f) pdf += (1.0f - m_sunPdfWeight) * solidAnglePdf(m_full, wi);
+    return pdf;
+}
+
+float EnvironmentLight::solidAnglePdf(const Distribution& dist, const Vec3f& wi) const {
+    if (!dist.valid() || m_width <= 0 || m_height <= 0) return uniformSpherePdf();
 
     Vec3f d = wi.normalized();
     Vec2f uv = directionToEquirect(d, m_rotation);
@@ -197,8 +273,8 @@ float EnvironmentLight::solidAnglePdf(const Vec3f& wi) const {
     float sinTheta = std::sqrt(std::max(0.0f, 1.0f - d.y * d.y));
     if (sinTheta < 1e-4f) return 0.0f;
 
-    float f = m_func[static_cast<size_t>(y) * static_cast<size_t>(m_width) + static_cast<size_t>(x)];
-    return (f / m_funcInt) * static_cast<float>(m_width * m_height) / (TWO_PI * PI * sinTheta);
+    float f = dist.func[static_cast<size_t>(y) * static_cast<size_t>(m_width) + static_cast<size_t>(x)];
+    return (f / dist.funcInt) * static_cast<float>(m_width * m_height) / (TWO_PI * PI * sinTheta);
 }
 
 float EnvironmentLight::imagePdf(const Vec3f& wi) const {
