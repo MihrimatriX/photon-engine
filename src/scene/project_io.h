@@ -8,6 +8,7 @@
 
 #include "scene/scene_graph.h"
 #include "scene/document.h"
+#include "scene/camera_animation.h"
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -19,6 +20,7 @@ struct ProjectData {
     nlohmann::json render = nlohmann::json::object();  ///< Uygulama tanımlı
     EnvironmentDesc environment;
     std::vector<LightDesc> lights;
+    std::vector<CameraTrack> cameraTracks; ///< Kamera animasyonları (anahtar kareler)
 };
 
 /// Projeyi yaz. Önce geçici dosyaya yazar, sonra yerine taşır (yarım dosya kalmaz).

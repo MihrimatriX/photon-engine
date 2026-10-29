@@ -5,12 +5,14 @@
 //     "camera": {...}, "render": {...},            // uygulamanın kendi alanları
 //     "environment": { "hdr", "rotation", "intensity", "background", "ground", ... },
 //     "lights": [ { "type", "color", "intensity", "position", ... } ],
+//     "animation": { "cameraTracks": [ { "name", "fps", "smooth", "keys": [...] } ] },
 //     "materials": [ { "type": "disney"|"glass"|"lambert"|"mirror", ... } ],
 //     "nodes": [ { "name", "type", "visible", "xf": [16], "material": i,
 //                  "source": "model.obj", "sourceIndex": k, "geometry": {...},
 //                  "children": [...] } ] }
 // Aynı malzemeyi paylaşan düğümler "materials" tablosunda tek kayda işaret eder.
 #include "scene/project_io.h"
+#include "scene/camera_animation.h"
 #include "scene/model_import.h"
 #include "scene/material_library.h"
 #include "materials/disney.h"
@@ -490,6 +492,11 @@ bool saveProject(const std::string& path, const SceneGraph& graph, const Project
     json lights = json::array();
     for (const auto& l : data.lights) lights.push_back(lightJson(l, ctx.base));
     root["lights"] = std::move(lights);
+    if (!data.cameraTracks.empty()) {
+        json tracks = json::array();
+        for (const CameraTrack& t : data.cameraTracks) tracks.push_back(cameraTrackToJson(t));
+        root["animation"] = {{"cameraTracks", std::move(tracks)}};
+    }
     json nodes = json::array();
     for (const auto& c : graph.root()->children) nodes.push_back(nodeJson(*c, ctx, false));
     root["materials"] = std::move(ctx.materials);
@@ -546,6 +553,10 @@ bool loadProjectJson(const std::string& text, const std::string& baseDir, SceneG
         data.render = root.value("render", json::object());
         if (root.contains("environment")) data.environment = environmentFromJson(root["environment"], ctx.base);
         for (const auto& l : root.value("lights", json::array())) data.lights.push_back(lightFromJson(l, ctx.base));
+        data.cameraTracks.clear();
+        if (auto an = root.find("animation"); an != root.end() && an->is_object())
+            for (const auto& t : an->value("cameraTracks", json::array()))
+                if (CameraTrack tr = cameraTrackFromJson(t); !tr.empty()) data.cameraTracks.push_back(std::move(tr));
     } catch (const std::exception& e) {
         if (error) *error = std::string("Proje okunamadı: ") + e.what();
         return false;

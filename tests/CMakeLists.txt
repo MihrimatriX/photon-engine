@@ -35,6 +35,7 @@ add_executable(photon_tests
     test_model_formats.cpp
     test_render_passes.cpp
     test_render_session.cpp
+    test_camera_animation.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE
