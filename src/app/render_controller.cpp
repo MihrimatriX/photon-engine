@@ -77,8 +77,18 @@ void RenderController::setScene(std::shared_ptr<const Scene> scene, bool interac
     {
         std::lock_guard<std::mutex> lk(m_mutex);
         m_scene = std::move(scene);
+        ++m_sceneVersion;
     }
     restart(interactive);
+}
+
+void RenderController::setDevice(const std::string& id) {
+    {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        if (id == m_deviceId) return;
+        m_deviceId = id;
+    }
+    restart(false);
 }
 
 void RenderController::setCamera(const CameraParams& cam, bool interactive) {
@@ -176,7 +186,9 @@ void RenderController::setTransparentPreview(bool transparent) {
 
 std::unique_lock<std::mutex> RenderController::lockScene() {
     if (!m_passInteractive.load()) m_cancel = true;
-    return std::unique_lock<std::mutex>(m_sceneMutex);
+    std::unique_lock<std::mutex> lock(m_sceneMutex);
+    ++m_sceneVersion; // yerinde düzenleme: cihazdaki kopya (GPU) yenilenmeli
+    return lock;
 }
 
 bool RenderController::fetchFrame(DisplayFrame& out) {
@@ -263,7 +275,7 @@ void RenderController::threadMain() {
             if (m_paused || !m_scene || m_vpW <= 0 || m_vpH <= 0) return false;
             if (m_dirty) return true;
             if (m_interactive) return true; // tam çözünürlüğe geçişi kontrol et / devam et
-            return m_targetSpp == 0 || m_spp < m_targetSpp;
+            return !m_converged && (m_targetSpp == 0 || m_spp < m_targetSpp);
         };
         m_cv.wait_for(lk, std::chrono::milliseconds(60), workPending);
         if (m_quit) break;
@@ -287,14 +299,14 @@ void RenderController::threadMain() {
             m_cancel = false;
             m_interactive = now - m_lastInteraction < kSettleTime;
             const int div = m_interactive ? std::max(1, m_ladder) : 1;
-            const int w = std::max(16, static_cast<int>(static_cast<float>(m_vpW) * m_resScale) / div);
-            const int h = std::max(16, static_cast<int>(static_cast<float>(m_vpH) * m_resScale) / div);
-            m_film.resize(w, h);
-            m_aovs.resize(w, h);
+            m_beginW = std::max(16, static_cast<int>(static_cast<float>(m_vpW) * m_resScale) / div);
+            m_beginH = std::max(16, static_cast<int>(static_cast<float>(m_vpH) * m_resScale) / div);
+            m_needBegin = true;
             m_spp = 0;
+            m_converged = false;
             m_startTime = now;
             displayDenoised = false;
-        } else if (!m_interactive && m_targetSpp > 0 && m_spp >= m_targetSpp) {
+        } else if (!m_interactive && (m_converged || (m_targetSpp > 0 && m_spp >= m_targetSpp))) {
             continue;
         }
 
@@ -304,20 +316,56 @@ void RenderController::threadMain() {
         const bool wantDenoise = m_denoise && denoiseAvailable();
         const int target = m_targetSpp;
         const bool interactive = m_interactive;
+        const std::string deviceId = m_deviceId;
         m_passInteractive = interactive;
         lk.unlock();
 
-        rs.width = m_film.width();
-        rs.height = m_film.height();
-        rs.samplesPerPixel = target > 0 ? target : 1 << 20;
-        const float aspect = static_cast<float>(rs.width) / static_cast<float>(std::max(1, rs.height));
-        std::unique_ptr<Camera> camera = makeCamera(camParams, aspect);
+        // Cihaz: istek değiştiyse yeniden aç; açılamazsa CPU'ya düş (viewport hiç boş kalmasın).
+        std::string deviceNote;
+        if (!m_device || deviceId != m_activeDeviceId) {
+            std::string err;
+            std::unique_ptr<RenderDevice> dev = createDevice(deviceId, &err);
+            if (!dev) {
+                deviceNote = err;
+                dev = createDevice("cpu");
+            }
+            m_session.reset(); // oturum eski cihaza başvurur: önce o bırakılır
+            m_device = std::move(dev);
+            m_activeDeviceId = deviceId;
+            m_session = std::make_unique<RenderSession>(*m_device);
+            m_uploadedScene = nullptr;
+            m_needBegin = true;
+            std::lock_guard<std::mutex> flk(m_frameMutex);
+            m_stats.device = m_device->info().name;
+            m_stats.deviceKind = deviceKindName(m_device->info().kind);
+            m_stats.deviceNote = deviceNote;
+        }
 
         const auto passStart = Clock::now();
         bool ok = false;
         try {
             std::lock_guard<std::mutex> sceneLock(m_sceneMutex);
-            ok = m_renderer.renderSamplePass(*scene, *camera, rs, m_film, m_spp, &m_cancel, &m_aovs);
+            // Sahne yalnız değiştiğinde yüklenir (CPU'da bedava, GPU'da tampon kopyası).
+            const uint64_t version = m_sceneVersion.load();
+            if (m_uploadedScene != scene.get() || m_uploadedVersion != version) {
+                m_device->setScene(scene);
+                m_uploadedScene = scene.get();
+                m_uploadedVersion = version;
+            }
+            if (m_needBegin) {
+                rs.width = m_beginW;
+                rs.height = m_beginH;
+                const float aspect = static_cast<float>(rs.width) / static_cast<float>(std::max(1, rs.height));
+                SessionConfig sc;
+                sc.mode = RenderMode::Interactive;
+                sc.targetSpp = target;
+                sc.aovs = true; // gürültü giderme kılavuzları ve şeffaf önizleme
+                m_session->begin(makeCamera(camParams, aspect), rs, sc);
+                m_needBegin = false;
+            } else {
+                m_session->setTargetSpp(target);
+            }
+            ok = m_session->advance(&m_cancel);
         } catch (const std::exception& e) {
             // Bir karodaki hata thread'i öldürmesin: birikimi at, bir sonraki
             // değişiklikte yeniden dene (F1.8). Hata konsola yazılır.
@@ -330,9 +378,15 @@ void RenderController::threadMain() {
         }
         m_passInteractive = false;
         const double passMs = std::chrono::duration<double, std::milli>(Clock::now() - passStart).count();
-        if (!ok) continue; // iptal: film yarım, bir sonraki turda yeniden kurulur
+        if (!ok) {
+            // İptal: film yarım, bir sonraki turda yeniden kurulur. (Oturum bitmişse advance
+            // false döner ama birikim geçerlidir; yakınsama bayrağı bekleme koşulunu kapatır.)
+            if (m_session->finished()) m_converged = m_session->converged();
+            continue;
+        }
 
-        ++m_spp;
+        m_spp = m_session->samples();
+        m_converged = m_session->converged();
         if (interactive) {
             // Çözünürlük merdivenini ölçülen süreye göre ayarla.
             if (passMs > kInteractiveBudgetMs * 1.4 && m_ladder < 8) ++m_ladder;
@@ -341,20 +395,16 @@ void RenderController::threadMain() {
 
         // Gürültü giderme: etkileşimde her kare (hızlı kalite), sonra 2, 4, 8, ... örnekte
         // ve hedefe ulaşınca (yüksek kalite). Arada son temiz kare gösterilmeye devam eder.
-        const bool reached = target > 0 && m_spp >= target;
+        const bool reached = (target > 0 && m_spp >= target) || m_converged;
         const bool denoiseNow = wantDenoise && (interactive || isPowerOfTwo(m_spp) || reached);
         const bool publishNow = !wantDenoise || denoiseNow;
 
         if (publishNow) {
-            auto hdr = std::make_shared<Image>(m_film.resolve());
-            auto alpha = std::make_shared<Image>(m_aovs.alpha.resolve());
-            if (denoiseNow) {
-                Image albedo = m_aovs.albedo.resolve();
-                Image normal = m_aovs.normal.resolve();
-                const auto q = interactive ? Denoiser::Quality::Fast
-                             : reached ? Denoiser::Quality::High : Denoiser::Quality::Balanced;
-                m_denoiser.run(*hdr, &albedo, &normal, q);
-            }
+            const auto q = interactive ? Denoiser::Quality::Fast
+                         : reached ? Denoiser::Quality::High : Denoiser::Quality::Balanced;
+            auto hdr = std::make_shared<Image>(denoiseNow ? m_session->resolveDenoised(m_denoiser, q)
+                                                          : m_session->resolve());
+            auto alpha = std::make_shared<Image>(m_session->resolveAlpha());
             displayHdr = hdr;
             displayAlpha = alpha;
             displayDenoised = denoiseNow;
@@ -369,8 +419,8 @@ void RenderController::threadMain() {
         std::lock_guard<std::mutex> flk(m_frameMutex);
         m_stats.spp = m_spp;
         m_stats.targetSpp = target;
-        m_stats.width = m_film.width();
-        m_stats.height = m_film.height();
+        m_stats.width = m_session->width();
+        m_stats.height = m_session->height();
         m_stats.seconds = std::chrono::duration<double>(Clock::now() - m_startTime).count();
         m_stats.passMs = passMs;
         m_stats.interactive = interactive;

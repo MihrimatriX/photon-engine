@@ -318,7 +318,7 @@ Nasıl okunur:
 - [ ] **F9.4** TinyBVH CWBVH CPU'da kurulur; gezinme çekirdeği CUDA'ya taşınır.
 - [ ] **F9.5** Önce megakernel; profil diverjans gösterirse wavefront.
 - [ ] **F9.6** CUDA–GL interop ile viewport.
-- [ ] **F9.7** `RenderDevice {upload, update(delta), renderPass, cancel}` arayüzü; CPU cihazı yedek kalır.
+- [x] **F9.7** (2026-10-29: `engine/render_device.*` + `engine/render_session.*`; viewport, son render, turntable ve CLI aynı yoldan; GPU sorgusu `gpu_probe.*`; update(delta) için sahne sürüm sayacı, gerçek delta GPU cihazıyla) `RenderDevice {upload, update(delta), renderPass, cancel}` arayüzü; CPU cihazı yedek kalır.
 - [ ] **F9.8** CPU–GPU eşleşme testi ve GPU bench.
 - [ ] **F9.9** RTX gelince OptiX 9.x ve OIDN CUDA cihazı.
 - **Öğrenme:** CUDA Programming Guide; "Accelerated Ray Tracing in One Weekend in CUDA"; Laine 2013; Ylitie 2017.

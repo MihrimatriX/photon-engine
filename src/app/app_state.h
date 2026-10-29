@@ -56,6 +56,7 @@ struct OutputSettings {
     std::string path;
     bool denoise = true;
     bool passes = false;           ///< EXR: render geçişleri tek dosyada (çok katmanlı)
+    std::string device = "auto";   ///< Render cihazı kimliği (enumerateDevices): "auto", "cpu", "cuda:0"
     int turntableFrames = 36;
     int turntableSpp = 32;
 };

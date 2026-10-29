@@ -37,7 +37,8 @@ Son render, viewport'tan bağımsız bir iş parçacığında, malzemeleri kopya
 (izole) bir sahneyle çalışır: kullanıcı render sürerken düzenleme yapsa bile
 çıktı etkilenmez. Viewport bu sırada duraklatılır ki tüm çekirdekler render'a
 gitsin. Örnek sayısı ya da süre sınırına ulaşınca OIDN (yüksek kalite) ile
-gürültü giderilir ve seçilen biçimde kaydedilir.
+gürültü giderilir ve seçilen biçimde kaydedilir. Render, CLI ile aynı yoldan geçer:
+seçilen RenderDevice üzerinde Final modlu bir RenderSession.
 
 ### `src/app/main_app.cpp`
 
@@ -98,6 +99,11 @@ UI thread'i hiçbir zaman bir render pass'ini beklemez. Akış:
      eşlenir ve RGBA8 olarak yayınlanır; UI yalnız kısa bir kilitle alır.
 Malzeme gibi yerinde değiştirilen nesneler için lockScene()/edit(): mevcut
 pass iptal edilir ve thread boşa çıkana kadar (en fazla bir satır) beklenir.
+
+Render, seçilen RenderDevice üzerinde Etkileşimli modlu bir RenderSession ile yapılır
+(son render ve CLI ile aynı çekirdek ve aynı cihaz katmanı). Sahne cihaza yalnız
+değiştiğinde yüklenir (sürüm sayacı): kamera hareketi bir GPU cihazında yeniden yükleme
+gerektirmez.
 
 ### `src/app/scene_ops.cpp`
 
@@ -531,6 +537,67 @@ Embree yalnız "ışın neye, hangi t'de, hangi barisentrik (u,v) ile çarptı" 
 cevaplar. Normal, UV ve teğet gibi gölgelendirme verisi motorun kendi kodunda
 (Triangle::fillHit) hesaplanır; böylece iki hızlandırıcı aynı görüntüyü üretir.
 
+### `src/engine/gpu_probe.cpp`
+
+gpu_probe.cpp — CUDA sürücü API'sinin dinamik yüklenmesi ve cihaz bilgisinin okunması.
+
+### `src/engine/gpu_probe.h`
+
+gpu_probe.h — Makinedeki NVIDIA GPU'ları CUDA sürücü API'siyle sorgular.
+
+Sürücü kitaplığı (Windows: nvcuda.dll, Linux: libcuda.so.1) çalışma zamanında yüklenir;
+derleme CUDA Toolkit'e bağlı değildir ve sürücüsü olmayan makinede boş liste döner.
+Yalnız bilgi toplanır (ad, bellek, hesaplama yeteneği); hiçbir çekirdek çalıştırılmaz.
+
+### `src/engine/render_device.cpp`
+
+render_device.cpp — CPU cihazı ve cihaz listesi / seçimi.
+
+### `src/engine/render_device.h`
+
+render_device.h — Render cihazı soyutlaması (F9.7): "nerede" çalışıldığı.
+
+Motor bir sahneyi bir cihazda render eder. Bugün tek gerçek cihaz CPU'dur (Embree +
+iş parçacığı havuzu). GPU arka uçları (CUDA: GTX 1080 sm_61; OptiX / Vulkan RT /
+D3D12 DXR: RT çekirdekli kartlar) aynı arayüzü uygulayacak; render döngüleri
+(RenderSession), arayüz ve CLI cihazın türünü bilmez.
+
+Arayüzün şekli Cycles'ın Device'ı ve PBRT-v4'ün CPU/GPU ayrımına benzer:
+  setScene(): sahne cihaza yüklenir. CPU paylaşılan işaretçiyi tutar; bir GPU cihazı
+              düz tamponlara paketleyip kopyalar. Yalnız sahne değişince çağrılır,
+              kamera hareketi yeni yükleme gerektirmez.
+  render():   her piksele bir örnek aralığı eklenir, sonuç çağıranın filmlerine biriktirilir.
+
+Cihazlar enumerateDevices() ile listelenir: CPU her zaman, NVIDIA GPU'lar CUDA sürücüsü
+varsa (sürücü dinamik yüklenir, derlemede bağımlılık yok). Arka ucu bu derlemede olmayan
+cihazlar "kullanılamaz" olarak, nedeniyle birlikte listelenir: kullanıcı makinesinde
+neyin mümkün olduğunu görür (ör. GTX 1080: RT çekirdeği yok → OptiX/DXR yolu kapalı).
+
+### `src/engine/render_session.cpp`
+
+render_session.cpp — Mod politikası: parti boyu, durma koşulları, çıktıların çözülmesi.
+
+### `src/engine/render_session.h`
+
+render_session.h — Render modu ve birikim oturumu: "nasıl" çalışıldığı.
+
+Aynı yol izleyici (PathTracer) her modda çalışır; modlar yalnız politikadır: kaç örnek,
+ne kadar süre, hangi çıktılar, ne zaman durulur. RTXPT'nin "Reference" ve "Realtime"
+modlarının aynı çekirdeği paylaşması gibi. Bugünkü modlar:
+
+  Interactive  viewport: piksel başına 1 örneklik pass'ler (her pass ekrana gelir, kamera
+               hareketinde ucuz yeniden başlatma), hedef örnek sayısına ya da sınırsız.
+  Final        son render, turntable, CLI: hedef örnek / süre sınırı / uyarlamalı yakınsama.
+               Örnekler partiler hâlinde verilir (karo önce: ~%7 hızlı); parti boyu ölçülen
+               hıza göre ~batchSeconds sürecek şekilde büyür, süre sınırı aşılmaz.
+
+Gerçek zamanlı bir mod (RTXPT benzeri: kare başına 1 örnek + zamansal yeniden kullanım +
+gerçek zamanlı gürültü giderici) GPU cihazıyla birlikte buraya eklenecek; oturumu
+kullanan kod (viewport, son render, CLI) değişmeyecek.
+
+Oturum bir RenderDevice üzerinde çalışır; cihazın sahnesi önceden setScene() ile verilmiş
+olmalıdır. Bir oturum tek iş parçacığından kullanılır.
+
 ### `src/engine/render_settings.h`
 
 render_settings.h — Render kalite ve çıktı ayarları: çözünürlük, örnek sayısı, sekme
@@ -545,11 +612,15 @@ renderer.cpp — Piksel örnekleme, karo dağıtımı, iptal ve gürültü gider
 renderer.h — Karo tabanlı, çok iş parçacıklı render sürücüsü.
 
 Renderer kameradan her piksel için ışın üretir, integrator'e (path tracer)
-verir ve sonucu Film'e biriktirir. İki çalışma biçimi var:
-  * render():            karo karo, her karonun TÜM örnekleri (CLI, turntable)
-  * renderSamplePass():  tüm görüntüye piksel başına 1 örnek (ilerlemeli viewport
-                         ve son render). Her pass görüntüyü biraz daha temizler.
-Pass'ler `cancel` bayrağıyla karo düzeyinde durdurulabilir.
+verir ve sonucu Film'e biriktirir. Temel işlem renderSamples(): her piksele
+[first, first + count) aralığındaki örnekler, karo karo (karo önce, sonra örnek:
+sahnenin o bölgesi önbellekte kalır; 1 örneklik pass'lere göre ~%7 hızlı). Örnekleyici
+(piksel, örnek indeksi)'ne göre deterministik olduğundan 8 örneklik bir parti, sekiz
+tek örneklik pass ile aynı görüntüyü verir. Üstündeki yardımcılar:
+  * render():            tüm örnekler tek partide (testler, basit kullanım)
+  * renderSamplePass():  piksel başına 1 örnek (viewport'un ilerlemeli pass'i)
+Uygulama ve CLI bunları doğrudan değil, RenderDevice + RenderSession üzerinden kullanır.
+Partiler `cancel` bayrağıyla satır düzeyinde durdurulabilir.
 
 ### `src/engine/scene.cpp`
 
@@ -860,8 +931,10 @@ Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json,
   --noise 0.02 (uyarlamalı örnekleme: göreli hata hedefi), --min-spp N,
   --clamp 10 (dolaylı parlama sınırı), --time SN (süre sınırı; ilerlemeli render),
   --filter box|triangle|gaussian|blackman-harris, --filter-width PİKSEL,
-  --passes (çok katmanlı EXR: ışık geçişleri, derinlik, konum, ID'ler, albedo, normal)
+  --passes (çok katmanlı EXR: ışık geçişleri, derinlik, konum, ID'ler, albedo, normal),
+  --device auto|cpu|cuda:0 (render cihazı), --list-devices (makinedeki cihazlar)
 stats.json: süre, örnek sayısı, Mray/s (milyon birincil ışın / saniye).
+Render, uygulamanın son render'ıyla aynı yoldan geçer: RenderDevice + RenderSession (Final).
 
 ### `src/materials/dielectric.cpp`
 

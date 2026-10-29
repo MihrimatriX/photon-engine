@@ -6,6 +6,7 @@
 #include "ui/widgets.h"
 #include "ui/file_dialog.h"
 #include "engine/denoiser.h"
+#include "engine/render_device.h"
 #include "core/color/transfer.h"
 #include "core/platform/path.h"
 
@@ -134,6 +135,30 @@ void Application::drawRenderDialog() {
     }
     if (ui::Section(ICON_GAUGE, "Kalite")) {
         if (ui::BeginProps("q")) {
+            ui::Prop("Cihaz", "Viewport ve son render'ın çalıştığı işlemci. GPU'lar bulunursa listelenir; GPU arka "
+                              "ucu gelene kadar seçilemez (nedeni üzerine gelince yazar)");
+            {
+                const auto& devices = enumerateDevices();
+                auto labelOf = [&](const std::string& id) {
+                    if (id == "auto") return std::string("Otomatik (") + devices.front().name + ")";
+                    for (const DeviceInfo& d : devices)
+                        if (d.id == id) return std::string(deviceKindName(d.kind)) + " · " + d.name;
+                    return id;
+                };
+                const std::string before = out.device;
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::BeginCombo("##dev", labelOf(out.device).c_str())) {
+                    if (ImGui::Selectable(labelOf("auto").c_str(), out.device == "auto")) out.device = "auto";
+                    for (const DeviceInfo& d : devices) {
+                        ImGui::BeginDisabled(!d.usable);
+                        if (ImGui::Selectable(labelOf(d.id).c_str(), out.device == d.id)) out.device = d.id;
+                        ImGui::EndDisabled();
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", d.note.c_str());
+                    }
+                    ImGui::EndCombo();
+                }
+                if (out.device != before) savePrefs();
+            }
             ui::Prop("Örnek sayısı", "Piksel başına ışın sayısı. Daha çok = daha az gürültü, daha uzun süre");
             ui::SliderI("##spp", &out.spp, 8, 8192, "%d", ImGuiSliderFlags_Logarithmic);
             ui::Prop("Süre sınırı", "0 = yok. Dolunca o ana dek olan örneklerle bitirir");

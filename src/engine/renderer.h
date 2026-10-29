@@ -1,11 +1,15 @@
 // renderer.h — Karo tabanlı, çok iş parçacıklı render sürücüsü.
 //
 // Renderer kameradan her piksel için ışın üretir, integrator'e (path tracer)
-// verir ve sonucu Film'e biriktirir. İki çalışma biçimi var:
-//   * render():            karo karo, her karonun TÜM örnekleri (CLI, turntable)
-//   * renderSamplePass():  tüm görüntüye piksel başına 1 örnek (ilerlemeli viewport
-//                          ve son render). Her pass görüntüyü biraz daha temizler.
-// Pass'ler `cancel` bayrağıyla karo düzeyinde durdurulabilir.
+// verir ve sonucu Film'e biriktirir. Temel işlem renderSamples(): her piksele
+// [first, first + count) aralığındaki örnekler, karo karo (karo önce, sonra örnek:
+// sahnenin o bölgesi önbellekte kalır; 1 örneklik pass'lere göre ~%7 hızlı). Örnekleyici
+// (piksel, örnek indeksi)'ne göre deterministik olduğundan 8 örneklik bir parti, sekiz
+// tek örneklik pass ile aynı görüntüyü verir. Üstündeki yardımcılar:
+//   * render():            tüm örnekler tek partide (testler, basit kullanım)
+//   * renderSamplePass():  piksel başına 1 örnek (viewport'un ilerlemeli pass'i)
+// Uygulama ve CLI bunları doğrudan değil, RenderDevice + RenderSession üzerinden kullanır.
+// Partiler `cancel` bayrağıyla satır düzeyinde durdurulabilir.
 #pragma once
 
 #include "engine/scene.h"
@@ -66,9 +70,22 @@ Color3f idColor(uint64_t id);
 /// katmanlar onlara işaret eder, storage katmanlardan uzun yaşamalıdır.
 std::vector<ExrLayer> makeExrLayers(const RenderPassFilms* passes, const AovFilms* aovs, std::vector<Image>& storage);
 
+/// Bir partinin sonucu.
+struct SampleBatchResult {
+    bool completed = true;      ///< false: iptal edildi (film yarım; piksel başına ortalama yine geçerli)
+    uint64_t samplesTraced = 0; ///< izlenen örnek sayısı (uyarlamalıda atlanan pikseller sayılmaz)
+};
+
 class Renderer {
 public:
     Renderer() = default;
+
+    /// Her piksele [firstSample, firstSample + count) örnekleri ekler. Uyarlamalı örneklemede
+    /// komşuluğuyla birlikte eşiğin altına inen piksel atlanır, parti içinde de 8 örnekte bir
+    /// kontrol edilip erken durur. Film/AOV/geçiş boyutları ayarlardan değil filmden alınır.
+    SampleBatchResult renderSamples(const Scene& scene, const Camera& camera, const RenderSettings& settings,
+                                    Film& accum, int firstSample, int count, const std::atomic<bool>* cancel = nullptr,
+                                    AovFilms* aovs = nullptr, RenderPassFilms* passes = nullptr);
 
     /// Senkron render: her karo için tüm örnekler. Ortalaması alınmış HDR görüntü
     /// döner; ayarlar isterse gürültüsü giderilmiş olur.
