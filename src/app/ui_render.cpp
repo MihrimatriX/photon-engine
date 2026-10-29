@@ -192,7 +192,18 @@ void Application::drawRenderDialog() {
                 markDocumentChanged();
             }
             ImGui::EndDisabled();
+            ui::Prop("Render geçişleri", "Yalnız EXR: tek dosyada katmanlar. Işık: DiffDir/Ind, GlossDir/Ind, "
+                                         "TransDir/Ind, Emit, Env (toplamı beauty). Veri: Depth, Position, Normal, "
+                                         "DiffCol (albedo), ObjectID, MaterialID. Nuke, Fusion, After Effects ve "
+                                         "Blender compositor'da açılır");
+            ImGui::BeginDisabled(out.format != 2);
+            ui::Toggle("passes", &out.passes);
+            ImGui::EndDisabled();
             ui::EndProps();
+        }
+        if (out.format == 2 && out.passes) {
+            const double mb = static_cast<double>(out.width) * out.height * 20.0 * 14.0 / (1024.0 * 1024.0);
+            ImGui::TextColored(pal.textDim, ICON_LAYERS "  Geçişler render sırasında ~%.0f MB bellek kullanır", mb);
         }
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - 6);
         ImGui::InputTextWithHint("##path", "Resimler/PhotonEngine/render_….png", &out.path);

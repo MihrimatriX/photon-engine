@@ -48,6 +48,14 @@ struct BSDFSample {
     Color3f weight;          ///< subsurface = true iken giriş ağırlığı (f·|cos|/pdf)
 };
 
+/// Bir BSDF değerinin lob gruplarına dağılımı (render geçişleri: difüz / parlak / geçirgen).
+/// diffuse + glossy + transmission = eval(wo, wi).
+struct LobeSplit {
+    Color3f diffuse;
+    Color3f glossy;
+    Color3f transmission;
+};
+
 /// @brief Abstract class representing a surface material/BSDF.
 ///
 /// Uses standard PBRT conventions: all vectors wo and wi are normalized
@@ -133,6 +141,17 @@ public:
     virtual Color3f evalPdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si, float& pdfOut) const {
         pdfOut = pdf(wo, wi, si);
         return eval(wo, wi, si);
+    }
+
+    /// eval'in lob gruplarına ayrılmış hali (render geçişleri). Varsayılan: wo ile wi geometrik
+    /// yüzeyin aynı tarafındaysa difüz, değilse geçirgen.
+    virtual LobeSplit evalSplit(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {
+        LobeSplit s;
+        const Color3f f = eval(wo, wi, si);
+        const Vec3f& n = si.ng.lengthSquared() > 0.0f ? si.ng : si.normal;
+        if (wo.dot(n) * wi.dot(n) >= 0.0f) s.diffuse = f;
+        else s.transmission = f;
+        return s;
     }
 
     /// @brief Returns emitted radiance from the surface (for light sources).

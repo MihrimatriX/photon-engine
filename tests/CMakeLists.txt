@@ -33,6 +33,7 @@ add_executable(photon_tests
     test_robustness.cpp
     test_light_sampler.cpp
     test_model_formats.cpp
+    test_render_passes.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE

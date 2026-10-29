@@ -13,6 +13,8 @@
 #include "camera/camera.h"
 #include "core/image/film.h"
 #include "core/image/image.h"
+#include "core/image/image_io.h"
+#include "integrators/path_tracer.h"
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -36,14 +38,44 @@ struct AovFilms {
     void resize(int w, int h) { albedo.resize(w, h); normal.resize(w, h); alpha.resize(w, h); }
 };
 
+/// Render geçişleri (çok katmanlı EXR, compositing). Işık geçişleri toplanınca beauty'yi verir
+/// (PathTracer::LightPasses); veri geçişleri ilk kesişimden: kameraya uzaklık, dünya konumu,
+/// nesne ve malzeme kimliği renkleri (Nuke/AE'de maske için). Her biri beauty ile aynı alt-piksel
+/// konumundan biriktirilir. Bellek: geçiş başına piksel ~20 bayt (1080p'de ~500 MB toplam).
+struct RenderPassFilms {
+    Film light[static_cast<int>(LightPass::Count)];
+    Film depth;
+    Film position;
+    Film objectId;
+    Film materialId;
+
+    void resize(int w, int h) {
+        for (Film& f : light) f.resize(w, h);
+        depth.resize(w, h);
+        position.resize(w, h);
+        objectId.resize(w, h);
+        materialId.resize(w, h);
+    }
+};
+
+/// Bir kimliği (düğüm, malzeme) ayırt edilebilir, kararlı bir renge çevirir (altın oran tonu).
+Color3f idColor(uint64_t id);
+
+/// Geçişleri ve AOV'leri çözüp çok katmanlı EXR katmanlarına çevirir (Cycles/Blender adları:
+/// DiffDir, GlossInd, Emit, Env, Depth, Normal, DiffCol...). Görüntüler @p storage'da tutulur;
+/// katmanlar onlara işaret eder, storage katmanlardan uzun yaşamalıdır.
+std::vector<ExrLayer> makeExrLayers(const RenderPassFilms* passes, const AovFilms* aovs, std::vector<Image>& storage);
+
 class Renderer {
 public:
     Renderer() = default;
 
     /// Senkron render: her karo için tüm örnekler. Ortalaması alınmış HDR görüntü
     /// döner; ayarlar isterse gürültüsü giderilmiş olur.
+    /// @p passes / @p aovsOut doluysa render geçişleri ve AOV'ler (albedo, normal, alfa) de yazılır.
     Image render(const Scene& scene, const Camera& camera, const RenderSettings& settings,
-                 const std::atomic<bool>* cancel = nullptr);
+                 const std::atomic<bool>* cancel = nullptr, RenderPassFilms* passes = nullptr,
+                 AovFilms* aovsOut = nullptr);
 
     /// Piksel başına birer örneklik pass'lerle samplesPerPixel'e kadar render.
     /// @param onPass Her pass sonrası film ve şimdiye dek örnek sayısıyla çağrılır.
@@ -51,14 +83,14 @@ public:
     /// @param aovsOut Doluysa AOV'ler buraya da yazılır (şeffaf PNG için alfa).
     Image renderProgressive(const Scene& scene, const Camera& camera, const RenderSettings& settings,
                             const std::function<bool(const Film&, int)>& onPass,
-                            AovFilms* aovsOut = nullptr);
+                            AovFilms* aovsOut = nullptr, RenderPassFilms* passes = nullptr);
 
     /// Var olan bir filme tek örneklik bir pass ekle.
     /// @return Pass tamamlandıysa true, iptal edildiyse false (film yarım kalır,
     ///         çağıran filmi atmalıdır).
     bool renderSamplePass(const Scene& scene, const Camera& camera, const RenderSettings& settings,
                           Film& accum, int passIndex, const std::atomic<bool>* cancel = nullptr,
-                          AovFilms* aovs = nullptr);
+                          AovFilms* aovs = nullptr, RenderPassFilms* passes = nullptr);
 };
 
 } // namespace photon

@@ -50,6 +50,23 @@ bool loadRGBA8(const std::string& path, std::vector<uint8_t>& out, int& w, int& 
 /// Save scene-linear radiance as OpenEXR (half float RGB, ZIP compression).
 bool saveImageEXR(const Image& img, const std::string& path);
 
+/// Çok katmanlı EXR'nin bir katmanı (render geçişi). Kanallar "<ad>.<son ek>" adını alır:
+/// ör. "DiffDir.R", "Normal.X", "Depth.Z" (Nuke, Fusion, After Effects ve Blender'ın beklediği).
+struct ExrLayer {
+    std::string name;
+    const Image* image = nullptr;
+    const char* suffixes = "RGB"; ///< kanal başına bir harf; uzunluğu kanal sayısıdır ("Z" = tek kanal)
+    bool fullFloat = false;       ///< 32-bit (konum, derinlik); renkler 16-bit half
+};
+
+/// Beauty (R, G, B ve varsa A) + katmanlar, tek EXR dosyasında, sahne-doğrusal, ZIP sıkıştırmalı.
+/// @p alpha'nın r kanalı kapsamadır; beauty önceden çarpılmış (premultiplied) kabul edilir.
+bool saveMultiLayerEXR(const std::string& path, const Image& beauty, const Image* alpha,
+                       const std::vector<ExrLayer>& layers);
+
+/// EXR dosyasının kanal adları (sıralı). Okunamazsa boş.
+std::vector<std::string> readExrChannelNames(const std::string& path);
+
 /// Load a Radiance .hdr file. Fails for any non-HDR format.
 std::optional<Image> loadImageHDR(const std::string& path);
 
