@@ -529,12 +529,19 @@ void Application::drawMaterialProps() {
             ui::EndProps();
         }
     }
-    if (ui::Section(ICON_BLEND, "Gelişmiş", d->anisotropy() > 0 || d->sheen() > 0 || d->diffuseTransmission() > 0)) {
+    if (ui::Section(ICON_BLEND, "Gelişmiş", d->anisotropy() > 0 || d->sheen() > 0 || d->diffuseTransmission() > 0 ||
+                                               d->diffuseRoughness() > 0)) {
         if (ui::BeginProps("adv")) {
             slider("Anizotropi", "##aniso", d->anisotropy(), 0, 1, [&](float v) { d->setAnisotropy(v); },
                    "Fırçalanmış metal gibi yönlü parlama");
             slider("Kumaş parlaklığı", "##sheen", d->sheen(), 0, 1, [&](float v) { d->setSheen(v); },
                    "Kadife/kumaş kenarlarındaki yumuşak parlama (sheen)");
+            if (d->sheen() > 0.0f)
+                slider("Lif dağınıklığı", "##sheenr", d->sheenRoughness(), 0.02f, 1, [&](float v) { d->setSheenRoughness(v); },
+                       "Küçük: ince, keskin kenar parlaması (saten). Büyük: geniş, yumuşak hale (kadife, yün)");
+            slider("Difüz pürüzlülüğü", "##diffr", d->diffuseRoughness(), 0, 1,
+                   [&](float v) { d->setDiffuseRoughness(v); },
+                   "0 = Lambert. Büyüdükçe yüzey 'düzleşir': kil, beton, kumaş, toz (enerji korunumlu Oren–Nayar)");
             slider("Işık geçirgenliği", "##dt", d->diffuseTransmission(), 0, 1,
                    [&](float v) { d->setDiffuseTransmission(v); }, "İnce yüzeylerde arkadan gelen ışık (silikon, kağıt)");
             ui::EndProps();

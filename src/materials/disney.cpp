@@ -1,10 +1,14 @@
-// Basitleştirilmiş Disney Principled BRDF (Burley 2012/2015): Burley difüz, GGX
-// speküler (anizotrop olabilir), sheen, ince-yüzey difüz geçirgenlik ve enerjiyi
-// koruyan bir clearcoat katmanı. Örnekleme Heitz 2018 görünür normalleri (VNDF) ile.
+// Principled BSDF (Disney 2012/2015 parametreleri, OpenPBR tarzı enerji korunumlu katmanlar):
+// EON difüz (Portsmouth 2025), GGX speküler (anizotrop olabilir), Charlie sheen, ince-yüzey
+// difüz geçirgenlik ve clearcoat. Örnekleme Heitz 2018 görünür normalleri (VNDF) ile.
+// Katmanlar albedo ölçeklemeyle birleşir (Kulla–Conty 2017): üstteki lob ne kadar yansıtırsa
+// alttaki o kadar az ışık alır; beyaz plastik fırın testinde ≈ 1 yansıtır (Burley difüzü yatay
+// açıda %50'ye varan enerji yaratıyordu).
 // Üretim eklemeleri: metal kenar tonu (F82), çoklu saçılma enerji telafisi (Turquin
 // 2019), ince film girişimi, metalik boya pulları ve rastgele yürüyüş SSS lobu.
 
 #include "materials/disney.h"
+#include "materials/eon.h"
 #include "materials/microfacet.h"
 #include "materials/fresnel.h"
 #include "core/image/image_io.h"
@@ -105,14 +109,67 @@ float pdfFlake(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingPa
     return ggxVisiblePdf(o, h, FLAKE_ALPHA, FLAKE_ALPHA) / (4.0f * c);
 }
 
+/// Yalıtkan speküler katmanın tabana bıraktığı pay (Kulla–Conty 2017):
+///   f_taban · (1 − E_s(μo)) · (1 − E_s(μi)) / (1 − E_avg)
+/// E_s = speküler lobun (F0 = 0.08·specular, Turquin telafisi dahil) yönlü albedosu. Beyaz
+/// Lambert tabanda toplam albedo E_s(μo) + (1 − E_s(μo)) = 1 olur ve ifade wo ↔ wi simetriktir.
+/// Anizotropide tablolar izotrop α = √(ax·ay) ile okunur (multiScatterFactor ile aynı).
+struct DielectricLayer {
+    float alpha = 0.0f;
+    float f0 = 0.0f;
+    float invOneMinusAvg = 1.0f;
+
+    explicit DielectricLayer(const DisneyMaterial::ShadingParams& p) {
+        float ax, ay;
+        anisoAlpha(p.roughness, p.anisotropy, ax, ay);
+        alpha = std::sqrt(ax * ay);
+        f0 = 0.08f * p.specular;
+        invOneMinusAvg = 1.0f / std::max(1e-4f, 1.0f - ggxSchlickAverageAlbedo(alpha, f0));
+    }
+    float transmit(float mu) const { return std::max(0.0f, 1.0f - ggxSchlickAlbedo(mu, alpha, f0)); }
+    float factor(float muO, float muI) const { return transmit(muO) * transmit(muI) * invOneMinusAvg; }
+};
+
+/// Clearcoat'un altına geçen pay: 1 − cc·E_c(μ), E_c = IOR 1.5 kaplamanın yönlü albedosu.
+float coatTransmit(const DisneyMaterial::ShadingParams& p, float mu) {
+    if (p.clearCoat <= 0.0f) return 1.0f;
+    const float alphaC = p.clearCoatRoughness * p.clearCoatRoughness;
+    return 1.0f - p.clearCoat * ggxSchlickAlbedo(mu, alphaC, COAT_F0);
+}
+
+/// Sheen katmanının rengi: Disney'in yarı tonlu sheen'i (0.5 + 0.5·ton), metal payında yok.
+Color3f sheenColor(const DisneyMaterial::ShadingParams& p) {
+    if (p.sheen <= 0.0f || p.metallic >= 1.0f) return Color3f::black();
+    const float lum = p.baseColor.luminance();
+    const Color3f tint = lum > 1e-6f ? p.baseColor * (1.0f / lum) : Color3f(1.0f);
+    return (Color3f(0.5f) + tint.clamp(0.0f, 1.0f) * 0.5f) * (p.sheen * (1.0f - p.metallic));
+}
+
+/// Sheen altındaki katmanların payı (glTF KHR_materials_sheen albedo ölçeklemesi):
+///   min(1 − s·Ê(μo), 1 − s·Ê(μi)),  s = sheen renginin en büyük bileşeni, Ê = min(1, E_sh).
+float sheenScale(const DisneyMaterial::ShadingParams& p, float s, float muO, float muI) {
+    if (s <= 0.0f) return 1.0f;
+    const float eo = std::min(1.0f, charlieSheenAlbedo(muO, p.sheenRoughness));
+    const float ei = std::min(1.0f, charlieSheenAlbedo(muI, p.sheenRoughness));
+    return std::max(0.0f, std::min(1.0f - s * eo, 1.0f - s * ei));
+}
+
+/// Charlie sheen lobu. Neubelt görünürlüğüyle albedo yatayda 1'i aşabildiği için lob
+/// max(1, E_sh(μo), E_sh(μi)) ile bölünür: böylece hiçbir açıda enerji yaratmaz.
+Color3f evalSheen(const Color3f& color, const DisneyMaterial::ShadingParams& p, float cosO, float cosI, float cosH) {
+    const float norm = std::max({1.0f, charlieSheenAlbedo(cosO, p.sheenRoughness),
+                                 charlieSheenAlbedo(cosI, p.sheenRoughness)});
+    return color * (charlieD(cosH, p.sheenRoughness) * charlieV(cosI, cosO) / norm);
+}
+
 /// Tüm lobların toplamı f(wo, wi), yerel çerçevede.
 ///
-/// Clearcoat (bulgu materials-10): kaplama, alttaki tabanın ÜSTÜNDE ince bir 1.5 IOR
-/// katmanıdır. Işığın Fc kadarı kaplamadan yansır; tabana yalnızca (1 - Fc) girer ve
-/// geri çıkarken yine (1 - Fc) ile zayıflar. Bu yüzden taban
-///   (1 - cc·Fc(cosθo)) · (1 - cc·Fc(cosθi))
-/// ile çarpılır. Eskiden kaplama lobu tabanın üstüne zayıflatmadan EKLENİYORDU ve
-/// yatay açılarda (Fc → 1) toplam yansıma 1'i aşıyordu (enerji yaratıyordu).
+/// Katmanlar (üstten alta): clearcoat → sheen → speküler (yalıtkan + metal) → taban (difüz,
+/// yüzey altı, ince geçirgenlik). Her katman altındakini kendi albedosuyla zayıflatır:
+///  - Clearcoat (bulgu materials-10): taban (1 − cc·E_c(μo))·(1 − cc·E_c(μi)) ile çarpılır.
+///    Eskiden kaplama lobu tabanın üstüne zayıflatmadan EKLENİYORDU (enerji yaratıyordu).
+///  - Sheen: altındakiler min(1 − s·Ê(μo), 1 − s·Ê(μi)) ile.
+///  - Yalıtkan speküler: difüz Kulla–Conty çarpanıyla (DielectricLayer).
 Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingParams& p) {
     Frame frame = shadingFrame(p.normal, p.tangent);
     Vec3f woLocal = frame.toLocal(wo);
@@ -121,13 +178,18 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
     if (woLocal.z <= 0.0f) return Color3f::black();
 
     const float cosThetaO = woLocal.z;
-    const float coatO = 1.0f - p.clearCoat * schlick(COAT_F0, cosThetaO);
+    const float coatO = coatTransmit(p, cosThetaO);
 
     float trans = p.inFlake ? 0.0f : std::clamp(p.diffuseTransmission, 0.0f, 1.0f) * (1.0f - p.metallic);
     if (wiLocal.z <= 0.0f) {
         if (trans <= 0.0f) return Color3f::black();
-        // İnce yaprak: alttan gelen ışık kaplamayı yalnızca wo tarafında bir kez geçer.
-        return p.baseColor * (trans * INV_PI * coatO);
+        // İnce yaprak: alttan gelen ışık kaplamayı yalnızca wo tarafında bir kez geçer; speküler
+        // ve sheen katmanları iki taraftan da (iki yüzlü levha) aynı payı bırakır.
+        const float muI = -wiLocal.z;
+        const DielectricLayer dl(p);
+        const Color3f sc = sheenColor(p);
+        const float sh = sheenScale(p, std::max({sc.r, sc.g, sc.b}), cosThetaO, muI);
+        return p.baseColor * (trans * INV_PI * coatO * dl.factor(cosThetaO, muI) * sh);
     }
 
     Vec3f hLocal = (woLocal + wiLocal).normalized();
@@ -139,35 +201,30 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
         // Pulun üstünde taban görünmez: ışık pul levhasından yansır.
         base = evalFlake(wo, wi, p);
     } else {
+        // Difüz (EON; difüz pürüzlülüğü 0 iken Lambert). Yüzey altı payı difüzden düşülür: o
+        // ışık giriş noktasında değil, yürüyüşün çıktığı noktada (integratörde) görünür.
+        const DielectricLayer dl(p);
+        const float diffW = (1.0f - p.metallic) * (1.0f - trans) * (1.0f - p.subsurface);
+        Color3f fDiffuse = diffW > 0.0f ? eonEval(p.baseColor, p.diffuseRoughness, wiLocal, woLocal) *
+                                              (diffW * dl.factor(cosThetaO, cosThetaI))
+                                        : Color3f::black();
 
-    // Burley difüz: F_D90 = 0.5 + 2·r·cos²θd ile kenarlarda geri-saçılma.
-    float F90 = 0.5f + 2.0f * p.roughness * cosThetaD * cosThetaD;
-    float Fo = 1.0f + (F90 - 1.0f) * pow5(1.0f - cosThetaO);
-    float Fi = 1.0f + (F90 - 1.0f) * pow5(1.0f - cosThetaI);
-    // Yüzey altı payı difüzden düşülür: o ışık giriş noktasında değil, yürüyüşün çıktığı
-    // noktada (integratörde) görünür.
-    Color3f fDiffuse = p.baseColor * INV_PI * Fo * Fi * (1.0f - p.metallic) * (1.0f - trans) * (1.0f - p.subsurface);
+        // GGX speküler. F0: dielektrikte 0.08·specular (Burley 2012; specular = 0.5 →
+        // F0 = 0.04, yani IOR 1.5). Metalde baseColor. (materials-9: eskiden 0.04·specular.)
+        float ax, ay;
+        anisoAlpha(p.roughness, p.anisotropy, ax, ay);
+        float D = ggxD(hLocal, ax, ay);
+        float G = ggxG(woLocal, wiLocal, ax, ay);
+        Color3f F = specularFresnel(p, cosThetaD);
+        Color3f fSpecular = (F * D * G) / (4.0f * cosThetaO * cosThetaI) * multiScatterFactor(p, cosThetaO, ax, ay);
 
-    // GGX speküler. F0: dielektrikte 0.08·specular (Burley 2012; specular = 0.5 →
-    // F0 = 0.04, yani IOR 1.5). Metalde baseColor. (materials-9: eskiden 0.04·specular.)
-    float ax, ay;
-    anisoAlpha(p.roughness, p.anisotropy, ax, ay);
-    float D = ggxD(hLocal, ax, ay);
-    float G = ggxG(woLocal, wiLocal, ax, ay);
-    Color3f F = specularFresnel(p, cosThetaD);
-    Color3f fSpecular = (F * D * G) / (4.0f * cosThetaO * cosThetaI) * multiScatterFactor(p, cosThetaO, ax, ay);
-
-    Color3f fSheen(0.0f);
-    if (p.sheen > 0.0f) {
-        // ponytail: sheen rides the diffuse sample; a dedicated sheen lobe if cloth noise matters
-        float fh = pow5(std::max(0.0f, 1.0f - cosThetaD));
-        float lum = p.baseColor.luminance();
-        Color3f tint = lum > 1e-6f ? p.baseColor * (1.0f / lum) : Color3f(1.0f);
-        Color3f csheen = Color3f(1.0f) * 0.5f + tint * 0.5f;
-        fSheen = csheen * (p.sheen * fh * (1.0f - p.metallic));
-    }
-
-    base = fDiffuse + fSpecular + fSheen;
+        base = fDiffuse + fSpecular;
+        const Color3f sc = sheenColor(p);
+        if (!sc.isBlack()) {
+            // ponytail: sheen rides the diffuse (cosine) sample; a dedicated lobe if satin noise matters
+            base = base * sheenScale(p, std::max({sc.r, sc.g, sc.b}), cosThetaO, cosThetaI) +
+                   evalSheen(sc, p, cosThetaO, cosThetaI, hLocal.z);
+        }
     }
     if (p.clearCoat <= 0.0f) return base;
 
@@ -175,9 +232,9 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
     float Dc = ggxD(hLocal, alphaC, alphaC);
     float Gc = ggxG(woLocal, wiLocal, alphaC, alphaC);
     float Fc = schlick(COAT_F0, cosThetaD);
-    Color3f fCoat(p.clearCoat * Fc * Dc * Gc / (4.0f * cosThetaO * cosThetaI));
-    float coatI = 1.0f - p.clearCoat * schlick(COAT_F0, cosThetaI);
-    return base * (coatO * coatI) + fCoat;
+    const float msC = 1.0f + COAT_F0 * (1.0f / ggxDirectionalAlbedo(cosThetaO, alphaC) - 1.0f);
+    Color3f fCoat(p.clearCoat * Fc * Dc * Gc / (4.0f * cosThetaO * cosThetaI) * msC);
+    return base * (coatO * coatTransmit(p, cosThetaI)) + fCoat;
 }
 
 void lobeWeights(const DisneyMaterial::ShadingParams& p, float& pCoat, float& pSpec,
@@ -374,6 +431,8 @@ DisneyMaterial::ShadingParams DisneyMaterial::resolve(const SurfaceInteraction& 
     p.clearCoatRoughness = m_clearCoatRoughness;
     p.anisotropy = m_anisotropy;
     p.sheen = m_sheen;
+    p.sheenRoughness = m_sheenRoughness;
+    p.diffuseRoughness = m_diffuseRoughness;
     p.diffuseTransmission = m_diffuseTransmission;
     p.subsurface = m_subsurface;
     p.normal = si.normal;
@@ -384,13 +443,14 @@ DisneyMaterial::ShadingParams DisneyMaterial::resolve(const SurfaceInteraction& 
         p.baseColor = m_albedoTex->sampleBilinear(uv.x, uv.y);
     }
     if (m_roughnessTex) {
-        Color3f c = m_roughnessTex->sampleBilinear(uv.x, uv.y);
-        // ponytail: use green channel (glTF ORM) with R fallback
-        p.roughness = std::max(0.001f, c.g > 1e-6f ? c.g : c.r);
+        // Yeşil kanal: glTF ORM paketinde pürüzlülük G'dedir; gri tonlu haritada R = G = B.
+        // (Eskiden G ≈ 0 iken R'ye düşülüyordu: ORM'de AO = 1, pürüzlülük = 0 olan teksel
+        // tamamen pürüzlü görünüyordu.)
+        p.roughness = std::max(0.001f, m_roughnessTex->sampleBilinear(uv.x, uv.y).g);
     }
     if (m_metalnessTex) {
-        Color3f c = m_metalnessTex->sampleBilinear(uv.x, uv.y);
-        p.metallic = std::clamp(c.b > 1e-6f ? c.b : c.r, 0.0f, 1.0f);
+        // Mavi kanal (glTF ORM); gri tonlu haritada R = G = B.
+        p.metallic = std::clamp(m_metalnessTex->sampleBilinear(uv.x, uv.y).b, 0.0f, 1.0f);
     }
     if (m_normalTex) {
         Color3f c = m_normalTex->sampleBilinear(uv.x, uv.y);
@@ -520,9 +580,14 @@ bool DisneyMaterial::sampleFull(const Vec3f& wo, const SurfaceInteraction& si, f
     } else if (uc < pCoat + pSpec + pDiffRefl + pSss) {
         wiLocal = cosineSampleHemisphere(u);
         wiLocal.z = -wiLocal.z;
+        // Yürüyüşe giren ışık üstteki katmanlardan (kaplama, sheen, yalıtkan speküler) geçer.
         const float trans = std::clamp(p.diffuseTransmission, 0.0f, 1.0f) * (1.0f - p.metallic);
-        const float coatO = 1.0f - p.clearCoat * schlick(COAT_F0, woLocal.z);
-        const float w = p.subsurface * (1.0f - p.metallic) * (1.0f - trans) * coatO / std::max(pSss, 1e-6f);
+        const float coatO = coatTransmit(p, woLocal.z);
+        const Color3f sc = sheenColor(p);
+        const float sheenO = sheenScale(p, std::max({sc.r, sc.g, sc.b}), woLocal.z, 1.0f);
+        const float layerO = DielectricLayer(p).transmit(woLocal.z);
+        const float w = p.subsurface * (1.0f - p.metallic) * (1.0f - trans) * coatO * sheenO * layerO /
+                        std::max(pSss, 1e-6f);
         out.wi = frame.toWorld(wiLocal).normalized();
         out.subsurface = true;
         out.weight = Color3f(w);

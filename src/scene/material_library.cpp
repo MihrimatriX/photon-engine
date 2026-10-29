@@ -155,6 +155,8 @@ void MaterialLibrary::applyAdvanced(const MaterialPreset& p, Material& mat) {
         g->setScattering(p.scatterDensity, p.scatterColor, p.scatterAnisotropy);
         g->setAbbe(p.abbe);
     } else if (auto* d = dynamic_cast<DisneyMaterial*>(&mat)) {
+        d->setDiffuseRoughness(p.diffuseRoughness);
+        d->setSheenRoughness(p.sheenRoughness);
         d->setSubsurface(p.subsurface);
         d->setSubsurfaceRadius(p.subsurfaceRadius);
         d->setSubsurfaceScale(p.subsurfaceScale);
@@ -187,6 +189,8 @@ void presetAdvancedToJson(const MaterialPreset& p, json& j) {
         if (p.abbe > 0.0f) j["abbe"] = p.abbe;
         return;
     }
+    if (p.diffuseRoughness > 0.0f) j["diffuseRoughness"] = p.diffuseRoughness;
+    if (p.sheenRoughness != def.sheenRoughness) j["sheenRoughness"] = p.sheenRoughness;
     if (p.subsurface > 0.0f)
         j["subsurface"] = {{"weight", p.subsurface}, {"radius", colJson(p.subsurfaceRadius)},
                            {"scale", p.subsurfaceScale}, {"anisotropy", p.subsurfaceAnisotropy}};
@@ -215,6 +219,8 @@ void presetAdvancedFromJson(const json& j, MaterialPreset& p) {
         p.subsurfaceAnisotropy = s->value("anisotropy", p.subsurfaceAnisotropy);
     }
     p.edgeTint = readColor(j, "edgeTint", p.edgeTint);
+    p.diffuseRoughness = j.value("diffuseRoughness", p.diffuseRoughness);
+    p.sheenRoughness = j.value("sheenRoughness", p.sheenRoughness);
     p.roundEdges = j.value("roundEdges", p.roundEdges);
     p.thinWalled = j.value("thinWalled", p.thinWalled);
     if (auto t = j.find("thinFilm"); t != j.end() && t->is_object()) {
@@ -264,6 +270,8 @@ MaterialPreset MaterialLibrary::presetFromMaterial(const Material& mat, const st
             p.emissive = m;
             p.baseColor = e / m;
         }
+        p.diffuseRoughness = d->diffuseRoughness();
+        p.sheenRoughness = d->sheenRoughness();
         p.subsurface = d->subsurface();
         p.subsurfaceRadius = d->subsurfaceRadius();
         p.subsurfaceScale = d->subsurfaceScale();
