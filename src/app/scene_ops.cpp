@@ -2,6 +2,8 @@
 // seçim, model içe aktarma, malzeme/ortam/stüdyo uygulama, ışıklar, kamera,
 // proje kaydetme/açma ve viewport görüntüsünü dışa aktarma.
 #include "app/application.h"
+#include "app/camera_keys.h"
+#include "scene/package.h"
 #include "scene/model_import.h"
 #include "scene/project_io.h"
 #include "scene/cornell_box.h"
@@ -13,6 +15,8 @@
 #include "core/math/constants.h"
 #include "core/platform/path.h"
 
+#include <optional>
+#include <cctype>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -288,6 +292,11 @@ void Application::newScene() {
     m_s.undo.clear();
     m_s.projectPath.clear();
     m_s.savedCameras.clear();
+    m_s.cameraTracks.clear();
+    m_s.activeTrack = -1;
+    m_s.animTime = 0.0f;
+    m_s.animPlaying = false;
+    m_s.showTimeline = false;
     m_s.documentDirty = false;
     clearSelection();
     m_s.camera = OrbitCamera{};
@@ -396,25 +405,135 @@ void Application::requestImport(const std::vector<std::string>& paths, const Vec
 }
 
 void Application::importWithOptions(const std::string& path, const ModelImportOptions& options, bool undoable,
-                                    const Vec3f* placeAt) {
+                                    const Vec3f* placeAt, const std::string& liveKey) {
     const bool hasPoint = placeAt != nullptr;
     const Vec3f point = placeAt ? *placeAt : Vec3f(0.0f);
-    runAsync("İçe aktarılıyor: " + ui::fileName(path), [this, path, undoable, options, hasPoint, point]() -> std::function<void()> {
+    runAsync("İçe aktarılıyor: " + ui::fileName(path), [this, path, undoable, options, hasPoint, point, liveKey]() -> std::function<void()> {
         auto err = std::make_shared<std::string>();
         auto warnings = std::make_shared<std::vector<std::string>>();
-        auto holder = std::make_shared<std::unique_ptr<SceneNode>>(importModelFile(path, err.get(), options, warnings.get()));
-        return [this, path, undoable, holder, err, warnings, hasPoint, point] {
+        auto extras = std::make_shared<ImportExtras>();
+        auto holder = std::make_shared<std::unique_ptr<SceneNode>>(
+            importModelFile(path, err.get(), options, warnings.get(), extras.get()));
+        return [this, path, undoable, holder, err, warnings, extras, hasPoint, point, liveKey] {
             if (!*holder) {
                 setStatus(err->empty() ? "Model yüklenemedi" : *err, true);
                 return;
             }
-            attachImported(path, std::move(*holder), undoable, *warnings, hasPoint ? &point : nullptr);
+            if (!liveKey.empty()) {
+                // DCC'nin gönderdiği dosya geçici klasördedir ve istemci eskilerini siler: anahtar
+                // başına kalıcı bir kopyaya taşınır ki proje (.photon) yeniden açılınca model kaybolmasın.
+                // Her güncellemede kopya yenilenir; proje DCC'den gelen en son hâli açar.
+                const std::string shown = liveKey.substr(liveKey.find('|') + 1);
+                std::string safe;
+                for (const unsigned char c : liveKey) safe.push_back(std::isalnum(c) || c >= 0x80 ? static_cast<char>(c) : '_');
+                std::error_code ec;
+                const auto dir = userDataDir() / "livelink";
+                std::filesystem::create_directories(dir, ec);
+                const auto stable = dir / pathFromUtf8(safe + pathToUtf8(pathFromUtf8(path).extension()));
+                std::filesystem::copy_file(pathFromUtf8(path), stable, std::filesystem::copy_options::overwrite_existing, ec);
+                if (!ec) (*holder)->sourcePath = pathToUtf8(stable);
+                (*holder)->name = shown;
+                // Canlı bağlantı: bu kaynaktan aynı ad daha önce geldiyse yerinde güncelle.
+                if (auto it = m_liveNodes.find(liveKey); it != m_liveNodes.end() && m_s.graph.findByUid(it->second)) {
+                    replaceLive(liveKey, it->second, std::move(*holder), *warnings, extras.get());
+                    return;
+                }
+                m_liveNodes[liveKey] = (*holder)->uid;
+            }
+            attachImported(path, std::move(*holder), undoable, *warnings, hasPoint ? &point : nullptr, extras.get());
         };
     });
 }
 
+void Application::setLiveLink(bool enabled) {
+    m_s.liveLinkEnabled = enabled;
+    if (!enabled) {
+        m_liveLink.stop();
+        return;
+    }
+    if (m_liveLink.running()) return;
+    std::string err;
+    auto accepts = [](const std::string& p) {
+        return isSupportedModelFile(p) || isPackageFile(p) || pathToUtf8(pathFromUtf8(p).extension()) == ".photon";
+    };
+    if (!m_liveLink.start(userDataDir() / "livelink.json", accepts, LiveLinkServer::kDefaultPort, &err))
+        setStatus("Canlı bağlantı açılamadı: " + err, true);
+}
+
+void Application::processLiveLink() {
+    LiveLinkRequest r;
+    while (m_liveLink.poll(r)) {
+        const std::string ext = pathToUtf8(pathFromUtf8(r.path).extension());
+        if (isPackageFile(r.path) || ext == ".photon") {
+            openProject(r.path);
+            continue;
+        }
+        const std::string name = r.name.empty() ? pathToUtf8(pathFromUtf8(r.path).stem()) : r.name;
+        const std::string key = r.replace ? (r.source.empty() ? "dcc" : r.source) + "|" + name : std::string();
+        setStatus("Canlı bağlantı: " + (r.source.empty() ? std::string("DCC") : r.source) + " → " + name);
+        importWithOptions(r.path, ModelImportOptions{}, true, nullptr, key);
+    }
+}
+
+void Application::replaceLive(const std::string& liveKey, uint64_t oldUid, std::unique_ptr<SceneNode> node,
+                              const std::vector<std::string>& warnings, ImportExtras* extras) {
+    SceneNode* old = m_s.graph.findByUid(oldUid);
+    if (!old || !old->parent) return;
+    pushUndo();
+    // Kullanıcının atadığı malzemeler parça adına göre korunur; yerleşim ve kullanıcının taşıması da.
+    std::unordered_map<std::string, std::shared_ptr<Material>> mats;
+    forEachMesh(*old, [&](SceneNode& n) { mats.emplace(n.name, n.material); });
+    size_t parts = 0, kept = 0;
+    forEachMesh(*node, [&](SceneNode& n) {
+        ++parts;
+        if (auto it = mats.find(n.name); it != mats.end() && it->second) {
+            n.material = it->second;
+            ++kept;
+        }
+    });
+    node->localTransform = old->localTransform;
+    if (extras && !extras->empty() && m_s.importPrefs.importCameras) {
+        // Kameralar ada göre güncellenir; ışıklara dokunulmaz (kullanıcı ayarlamış olabilir).
+        Transform world = node->localTransform;
+        for (const SceneNode* p = old->parent; p; p = p->parent) world = p->localTransform * world;
+        transformImportExtras(*extras, world);
+        for (CameraTrack& t : extras->cameras) {
+            if (t.keys.size() == 1) {
+                const OrbitCamera cam = orbitFromKey(t.keys.front(), m_s.camera);
+                auto it = std::find_if(m_s.savedCameras.begin(), m_s.savedCameras.end(),
+                                       [&](const AppState::SavedCamera& s) { return s.name == t.name; });
+                if (it != m_s.savedCameras.end()) it->cam = cam;
+                else m_s.savedCameras.push_back({t.name, cam});
+            } else {
+                auto it = std::find_if(m_s.cameraTracks.begin(), m_s.cameraTracks.end(),
+                                       [&](const CameraTrack& c) { return c.name == t.name; });
+                if (it != m_s.cameraTracks.end()) *it = std::move(t);
+                else m_s.cameraTracks.push_back(std::move(t));
+            }
+        }
+    }
+    SceneNode* parent = old->parent;
+    const uint64_t uid = node->uid;
+    node->parent = parent;
+    for (auto& c : parent->children)
+        if (c.get() == old) {
+            c = std::move(node); // eski düğüm burada silinir
+            break;
+        }
+    m_liveNodes[liveKey] = uid;
+    ++m_liveUpdates;
+    m_s.graph.bumpRevision();
+    selectNode(uid);
+    markDocumentChanged();
+    std::string msg = "Canlı güncellendi: " + liveKey.substr(liveKey.find('|') + 1) + " (" + std::to_string(parts) +
+                      " parça, " + std::to_string(kept) + " malzeme korundu)";
+    for (const auto& w : warnings) msg += "  ·  " + w;
+    setStatus(msg, !warnings.empty());
+}
+
 void Application::attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable,
-                                 const std::vector<std::string>& warnings, const Vec3f* placeAt) {
+                                 const std::vector<std::string>& warnings, const Vec3f* placeAt,
+                                 ImportExtras* extras) {
     if (undoable) pushUndo();
     const bool wasEmpty = m_s.graph.empty();
     // Zemine oturt: modelin en alt noktası y = 0 olsun; boş sahnede merkeze al. Viewport'a
@@ -434,19 +553,56 @@ void Application::attachImported(const std::string& path, std::unique_ptr<SceneN
     const uint64_t uid = node->uid;
     size_t parts = 0;
     forEachMesh(*node, [&](SceneNode&) { ++parts; });
+    // DCC kameraları ve ışıkları grubun yerel uzayında geldi: yerleştirmeden sonraki dünya
+    // dönüşümüyle taşınır, böylece 3ds Max / Maya / Blender'daki kadraj ve ışık düzeni korunur.
+    int dccLights = 0, dccCams = 0, dccTracks = 0;
+    std::optional<OrbitCamera> firstDccView;
+    if (extras && !extras->empty()) {
+        transformImportExtras(*extras, node->localTransform);
+        if (m_s.importPrefs.importLights)
+            for (LightDesc& l : extras->lights) {
+                m_s.lights.push_back(std::move(l));
+                ++dccLights;
+            }
+        if (m_s.importPrefs.importCameras)
+            for (CameraTrack& t : extras->cameras) {
+                if (!firstDccView) firstDccView = orbitFromKey(t.keys.front(), m_s.camera);
+                if (t.keys.size() == 1) {
+                    m_s.savedCameras.push_back({t.name, orbitFromKey(t.keys.front(), m_s.camera)});
+                    ++dccCams;
+                } else {
+                    m_s.cameraTracks.push_back(std::move(t));
+                    m_s.activeTrack = static_cast<int>(m_s.cameraTracks.size()) - 1;
+                    m_s.animTime = 0.0f;
+                    m_s.showTimeline = true;
+                    ++dccTracks;
+                }
+            }
+    }
     m_s.graph.root()->addChild(std::move(node));
     if (wasEmpty) {
+        // Dosya kendi ışıklarını getirdiyse varsayılan stüdyo ışıkları eklenmez ve ortam ışığı
+        // kısılır: DCC'lerde (Max, Maya) varsayılan ortam siyahtır, sahneyi ışıklar aydınlatır.
+        // Hafif bir dolgu yansımalar için kalır; Ortam sekmesinden geri açılır.
         if (m_s.lights.empty()) {
             for (const auto& s : m_s.studios)
                 if (s.id == "product_softbox") applyStudio(s);
+        } else if (dccLights > 0) {
+            m_s.environment.intensity = 0.15f;
         }
-        frameAll();
+        // Dosyada kamera varsa onun kadrajı (DCC'deki görünüm); yoksa sahneye sığdır.
+        if (firstDccView) m_s.camera = *firstDccView;
+        else frameAll();
     }
     selectNode(uid); // applyStudio seçimi temizler; bu yüzden en sonda
     addRecent(path);
 
     markDocumentChanged();
-    std::string msg = "İçe aktarıldı: " + ui::fileName(path) + " (" + std::to_string(parts) + " parça)";
+    std::string msg = "İçe aktarıldı: " + ui::fileName(path) + " (" + std::to_string(parts) + " parça";
+    if (dccLights) msg += ", " + std::to_string(dccLights) + " ışık" + (wasEmpty ? " (ortam ışığı kısıldı)" : "");
+    if (dccCams) msg += ", " + std::to_string(dccCams) + " kamera";
+    if (dccTracks) msg += ", " + std::to_string(dccTracks) + " kamera animasyonu";
+    msg += ")";
     for (const auto& w : warnings) msg += "  ·  " + w;
     setStatus(msg, !warnings.empty());
 }
@@ -813,8 +969,9 @@ void Application::applyCameraPreset(const char* id) {
     frameAll();
 }
 
-CameraParams Application::cameraParams() const {
-    const OrbitCamera& c = m_s.camera;
+CameraParams Application::cameraParams() const { return cameraParamsFor(m_s.camera); }
+
+CameraParams Application::cameraParamsFor(const OrbitCamera& c) const {
     CameraParams p;
     p.eye = c.position();
     p.target = c.targetVec();
@@ -825,12 +982,14 @@ CameraParams Application::cameraParams() const {
     p.focusDistance = effectiveFocusDistance(c);
     p.apertureBlades = c.apertureBlades;
     p.bladeRotationDeg = c.bladeRotationDeg;
+    p.shiftX = c.orthographic ? 0.0f : c.shiftX;
+    p.shiftY = c.orthographic ? 0.0f : c.shiftY;
     return p;
 }
 
 // Viewport koordinatı (u sağa, v aşağı, [0,1]) → kamera ışını → derlenmiş sahnede
 // en yakın kesişim → düğüm kimliği. BVH kullanır, büyük modellerde de anlıktır.
-uint64_t Application::pickAt(float u, float v, Vec3f* hitPoint) {
+uint64_t Application::pickAt(float u, float v, Vec3f* hitPoint, Vec3f* hitNormal) {
     if (!m_s.compiled) return 0;
     const float aspect = m_s.viewportPxH > 0 ? static_cast<float>(m_s.viewportPxW) / m_s.viewportPxH : 1.0f;
     CameraParams p = cameraParams();
@@ -840,7 +999,51 @@ uint64_t Application::pickAt(float u, float v, Vec3f* hitPoint) {
     SurfaceInteraction isect;
     if (!m_s.compiled->intersect(ray, isect)) return 0;
     if (hitPoint) *hitPoint = isect.point;
+    if (hitNormal) *hitNormal = isect.normal.dot(ray.direction) > 0.0f ? -isect.normal : isect.normal; // bakana dönük
     return m_s.compiled->nodeUidOf(isect);
+}
+
+// Yansıma yerleştirme (hesap placeLightForHighlight'ta). Uzaklık korunur ki aydınlık değişmesin;
+// pürüzlü yüzeyde parlama genişler ama yeri aynı kalır.
+void Application::placeHighlight(const Vec3f& point, const Vec3f& normal) {
+    if (m_s.selKind != SelectionKind::Light || m_s.selLight < 0 || m_s.selLight >= static_cast<int>(m_s.lights.size())) {
+        setStatus("Önce yerleştirilecek ışığı seçin", true);
+        return;
+    }
+    pushUndo();
+    LightDesc& l = m_s.lights[static_cast<size_t>(m_s.selLight)];
+    const AABB b = m_s.graph.worldBounds();
+    const Vec3f r = placeLightForHighlight(l, m_s.camera.position(), point, normal, std::max(0.5f, (b.pMax - b.pMin).length()));
+    markDocumentChanged();
+    setStatus("Işık yerleştirildi: \"" + l.name + "\" yansıması tıklanan noktada" +
+              (r.y < -0.2f ? " (ışık zeminin altında kaldı; daha yukarıdan bir noktaya tıklayın)" : ""), r.y < -0.2f);
+}
+
+void Application::applyTwoPointPerspective() {
+    OrbitCamera& c = m_s.camera;
+    if (c.orthographic) return;
+    // Bakışın aşağı/yukarı açısı α; yatay bakışa getirilince konu kare merkezinden tan(α) kadar
+    // kayar. Dikey kaydırma bunu karşılar: shiftY = −tan(α) / (2·tan(fov/2)) (kare yüksekliği cinsinden).
+    const Vec3f eye = c.position(), target = c.targetVec();
+    const Vec3f d = target - eye;
+    const float horiz = std::sqrt(d.x * d.x + d.z * d.z);
+    if (horiz < 1e-4f) {
+        setStatus("Tam yukarıdan/aşağıdan bakışta iki noktalı perspektif yapılamaz", true);
+        return;
+    }
+    pushUndo();
+    const float tanA = d.y / horiz; // yukarı bakış pozitif
+    const float tanHalf = std::tan(c.fov * DEG_TO_RAD * 0.5f);
+    c.shiftY = std::clamp(tanA / (2.0f * tanHalf) + c.shiftY, -2.0f, 2.0f);
+    // Göz yerinde, hedef göz yüksekliğine iner: θ = 90° (yatay).
+    const Vec3f newTarget(target.x, eye.y, target.z);
+    c.target[0] = newTarget.x;
+    c.target[1] = newTarget.y;
+    c.target[2] = newTarget.z;
+    c.radius = horiz;
+    c.theta = 0.5f * PI;
+    c.phi = std::atan2(eye.z - newTarget.z, eye.x - newTarget.x);
+    setStatus("İki noktalı perspektif: dikeyler paralel (lens kaydırma " + std::to_string(c.shiftY).substr(0, 5) + ")");
 }
 
 // ── Proje ────────────────────────────────────────────────────────────────
@@ -852,7 +1055,7 @@ json cameraJson(const OrbitCamera& c) {
             {"phi", c.phi}, {"fov", c.fov}, {"focalLengthMm", c.focalLengthMm}, {"orthographic", c.orthographic},
             {"aperture", c.aperture}, {"fStop", c.fStop}, {"focusDistance", c.focusDistance},
             {"focusExplicit", c.focusExplicit}, {"apertureBlades", c.apertureBlades},
-            {"bladeRotation", c.bladeRotationDeg}};
+            {"bladeRotation", c.bladeRotationDeg}, {"shiftX", c.shiftX}, {"shiftY", c.shiftY}};
 }
 
 void readCamera(const json& j, OrbitCamera& c) {
@@ -870,6 +1073,8 @@ void readCamera(const json& j, OrbitCamera& c) {
     c.focusExplicit = j.value("focusExplicit", c.focusExplicit);
     c.apertureBlades = j.value("apertureBlades", c.apertureBlades);
     c.bladeRotationDeg = j.value("bladeRotation", c.bladeRotationDeg);
+    c.shiftX = std::clamp(j.value("shiftX", 0.0f), -2.0f, 2.0f);
+    c.shiftY = std::clamp(j.value("shiftY", 0.0f), -2.0f, 2.0f);
 }
 
 } // namespace
@@ -895,27 +1100,45 @@ void Application::saveProject() {
     }
     d.environment = m_s.environment;
     d.lights = m_s.lights;
+    d.cameraTracks = m_s.cameraTracks;
     std::string err;
-    if (!::photon::saveProject(m_s.projectPath, m_s.graph, d, &err)) {
+    std::vector<std::string> warnings;
+    // Paket (.photonpack): dokular, HDRI, IES ve geometri dosyanın içinde; değilse JSON proje.
+    const bool package = isPackageFile(m_s.projectPath);
+    const bool ok = package ? savePackage(m_s.projectPath, m_s.graph, d, &err, &warnings)
+                            : ::photon::saveProject(m_s.projectPath, m_s.graph, d, &err);
+    if (!ok) {
         setStatus("Kaydedilemedi: " + err, true);
         return;
     }
     m_s.documentDirty = false;
     addRecent(m_s.projectPath);
-    setStatus("Kaydedildi: " + ui::fileName(m_s.projectPath));
+    std::string msg = (package ? "Paket kaydedildi: " : "Kaydedildi: ") + ui::fileName(m_s.projectPath);
+    for (const auto& w : warnings) msg += "  ·  " + w;
+    setStatus(msg, !warnings.empty());
 }
 
 void Application::saveProjectAs() {
     std::string path = m_s.projectPath.empty() ? "urun.photon" : m_s.projectPath;
-    FileDialogFilter f[] = {{"Photon projesi", "*.photon"}};
-    if (!showFileDialog(path, FileDialogMode::Save, "Projeyi kaydet", f, 1)) return;
+    FileDialogFilter f[] = {{"Photon projesi", "*.photon"}, {"Photon paketi (dokular ve modeller içinde)", "*.photonpack"}};
+    if (!showFileDialog(path, FileDialogMode::Save, "Projeyi kaydet", f, 2)) return;
+    m_s.projectPath = path;
+    saveProject();
+}
+
+void Application::savePackageAs() {
+    std::string path = m_s.projectPath.empty() ? "urun.photonpack"
+                                               : pathToUtf8(pathFromUtf8(m_s.projectPath).replace_extension(".photonpack"));
+    FileDialogFilter f[] = {{"Photon paketi (dokular ve modeller içinde)", "*.photonpack"}};
+    if (!showFileDialog(path, FileDialogMode::Save, "Paket olarak kaydet", f, 1)) return;
+    if (!isPackageFile(path)) path += ".photonpack";
     m_s.projectPath = path;
     saveProject();
 }
 
 void Application::openProjectDialog() {
     std::string path = m_s.projectPath;
-    FileDialogFilter f[] = {{"Photon projesi", "*.photon"}, {"Tüm dosyalar", "*.*"}};
+    FileDialogFilter f[] = {{"Photon projesi ve paketi", "*.photon;*.photonpack"}, {"Tüm dosyalar", "*.*"}};
     if (showFileDialog(path, FileDialogMode::Open, "Proje aç", f, 2)) openProject(path);
 }
 
@@ -923,13 +1146,19 @@ bool Application::openProject(const std::string& path) {
     ProjectData d;
     std::string err;
     SceneGraph loaded;
-    if (!loadProject(path, loaded, d, &err)) {
+    const bool ok = isPackageFile(path) ? loadPackage(path, loaded, d, &err) : loadProject(path, loaded, d, &err);
+    if (!ok) {
         setStatus(err.empty() ? "Proje açılamadı" : err, true);
         return false;
     }
     m_s.graph.setRoot(SceneGraph::cloneTree(*loaded.root(), false));
     m_s.lights = d.lights;
     m_s.environment = d.environment;
+    m_s.cameraTracks = d.cameraTracks;
+    m_s.activeTrack = m_s.cameraTracks.empty() ? -1 : 0;
+    m_s.animTime = 0.0f;
+    m_s.animPlaying = false;
+    m_s.showTimeline = !m_s.cameraTracks.empty();
     // Kamera ve render alanları uygulamaya özgü ve serbest biçimli: yanlış türde bir değer (ör.
     // NaN'ın JSON'da null yazılması) eskiden istisnayla uygulamayı kapatıyordu. O ana kadar
     // okunanlar kalır, kalanı varsayılanda kalır, kullanıcıya uyarı gösterilir.
@@ -982,13 +1211,14 @@ bool Application::openProject(const std::string& path) {
 void Application::openModelDialog() {
     std::string path;
     const std::string all = supportedModelPatterns();
-    FileDialogFilter f[] = {{"3B modeller (FBX, OBJ, glTF, Alembic)", all.c_str()},
+    FileDialogFilter f[] = {{"3B modeller (FBX, OBJ, glTF, Alembic, Max, Maya, Blender)", all.c_str()},
                             {"FBX (Maya, 3ds Max, Blender, C4D)", "*.fbx"},
+                            {"3ds Max / Maya / Blender sahnesi (kurulu uygulamayla)", "*.max;*.ma;*.mb;*.blend"},
                             {"Alembic önbelleği", "*.abc"},
                             {"glTF 2.0", "*.gltf;*.glb"},
                             {"Wavefront OBJ", "*.obj"},
                             {"Tüm dosyalar", "*.*"}};
-    if (showFileDialog(path, FileDialogMode::Open, "Model içe aktar", f, 6)) requestImport({path});
+    if (showFileDialog(path, FileDialogMode::Open, "Model içe aktar", f, 7)) requestImport({path});
 }
 
 void Application::openHdrDialog() {

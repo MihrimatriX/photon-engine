@@ -29,6 +29,9 @@ struct LightDesc {
     std::string name = "Işık";
     bool enabled = true;
     Color3f color{1.0f};
+    /// > 0 ise ışık rengi bu renk sıcaklığından (Kelvin) gelir ve color yok sayılır (fotoğrafçılık
+    /// gibi: 2700 K ampul, 5500 K gün ışığı). 0 = color kullanılır.
+    float temperatureK = 0.0f;
     /// Alan: radyans; yönlü: ışınım (irradiance); nokta: yoğunluk. Hepsi color ile çarpılır.
     float intensity = 10.0f;
     Vec3f position{0.0f, 3.0f, 0.0f};  ///< Alan/nokta: merkez
@@ -82,6 +85,10 @@ void resolveSunPosition(EnvironmentDesc& env);
 nlohmann::json imagerToJson(const ImagerSettings& s);
 ImagerSettings imagerFromJson(const nlohmann::json& j);
 
+/// Işığın renk × güç değeri (Kelvin açıksa sıcaklığın rengi): nokta/spot için şiddet I (W/sr),
+/// alan için radyans L, yönlü için ışınım E.
+Color3f lightEmission(const LightDesc& d);
+
 /// LightDesc listesinden render ışıkları (yalnız etkin olanlar).
 std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& descs);
 
@@ -89,6 +96,14 @@ std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& de
 Vec3f directionalTravelDir(const LightDesc& d);
 /// Yönlü ışığın geldiği yön (azimut/yükseklik, derece) → birim vektör.
 Vec3f sphericalDirection(float azimuthDeg, float elevationDeg);
+
+/// Parlama yerleştirme (Maverick/KeyShot "highlight"): gözden @p point'e bakış, yüzey normali
+/// @p normal etrafında aynadaki gibi yansır; ışık bu doğrultuda olursa parlaması @p point'te
+/// görünür. Konumlu ışıklar şimdiki uzaklıklarını korur (uzaklık yoksa @p fallbackDistance) ve
+/// @p point'e döner; yönlü ışıkta yalnız geliş yönü değişir (en az 1° yükseklik). Dönüş: yüzeyden
+/// ışığa birim yansıma doğrultusu (y < 0 ise ışık yüzeyin altında kalır).
+Vec3f placeLightForHighlight(LightDesc& d, const Vec3f& eye, const Vec3f& point, const Vec3f& normal,
+                             float fallbackDistance);
 
 /// Tek renkli/geçişli prosedürel gökyüzü + iki "pencere" (krom yansımaları için).
 std::shared_ptr<const Image> makeProceduralSky(const Color3f& zenith, const Color3f& horizon);

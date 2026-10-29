@@ -10,6 +10,7 @@
 #pragma once
 
 #include "app/app_state.h"
+#include "app/live_link.h"
 #include "scene/primitives.h"
 
 #include <imgui.h>
@@ -17,6 +18,7 @@
 #include <functional>
 #include <future>
 #include <string>
+#include <unordered_map>
 
 struct GLFWwindow;
 
@@ -64,6 +66,10 @@ private:
     RasterView m_raster;               ///< GPU görüntü modları (Katı, Tel kafes, Normaller, bindirme)
     bool m_rasterOk = false;           ///< Sürücü gerekli GL işlevlerini verdi mi
     unsigned int m_rasterTex = 0;      ///< Son GPU çiziminin dokusu (kimlik sabit kalır)
+    // Gerçek zamanlı mod: ortam ve ton eşleme yalnız girdileri değişince yeniden hazırlanır.
+    RasterView::Realtime m_rtInputs;
+    std::string m_rtEnvKey;
+    int m_rtLutOp = -1;
     size_t m_rasterTris = 0;           ///< Son GPU çizimindeki üçgen sayısı (rozet)
     /// ImGui::Render() sonrası, çizim listesi GPU'ya gitmeden hemen önce: GPU modunun
     /// dokusunu bu karenin kamerasıyla günceller (bir kare gecikme olmaz).
@@ -143,9 +149,15 @@ public:
     /// sorma" seçiliyse doğrudan). @p dropPoint: viewport'ta bırakılan yer.
     void requestImport(const std::vector<std::string>& paths, const Vec3f* dropPoint = nullptr);
     void importWithOptions(const std::string& path, const ModelImportOptions& options, bool undoable,
-                           const Vec3f* placeAt);
+                           const Vec3f* placeAt, const std::string& liveKey = {});
+    // Canlı bağlantı (live_link.h): DCC'den gelen istekler
+    void processLiveLink();
+    void setLiveLink(bool enabled);
+    void replaceLive(const std::string& liveKey, uint64_t oldUid, std::unique_ptr<SceneNode> node,
+                     const std::vector<std::string>& warnings, ImportExtras* extras);
     void attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable,
-                        const std::vector<std::string>& warnings = {}, const Vec3f* placeAt = nullptr);
+                        const std::vector<std::string>& warnings = {}, const Vec3f* placeAt = nullptr,
+                        ImportExtras* extras = nullptr);
     ModelImportOptions importOptionsFor(const std::string& path) const;
     void drawImportDialog();
     void loadPrefs();
@@ -163,8 +175,17 @@ public:
     void placeSelectionOnGround();
     void applyCameraPreset(const char* id);
     CameraParams cameraParams() const;
-    uint64_t pickAt(float u, float v, Vec3f* hitPoint = nullptr);
+    CameraParams cameraParamsFor(const OrbitCamera& c) const;
+    uint64_t pickAt(float u, float v, Vec3f* hitPoint = nullptr, Vec3f* hitNormal = nullptr);
+    /// Seçili ışığı, yansıması tıklanan noktada görünecek yere taşır (Maverick/KeyShot "highlight").
+    void placeHighlight(const Vec3f& point, const Vec3f& normal);
+    /// Kamerayı yatay bakışa getirir, konuyu kadrajda tutmak için dikey lens kaydırması uygular.
+    void applyTwoPointPerspective();
+    void drawCompositionGuides(const ImVec2& origin, const ImVec2& size);
+    /// Gerçek zamanlı modun girdileri: ortam/LUT önbellekten, ışıklar ve zemin her kare.
+    void prepareRealtime(const AABB& sceneBounds);
     void saveProjectAs();
+    void savePackageAs();
     void saveProject();
     void openProjectDialog();
     bool openProject(const std::string& path);
@@ -183,6 +204,16 @@ public:
     // ── final_render.cpp ──
     void startFinalRender();
     void startTurntable();
+    // Kamera animasyonu (animation.cpp)
+    void drawTimeline(const ImVec2& origin, const ImVec2& size);
+    void tickAnimation(float dt);
+    void applyTrackTime(float t);
+    void startAnimationRender();
+    bool m_animSmokeStarted = false; ///< --ui animrender denemesi başladı mı
+    LiveLinkServer m_liveLink;
+    std::unordered_map<std::string, uint64_t> m_liveNodes; ///< "kaynak|ad" → canlı güncellenen düğüm
+    int m_liveUpdates = 0; ///< yerinde güncelleme sayısı (--ui livelink denemesi bekler)
+    void buildTrackFromSavedCameras();
     void cancelFinalRender();
     void joinFinalRender();
 

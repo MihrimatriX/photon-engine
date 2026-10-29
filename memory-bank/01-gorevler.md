@@ -301,10 +301,10 @@ Nasıl okunur:
 
 ## Faz 8 — Rasterizasyon izi (2–3 hafta)
 
-- [ ] **F8.1** Split-sum IBL: ön filtrelenmiş GGX küp haritası, irradiance, BRDF LUT. **[SEN]** BRDF LUT integrali.
-- [ ] **F8.2** PCF'li gölge haritası, MSAA, tam çözünürlük.
-- [ ] **F8.3** Doku, emisyon ve cam yaklaşımı; seçim konturu; backface tutarlılığı; path tracer ile aynı ton eşleme. `[ui-13]`
-- [ ] **F8.4** Equirect→küp dönüşümü bilinear; ışıklar gerçek değerleriyle.
+- [x] **F8.1** Split-sum IBL — yalın sürüm: equirect mip zinciri + Karis analitik env-BRDF, difüz SH9 (2026-10-29). Kalan: ön filtrelenmiş GGX küp + BRDF LUT integrali (**[SEN]**).
+- [x] **F8.2** Gölge haritası: 2×2 atlas, 4 ışık, PCSS (engelleyici araması + Vogel diski), 4× MSAA.
+- [x] **F8.3** Doku (albedo sRGB, ORM, normal — kotanjant çerçevesi), emisyon, cam (kısmi gölge, Fresnel bindirme, kırılan ortam), seçim kenar ışığı, iki yüzlü gölgelendirme, path tracer ile aynı ton eşleme (64³ LUT).
+- [x] **F8.4** Ortam aynı `EnvironmentLight`'tan pişiriliyor (küp yerine equirect); ışıklar gerçek değerleriyle (Kelvin, I, L·A, E); HDRI güneşi ayıklama.
 - [ ] **F8.5** GL kaynak ömürleri: küçük resimler yeniden kurulurken eski texture ID'leri.
 - [ ] **F8.6** Raster→path-trace geçişindeki sıçrama kalkar.
 - **Öğrenme:** LearnOpenGL (PBR, IBL, shadow mapping), *Real-Time Rendering* 4. baskı, Cem Yüksel dersleri.

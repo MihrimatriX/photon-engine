@@ -1,6 +1,7 @@
 // model_import.cpp — OBJ (tinyobjloader), glTF (cgltf), FBX (ufbx) ve Alembic yükleyicilerini
 // sahne ağacına bağlar.
 #include "scene/model_import.h"
+#include "scene/dcc_convert.h"
 #include "io/alembic_loader.h"
 #include "io/fbx_loader.h"
 #include "io/gltf_loader.h"
@@ -58,11 +59,13 @@ std::unique_ptr<SceneNode> toSceneNode(const ImportedNode& in, const ImportedMod
 
 bool isSupportedModelFile(const std::string& path) {
     const std::string e = lowerExtension(path);
-    return e == ".obj" || e == ".gltf" || e == ".glb" || e == ".fbx" || (e == ".abc" && alembicAvailable());
+    return e == ".obj" || e == ".gltf" || e == ".glb" || e == ".fbx" || (e == ".abc" && alembicAvailable()) ||
+           isDccNativeFile(path);
 }
 
 std::string supportedModelPatterns() {
-    return alembicAvailable() ? "*.fbx;*.obj;*.gltf;*.glb;*.abc" : "*.fbx;*.obj;*.gltf;*.glb";
+    return alembicAvailable() ? "*.fbx;*.obj;*.gltf;*.glb;*.abc;*.max;*.ma;*.mb;*.blend"
+                              : "*.fbx;*.obj;*.gltf;*.glb;*.max;*.ma;*.mb;*.blend";
 }
 
 namespace {
@@ -155,6 +158,22 @@ void transformImportExtras(ImportExtras& extras, const Transform& toWorld) {
 std::unique_ptr<SceneNode> importModelFile(const std::string& path, std::string* error,
                                            const ModelImportOptions& options, std::vector<std::string>* warnings,
                                            ImportExtras* extras) {
+    if (isDccNativeFile(path)) {
+        // 3ds Max / Maya / Blender dosyası: kurulu DCC arka planda FBX'e çevirir (önbellekli).
+        // Kaynak yol özgün dosya kalır: proje yeniden açılınca önbellekten, kaynak değiştiyse yeniden çevrilir.
+        std::string err;
+        const std::string fbx = convertDccToFbx(path, &err);
+        if (fbx.empty()) {
+            if (error) *error = err;
+            return nullptr;
+        }
+        auto group = importModelFile(fbx, error, options, warnings, extras);
+        if (group) {
+            group->sourcePath = path;
+            group->name = pathToUtf8(pathFromUtf8(path).stem());
+        }
+        return group;
+    }
     const std::string ext = lowerExtension(path);
     std::error_code ec;
     if (!std::filesystem::exists(pathFromUtf8(path), ec)) {

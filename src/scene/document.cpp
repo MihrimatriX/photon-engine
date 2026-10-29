@@ -5,6 +5,7 @@
 #include "lights/point_light.h"
 #include "lights/spot_light.h"
 #include "core/image/image_io.h"
+#include "core/image/imager.h"
 #include "core/math/constants.h"
 #include "core/platform/path.h"
 #include "geometry/mesh.h"
@@ -34,6 +35,28 @@ Vec3f sphericalDir(float azimuthDeg, float elevationDeg) {
 
 Vec3f sphericalDirection(float azimuthDeg, float elevationDeg) { return sphericalDir(azimuthDeg, elevationDeg); }
 
+Vec3f placeLightForHighlight(LightDesc& d, const Vec3f& eye, const Vec3f& point, const Vec3f& normal,
+                             float fallbackDistance) {
+    const Vec3f v = (point - eye).normalized();
+    Vec3f n = normal.normalized();
+    if (n.dot(v) > 0.0f) n = -n; // bakana dönük yüz
+    const Vec3f r = (v - n * (2.0f * v.dot(n))).normalized();
+    if (d.type == LightDesc::Type::Directional) {
+        d.elevationDeg = std::clamp(std::asin(std::clamp(r.y, -1.0f, 1.0f)) * RAD_TO_DEG, 1.0f, 90.0f);
+        d.azimuthDeg = std::atan2(r.z, r.x) * RAD_TO_DEG;
+    } else {
+        float dist = (d.position - point).length();
+        if (!(dist > 1e-3f)) dist = std::max(1e-3f, fallbackDistance);
+        d.position = point + r * dist;
+        d.target = point;
+    }
+    return r;
+}
+
+Color3f lightEmission(const LightDesc& d) {
+    return (d.temperatureK > 0.0f ? temperatureColor(d.temperatureK) : d.color) * d.intensity;
+}
+
 Vec3f directionalTravelDir(const LightDesc& d) {
     return -sphericalDir(d.azimuthDeg, d.elevationDeg);
 }
@@ -44,7 +67,7 @@ std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& de
     std::vector<std::shared_ptr<Light>> out;
     for (const LightDesc& d : descs) {
         if (!d.enabled || d.intensity <= 0.0f) continue;
-        const Color3f L = d.color * d.intensity;
+        const Color3f L = lightEmission(d);
         switch (d.type) {
             case LightDesc::Type::Area: {
                 Vec3f n = d.target - d.position;

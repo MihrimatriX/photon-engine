@@ -3,6 +3,16 @@
 Her kaynak dosyanın başındaki açıklama yorumundan üretildi (`scripts/gen_file_reference.sh`).
 Ayrıntı için dosyanın kendisine bakın.
 
+### `src/app/animation.cpp`
+
+animation.cpp — Kamera animasyonu: zaman çizelgesi, oynatma ve kare dizisi render'ı.
+
+Zaman çizelgesi viewport'un altında yüzen bir şerittir (Marmoset/D5 gibi): iz seçimi,
+oynat/duraklat, döngü, anahtar ekle/sil, kayıtlı kameralardan tur oluşturma ve animasyonu
+render etme. Şeritte sürüklemek zamanı değiştirir ve kamerayı o ana getirir; oynatırken
+viewport etkileşimli modda (düşük çözünürlük + anlık gürültü giderme) izler, durunca temizlenir.
+Render, her kare için Final modlu bir RenderSession ile PNG dizisi yazar (turntable ile aynı yol).
+
 ### `src/app/app_state.h`
 
 app_state.h — Uygulamanın tüm durumu: belge (sahne, ışıklar, ortam), görünüm
@@ -29,6 +39,14 @@ Uygulama tek bir sınıf, ama kodu sorumluluklarına göre birkaç dosyaya böl�
   ui_*.cpp          paneller: menü, kütüphane, viewport, sahne, özellikler, render
 Hepsi aynı AppState'i paylaşır; paneller yalnız UI thread'inde çalışır.
 
+### `src/app/camera_keys.h`
+
+camera_keys.h — Kamera animasyonu anahtarı ↔ yörünge kamerası dönüşümü.
+
+Uygulama kamerayı yörünge (hedef, yarıçap, θ, φ) olarak tutar; anahtar kareler göz ve hedef
+noktası olarak saklanır (DCC kameraları da böyle gelir). Dönüşüm kayıpsızdır; yuvarlanma (roll)
+yoktur, yukarı her zaman +Y.
+
 ### `src/app/final_render.cpp`
 
 final_render.cpp — Dosyaya son render ve turntable (360° kare dizisi).
@@ -39,6 +57,33 @@ Son render, viewport'tan bağımsız bir iş parçacığında, malzemeleri kopya
 gitsin. Örnek sayısı ya da süre sınırına ulaşınca OIDN (yüksek kalite) ile
 gürültü giderilir ve seçilen biçimde kaydedilir. Render, CLI ile aynı yoldan geçer:
 seçilen RenderDevice üzerinde Final modlu bir RenderSession.
+
+### `src/app/live_link.cpp`
+
+live_link.cpp — Yerel TCP sunucusu (Winsock / POSIX soketleri) ve istek doğrulama.
+
+### `src/app/live_link.h`
+
+live_link.h — Canlı bağlantı: 3ds Max, Maya ve Blender'dan tek tıkla gönderme.
+
+DCC betikleri (integrations/) sahneyi FBX olarak dışa aktarır ve dosya yolunu bu sunucuya
+gönderir; uygulama içe aktarır. Aynı kaynaktan aynı ad yeniden gelirse model yerinde güncellenir
+(kullanıcının atadığı malzemeler ve taşıma korunur), KeyShot LiveLinking gibi.
+
+Protokol (satır tabanlı JSON, bağlantı başına bir istek):
+  istemci → {"token": "...", "cmd": "import", "path": "C:/.../sahne.fbx",
+             "source": "3dsmax", "name": "Araba", "replace": true}\n
+  sunucu  → {"ok": true}\n   ya da   {"ok": false, "error": "..."}\n
+  "cmd": "ping" → {"ok": true, "app": "PhotonEngine", "version": "..."}
+
+Güvenlik:
+  - yalnız 127.0.0.1 dinlenir (ağdan erişilemez; Windows güvenlik duvarı uyarısı da çıkmaz);
+  - her açılışta rastgele 128 bit jeton üretilir ve kullanıcı veri klasöründeki livelink.json'a
+    (yalnız sahibi okuyabilir) port ile birlikte yazılır; DCC betikleri aynı kullanıcı olarak
+    çalıştığı için okur, başka kullanıcılar okuyamaz. Jeton sabit sürede karşılaştırılır;
+  - ilk satır JSON değilse bağlantı kapatılır: tarayıcıdan localhost'a gönderilen HTTP istekleri
+    ("POST / HTTP/1.1") hiçbir şey yaptıramaz;
+  - yalnız var olan, desteklenen uzantılı dosyalar kabul edilir; istek boyutu 64 KB ile sınırlı.
 
 ### `src/app/main_app.cpp`
 
@@ -70,15 +115,31 @@ ve viewport ışın izlenmiş görüntüyle çalışmaya devam eder.
 Bindirme (overlay): şeffaf zemin, yüzeyler yalnız derinliğe yazılır (renk maskesi
 kapalı), sonra görünür kenarlar. Çıktı ışın izlenmiş görüntünün üstüne konur.
 
+Gerçek zamanlı mod (renderRealtime):
+  1. Gölge haritası: ana ışığın gözünden derinlik (2048², eğim ofsetli).
+  2. Arka plan: ortam haritası (ya da düz renk), tam ekran üçgen.
+  3. Opak yüzeyler: forward PBR; her piksel ton eşlenip sRGB yazılır (MSAA çözümü sonrası
+     kenarlar ekran uzayında yumuşar).
+  4. Zemin: aynı gölgelendirici + temas gölgesi; gölge yakalayıcıda yalnız karartma.
+  5. Cam: arkadan öne sıralı, iki geçiş — çarpımsal geçirgenlik (renkli cam), sonra Fresnel
+     ağırlıklı yansıma (harmanlama; ekran değerlerini toplamak sRGB'de sütümsü sonuç verirdi).
+     Kırılma yok. Camlar ayrı bir derinlik atlasına da yazılır: gölgeleri kısmidir (ışın
+     izleyicide ışığın bir kısmı geçer, kostik olur; opak gölge fazla, hiç gölge az olurdu).
+
 ### `src/app/raster_view.h`
 
-raster_view.h — Viewport'un GPU (OpenGL 3.3) görüntü modları: Katı, Tel kafes,
-Normaller ve ışın izlenmiş görüntünün üstüne bindirilen tel kafes.
+raster_view.h — Viewport'un GPU (OpenGL 3.3) görüntü modları: Gerçek zamanlı (PBR), Katı,
+Tel kafes, Normaller ve ışın izlenmiş görüntünün üstüne bindirilen tel kafes.
 
 Işın izleyici ürünün "son" görüntüsünü verir ama büyük modelde yavaştır; bu modlar
 geometriyi her karede rasterleştirerek modelleme/yerleştirme sırasında anında
 geri bildirim verir (KeyShot'ın "geometri görünümü", Blender'ın "solid" modu).
 Çıktı ekran dışı bir dokuya (FBO, 4× MSAA) çizilir; viewport onu resim olarak koyar.
+
+Gerçek zamanlı mod oyun motoru gibi çalışır (forward PBR, saniyede onlarca kare): GGX
+metal/pürüzlülük, aynı ışıklar (Kelvin, IES hariç koni), tek gölge haritalı ana ışık (PCF),
+ortamdan SH9 difüz + mip zincirinden parlak yansıma, zemin ve temas gölgesi, dokular, cam.
+Girdiler ışın izleyiciyle aynı kaynaktan hazırlanır (scene/realtime_scene.h).
 
 ### `src/app/render_controller.cpp`
 
@@ -355,6 +416,24 @@ Path tracer fiziksel radyans üretir: güneşli bir pencere 1000, gölge 0.01 ol
 Ekran yalnız 0..1 gösterebildiği için bir "ton eşleme" eğrisi gerekir.
 Sıra: pozlama (EV, 2^EV ile çarpım) → eğri → sRGB kodlama (OETF) → 8 bit.
 
+### `src/core/io/zip.cpp`
+
+zip.cpp — ZIP yerel/merkezi başlıkları, CRC-32, stb zlib ile DEFLATE.
+
+### `src/core/io/zip.h`
+
+zip.h — Küçük ZIP okuyucu/yazıcı (.photonpack paketleri için).
+
+Biçim: PKWARE APPNOTE'un temel alt kümesi. Yöntem 0 (saklama) ve 8 (DEFLATE), UTF-8 adlar
+(bayrak bit 11), Zip64 yok: arşiv < 4 GB, < 65535 girdi. Sıkıştırma ve açma stb'nin zlib
+kodlarıyla yapılır (stb_image_write / stb_image; projede zaten derleniyor).
+
+Okuyucu güvenilmeyen dosyaya karşı yazılmıştır (paketler başkasından gelebilir):
+  - girdi adları denetlenir: mutlak yol, sürücü harfi, ters bölü, ".." bileşeni, denetim
+    karakteri reddedilir ("zip slip": paket dışındaki bir dosyanın üzerine yazılması);
+  - CRC-32 ve açılmış boyut doğrulanır; şifreli girdi ve bilinmeyen yöntem reddedilir;
+  - boyut sınırları (girdi başına ve toplam) bellek tüketme saldırısını sınırlar.
+
 ### `src/core/math/aabb.h`
 
 aabb.h — Eksen hizalı sınırlayıcı kutu (AABB).
@@ -467,6 +546,19 @@ path.cpp — Çalışan exe'nin klasörü ve assets/ kökünün bulunması (uygu
 path.h — UTF-8 string ↔ std::filesystem::path dönüşümü.
 Windows'ta std::string'den path kurmak ANSI kod sayfasıyla çözer ve Türkçe karakterli
 yolları ("Masaüstü/şişe.obj") bozar; u8string üzerinden geçmek bunu engeller.
+
+### `src/core/platform/process.cpp`
+
+process.cpp — runProcess: POSIX (fork/execvp, poll) ve Windows (CreateProcessW, okuma thread'i).
+
+### `src/core/platform/process.h`
+
+process.h — Harici programı çalıştırma (DCC dönüştürücüleri: blender, mayapy, 3dsmaxbatch).
+
+Kabuk kullanılmaz: argümanlar ayrı ayrı verilir (POSIX: fork + execvp; Windows: CreateProcessW
+ve CommandLineToArgvW kurallarıyla tırnaklanmış komut satırı). Dosya adlarındaki boşluk, tırnak,
+noktalı virgül komut enjeksiyonuna yol açamaz. stdout ve stderr birlikte toplanır; süre aşılırsa
+süreç sonlandırılır.
 
 ### `src/core/random/rng.h`
 
@@ -925,6 +1017,7 @@ armatürün açısal dağılımını verir. Koni 180° ise yalnız IES dağılı
 main.cpp — photon_render: arayüzsüz (komut satırı) renderer ve ölçüm aracı.
 
   photon_render sahne.photon  [--out render.png] [--spp 256] [--res 1920x1080]
+  photon_render sahne.photonpack [...]          (kendi kendine yeten paket)
   photon_render model.obj     [...]               (stüdyo ışığı + otomatik kadraj)
   photon_render --cornell     [...]
 Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json,
@@ -1070,11 +1163,53 @@ stratified_sampler.h — Tabakalı (jittered) örnekleyici: alanı nx × ny hüc
 hücreye bir örnek düşürür. Örnek sayısı nx·ny ile sabittir; sayı önceden bilinmeyen
 ilerlemeli render'da Owen-karıştırmalı Sobol daha uygundur.
 
+### `src/scene/camera_animation.cpp`
+
+camera_animation.cpp — Hermite ara değerleme ve JSON.
+
+### `src/scene/camera_animation.h`
+
+camera_animation.h — Kamera animasyonu: zamana bağlı anahtar kareler ve ara değerleme.
+
+Bir iz (track), kameranın göz noktası, baktığı nokta, görüş açısı ve odak değerlerini
+anahtar karelerde tutar. Aradaki kareler zamana göre parametrelenmiş kübik Hermite eğrisiyle
+bulunur. Teğetler Catmull-Rom kuralıyla komşu anahtarlardan gelir:
+  m_i = (p_{i+1} − p_{i−1}) / (t_{i+1} − t_{i−1})
+Bu, düzensiz aralıklı anahtarlarda bile hızı sürekli (C¹) tutar; ilk ve son anahtarda teğet
+sıfırdır, yani hareket yumuşak başlar ve yumuşak durur ("ease in/out"). Doğrusal mod da var
+(mimari yürüyüşlerde sabit hız için).
+
+Kaynaklar: uygulamada kullanıcının eklediği anahtarlar, kayıtlı kameralardan üretilen tur ve
+FBX'ten gelen kamera animasyonu (her kare örneklenir). Proje ve paket dosyasında saklanır.
+
 ### `src/scene/cornell_box.h`
 
 cornell_box.h — Klasik Cornell kutusu test sahnesini SceneGraph'a kuran yardımcılar.
 555 birimlik kutu: kırmızı/yeşil yan duvarlar renk taşmasını (color bleeding), cam küre
 kırılma ve kostikleri, altın küre metal BRDF'i, ayna kutu yansımaları sınar.
+
+### `src/scene/dcc_convert.cpp`
+
+dcc_convert.cpp — DCC araçlarını bulma, dışa aktarma betikleri ve önbellek.
+
+### `src/scene/dcc_convert.h`
+
+dcc_convert.h — 3ds Max (.max), Maya (.ma/.mb) ve Blender (.blend) dosyalarını doğrudan açma.
+
+Bu biçimler ya kapalıdır (.max, .mb: yalnız Autodesk'in kendi yazılımı okuyabilir) ya da
+uygulamanın iç veri yapısıdır (.blend). Güvenilir tek yol, dosyayı yazan uygulamanın kendisidir:
+makinede kuruluysa onun komut satırı aracı arka planda (pencere açmadan) dosyayı açar ve FBX'e
+aktarır; PhotonEngine o FBX'i okur. Kullanıcı açısından sonuç "doğrudan açmak"tır:
+  Blender  : blender -b dosya.blend --factory-startup --python betik.py -- çıktı.fbx
+  Maya     : mayapy betik.py dosya.ma çıktı.fbx
+  3ds Max  : 3dsmaxbatch betik.ms -sceneFile dosya.max -mxsString out:çıktı.fbx
+Dışa aktarma ayarları DCC eklentileriyle aynıdır (dokular gömülü, kameralar, ışıklar, pişirilmiş
+animasyon, Y yukarı). Sonuç kullanıcı veri klasöründeki dcc_cache'te tutulur (yol + boyut +
+değişme zamanı karması): aynı dosya ikinci kez açılınca DCC yeniden çalıştırılmaz.
+
+Araç yeri: önce ortam değişkeni (PHOTON_BLENDER, PHOTON_MAYAPY, PHOTON_3DSMAXBATCH), sonra
+standart kurulum klasörlerinin en yeni sürümü (Windows: Program Files; macOS: /Applications;
+Linux: PATH ve /usr/autodesk).
 
 ### `src/scene/document.cpp`
 
@@ -1101,6 +1236,21 @@ Her JSON dosyası bir "preset"tir: ad, kategori, tür (genel/cam) ve fiziksel
 parametreler. Kütüphane panelinde küçük resimleriyle listelenir; bir parçaya
 sürüklenince createMaterial() ile gerçek bir Material nesnesine dönüşür.
 
+### `src/scene/mesh_binary.cpp`
+
+mesh_binary.cpp — .mesh kodlama/çözme.
+
+### `src/scene/mesh_binary.h`
+
+mesh_binary.h — Üçgen mesh'in ikili biçimi (.mesh, .photonpack içinde).
+
+JSON'a sayı dizisi olarak gömmek büyük modelde dosyayı on kat şişirir ve okuması yavaştır; paket
+geometriyi bu küçük ikili biçimde taşır (DEFLATE ile ayrıca sıkıştırılır):
+  "PHMESH01" | u32 köşe | u32 indeks | u32 bayrak (1 normal, 2 UV) | u32 0
+  | f32 konum[3·köşe] | f32 normal[3·köşe]? | f32 uv[2·köşe]? | u32 indeks[indeks]
+Bayt sırası küçük-sonlu (x86, ARM). Okuyucu güvenilmeyen veriye karşı denetler: boyut tutarlı,
+indeksler sınır içinde, konumlar sonlu.
+
 ### `src/scene/model_import.cpp`
 
 model_import.cpp — OBJ (tinyobjloader), glTF (cgltf), FBX (ufbx) ve Alembic yükleyicilerini
@@ -1110,6 +1260,30 @@ sahne ağacına bağlar.
 
 model_import.h — Model dosyasını (OBJ, glTF, FBX, Alembic) sahne ağacına bir grup düğümü
 olarak yükleme.
+
+### `src/scene/package.cpp`
+
+package.cpp — .photonpack yazma ve açma.
+
+### `src/scene/package.h`
+
+package.h — PhotonEngine'in kendi kendine yeten proje paketi (.photonpack).
+
+.photon proje dosyası JSON'dur ve dokuları, HDRI'ları, IES profillerini ve içe aktarılan model
+dosyalarını yolla gösterir: başka bir makineye taşınınca kopyalanmayan her dosya kaybolur.
+Paket tek bir ZIP dosyasında her şeyi taşır (KeyShot .ksp, Marmoset .tbscene gibi):
+
+  project.photon        proje (JSON); yollar paket içi adlar
+  geometry/N.mesh       her mesh ikili (mesh_binary.h); paylaşılan geometri bir kez
+  assets/K_ad.uzantı    dokular, HDRI, IES (aynı dosya bir kez)
+
+Paketteki geometri kaynak modelden (FBX, OBJ, Alembic) bağımsızdır: paket o dosyalar ve
+içe aktarıcının sürümü olmadan da aynı sahneyi açar. Kamera animasyonları, ışıklar, ortam ve
+render ayarları proje JSON'undadır.
+
+Açma: paket kullanıcı veri klasöründeki önbelleğe (packages/<karma>) çıkarılır ve oradan
+yüklenir; aynı paket ikinci kez açılınca yeniden çıkarılmaz. Okuma güvenilmeyen dosyaya
+karşı denetlidir (zip.h: güvensiz yol, CRC, boyut sınırları).
 
 ### `src/scene/primitives.cpp`
 
@@ -1137,6 +1311,7 @@ project_io.cpp — Proje dosyasının JSON şeması ve okuma/yazma kodu.
     "camera": {...}, "render": {...},            // uygulamanın kendi alanları
     "environment": { "hdr", "rotation", "intensity", "background", "ground", ... },
     "lights": [ { "type", "color", "intensity", "position", ... } ],
+    "animation": { "cameraTracks": [ { "name", "fps", "smooth", "keys": [...] } ] },
     "materials": [ { "type": "disney"|"glass"|"lambert"|"mirror", ... } ],
     "nodes": [ { "name", "type", "visible", "xf": [16], "material": i,
                  "source": "model.obj", "sourceIndex": k, "geometry": {...},
@@ -1151,6 +1326,33 @@ Proje, sahnenin tam halini saklar: düğüm ağacı (dönüşüm, görünürlük
 içe aktarılan modellerin kaynak yolları, yerinde oluşturulmuş geometri, ışıklar,
 ortam ve uygulamanın kendi kamera/render ayarları (opak JSON olarak).
 Yollar mümkünse proje dosyasına göre göreli yazılır; böylece klasör taşınabilir.
+
+### `src/scene/realtime_scene.cpp`
+
+realtime_scene.cpp — Gerçek zamanlı modun ortam pişirmesi, SH9, ışık listesi, gölge izdüşümü
+ve ton eşleme LUT'u.
+
+### `src/scene/realtime_scene.h`
+
+realtime_scene.h — Gerçek zamanlı (oyun motoru tarzı) viewport modunun CPU tarafı.
+
+Gerçek zamanlı mod ışın izlemez: geometriyi GPU'da rasterleştirir, her pikseli bir kez
+gölgelendirir (forward PBR). Işın izleyiciyle aynı sahneyi göstermesi için girdileri aynı
+kaynaktan alır; bu dosyadaki hazırlık GL'den bağımsızdır ve testlerle doğrulanır:
+  - Ortam: aynı EnvironmentLight'tan (HDRI, prosedürel stüdyo, fiziksel gök; döndürme ve
+    yoğunluk dahil) dünya yönlerinde equirect olarak pişirilir. Güneş diski haritaya girmez,
+    ayrı ve gölgeli bir yönlü ışık olur (0.5°'lik disk mip zincirinde bulanık bir lekeye dönerdi).
+    Güneşi görüntünün içinde olan HDRI'lerde (açık gök) güneş lekesi ayıklanır ve aynı şekilde
+    gölgeli yönlü ışık olur (ışın izleyici onu önem örneklemesiyle bulup keskin gölge düşürür).
+    Zemin açıksa alt yarıküre zeminin kendisiyle değiştirilir (aydınlanmış zemin rengi): krom
+    yansımalarında ve alttan gelen dolaylı ışıkta ışın izleyicideki gibi zemin görünür.
+  - Difüz ortam ışığı: ışınım (irradiance) 9 katsayılı küresel harmoniklerle (Ramamoorthi &
+    Hanrahan 2001). Parlak/pürüzlü yansımalar haritanın mip zincirinden, "split-sum" (Karis 2013).
+  - Işıklar: LightDesc'lerin GPU listesi, aynı radyometrik anlam (nokta/spot: şiddet, alan:
+    radyans × alan, yönlü: ışınım) ve Kelvin rengi. Sahneye en çok ışık veren en çok 4 ışık
+    gölge haritası alır (stüdyonun ana, dolgu ve kontur softbox'larının hepsi gölge düşürür).
+  - Ton eşleme: viewport'un operatörü (AgX, ACES, PBR Neutral…) 3B LUT'a pişirilir; GPU aynı
+    eğriyi birebir uygular (shader'da yeniden yazılan eğri zamanla ayrışırdı).
 
 ### `src/scene/scene_graph.cpp`
 

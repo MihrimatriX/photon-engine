@@ -105,10 +105,13 @@ void Application::loadPrefs() {
             p.zUp = ip->value("zUp", p.zUp);
             p.alembicFps = std::clamp(ip->value("alembicFps", p.alembicFps), 1.0f, 1000.0f);
             p.dontAsk = ip->value("dontAsk", p.dontAsk);
+            p.importLights = ip->value("lights", p.importLights);
+            p.importCameras = ip->value("cameras", p.importCameras);
         }
         for (const auto& r : j.value("recent", nlohmann::json::array()))
             if (r.is_string()) m_s.recentFiles.push_back(r.get<std::string>());
         m_s.output.device = j.value("renderDevice", m_s.output.device);
+        m_s.liveLinkEnabled = j.value("liveLink", m_s.liveLinkEnabled);
     } catch (const nlohmann::json::exception&) {
         // yanlış türde alan: o ana kadar okunanlar kalır
     }
@@ -117,9 +120,11 @@ void Application::loadPrefs() {
 void Application::savePrefs() {
     const AppState::ImportPrefs& p = m_s.importPrefs;
     nlohmann::json j;
-    j["import"] = {{"unit", p.unit}, {"zUp", p.zUp}, {"alembicFps", p.alembicFps}, {"dontAsk", p.dontAsk}};
+    j["import"] = {{"unit", p.unit}, {"zUp", p.zUp}, {"alembicFps", p.alembicFps}, {"dontAsk", p.dontAsk},
+                   {"lights", p.importLights}, {"cameras", p.importCameras}};
     j["recent"] = m_s.recentFiles;
     j["renderDevice"] = m_s.output.device; // makineye özgü: projeye değil tercihlere
+    j["liveLink"] = m_s.liveLinkEnabled;
     const fs::path file = pathFromUtf8(m_s.userDir) / "prefs.json";
     const fs::path tmp = fs::path(file).concat(".tmp");
     {
@@ -140,6 +145,7 @@ void Application::addRecent(const std::string& path) {
 }
 
 Application::~Application() {
+    m_liveLink.stop();
     cancelFinalRender();
     joinFinalRender();
     m_s.viewport.stop();
@@ -337,7 +343,7 @@ void Application::processDrops() {
                 m_s.thumbs.requestEnvironment("env:" + a.id, a.path, a.zenith, a.horizon);
             }
             applyEnvironment(a);
-        } else if (hasExt(fp, {".photon"})) {
+        } else if (hasExt(fp, {".photon", ".photonpack"})) {
             openProject(p);
         } else if (hasExt(fp, {".png", ".jpg", ".jpeg", ".tga", ".bmp"})) {
             if (std::find(m_s.textures.begin(), m_s.textures.end(), p) == m_s.textures.end()) m_s.textures.push_back(p);
@@ -379,12 +385,23 @@ void Application::handleShortcuts() {
     if (ctrl && pressed(ImGuiKey_G)) { shift ? ungroupSelection() : groupSelection(); }
     if (ctrl) return;
     if (pressed(ImGuiKey_H)) { io.KeyAlt ? showAllNodes() : toggleSelectionVisibility(); }
+    if (io.KeyAlt && pressed(ImGuiKey_T)) m_s.showTimeline = !m_s.showTimeline;
     if (io.KeyAlt) return; // Alt+F4 vb. tek tuş kısayollarını tetiklemesin
+    if (m_s.showTimeline && pressed(ImGuiKey_Space) && m_s.activeTrack >= 0) {
+        m_s.animPlaying = !m_s.animPlaying;
+        const CameraTrack& t = m_s.cameraTracks[static_cast<size_t>(m_s.activeTrack)];
+        if (m_s.animPlaying && m_s.animTime >= t.duration()) m_s.animTime = 0.0f;
+    }
     if (pressed(ImGuiKey_I)) isolateSelection();
     if (pressed(ImGuiKey_Z)) {
-        // Z: görüntü modları arasında döngü (GPU yoksa yalnız Render ↔ Kil).
-        const int count = m_rasterOk ? kViewModeCount : 2;
-        setViewMode(static_cast<ViewMode>((static_cast<int>(m_s.viewMode) + (shift ? count - 1 : 1)) % count));
+        // Z: görüntü modları arasında kViewModeOrder sırasıyla döngü (GPU yoksa yalnız Render ↔ Kil).
+        int pos = 0;
+        for (int i = 0; i < kViewModeCount; ++i)
+            if (kViewModeOrder[i] == m_s.viewMode) pos = i;
+        const int step = shift ? kViewModeCount - 1 : 1;
+        do pos = (pos + step) % kViewModeCount;
+        while (!m_rasterOk && isRasterMode(kViewModeOrder[pos]));
+        setViewMode(kViewModeOrder[pos]);
     }
     if (pressed(ImGuiKey_F2)) beginRename();
     // Tek tuşlu kısayollar yalnız viewport ya da sahne paneli üzerindeyken değil,
@@ -392,7 +409,10 @@ void Application::handleShortcuts() {
     if (pressed(ImGuiKey_F)) frameSelection();
     if (pressed(ImGuiKey_A) && shift) frameAll();
     if (pressed(ImGuiKey_Delete) || pressed(ImGuiKey_Backspace)) deleteSelection();
-    if (pressed(ImGuiKey_Escape)) clearSelection();
+    if (pressed(ImGuiKey_Escape)) {
+        if (m_s.pickHighlight || m_s.pickFocus) m_s.pickHighlight = m_s.pickFocus = false;
+        else clearSelection();
+    }
     if (pressed(ImGuiKey_Q)) m_s.gizmoOp = 0;
     if (pressed(ImGuiKey_W)) m_s.gizmoOp = 1;
     if (pressed(ImGuiKey_E)) m_s.gizmoOp = 2;
@@ -450,9 +470,11 @@ void Application::frame(float dt) {
         if (m_s.statusTimer <= 0.0f) m_s.statusText.clear();
     }
     if (m_s.camera.turntable) m_s.camera.tick(dt);
+    tickAnimation(dt);
 
     m_s.thumbs.uploadReady();
     processDrops();
+    processLiveLink();
     pollAsync();
     compileIfDirty();
 
@@ -499,6 +521,8 @@ int Application::run() {
     initImGui();
     loadAssets();
     m_s.viewport.start();
+    // Ekran görüntüsü modunda kapalı (testler port açmasın); --ui livelink bunu dener.
+    setLiveLink(m_s.liveLinkEnabled && (m_opts.screenshotPath.empty() || m_opts.uiState == "livelink"));
 
     if (!m_opts.openPath.empty()) {
         if (isSupportedModelFile(m_opts.openPath)) importModel(m_opts.openPath, false);
@@ -545,6 +569,38 @@ int Application::run() {
     else if (ui == "wire") { setViewMode(ViewMode::Wire); selectFirst(); }
     else if (ui == "normals") setViewMode(ViewMode::Normals);
     else if (ui == "clay") setViewMode(ViewMode::Clay);
+    else if (ui == "realtime") setViewMode(ViewMode::Realtime);
+    else if (ui == "textured" || ui == "realtime-tex") {
+        // Dokulu malzemeler (albedo + normal + pürüzlülük, kutu eşleme) ve gölge yakalayıcı zemin.
+        auto assign = [&](const char* node, const char* preset) {
+            const MaterialPreset* p = m_s.materials.findById(preset);
+            auto set = [](auto&& self, SceneNode& n, const std::shared_ptr<Material>& m) -> void {
+                n.material = m;
+                for (auto& c : n.children) self(self, *c, m);
+            };
+            for (auto& c : m_s.graph.root()->children)
+                if (p && c->name == node) set(set, *c, MaterialLibrary::createMaterial(*p));
+        };
+        assign("Kaide", "wood_table");
+        assign("Küp", "red_leather");
+        assign("Altın Küre", "metal_plate");
+        rebuildScene();
+        if (ui == "realtime-tex") setViewMode(ViewMode::Realtime);
+    }
+    else if (ui == "catcher" || ui == "realtime-catcher") {
+        // Gölge yakalayıcı zemin + düz beyaz arka plan (ürün fotoğrafı / web görseli).
+        m_s.environment.groundShadowOnly = true;
+        m_s.environment.background.mode = Background::Mode::Color;
+        m_s.environment.background.color = Color3f(0.9f);
+        rebuildScene();
+        if (ui == "realtime-catcher") setViewMode(ViewMode::Realtime);
+    }
+    else if (ui == "sun" || ui == "realtime-sun") {
+        // Güneşi HDRI'nin içinde olan açık gök: ışın izleyici ile gerçek zamanlı modun gölgeleri.
+        for (const auto& st : m_s.studios)
+            if (st.id == "outdoor_sun") applyStudio(st);
+        if (ui == "realtime-sun") setViewMode(ViewMode::Realtime);
+    }
     else if (ui == "overlay") m_s.wireOverlay = true;
     else if (ui == "shapes") {
         for (int k = 0; k < kPrimitiveCount; ++k) addPrimitive(static_cast<PrimitiveKind>(k));
@@ -561,6 +617,23 @@ int Application::run() {
     else if (ui == "env") { m_s.rightTab = 2; m_s.leftTab = 1; }
     else if (ui == "light") { selectLight(0); m_s.leftTab = 2; }
     else if (ui == "camera") { m_s.rightTab = 4; m_s.leftTab = 3; }
+    else if (ui == "protools") {
+        // Işık araçları: Kelvin (halojen), üçler kuralı, 4:5 çıktı kadrajı; parlama yerleştirme
+        // sahne derlenince döngüde yapılır (tıklama gibi pickAt üzerinden).
+        selectLight(0);
+        m_s.leftTab = 2;
+        m_s.lights[0].temperatureK = 3200.0f;
+        m_s.compositionGuide = 1;
+        m_s.showOutputFrame = true;
+        m_s.output.width = 1080;
+        m_s.output.height = 1350;
+    }
+    else if (ui == "twopoint") {
+        // Mimari çekim: yukarıdan bakan varsayılan kamera → yatay bakış + dikey lens kaydırma.
+        m_s.rightTab = 4;
+        applyTwoPointPerspective();
+        m_s.compositionGuide = 3;
+    }
     else if (ui == "image") m_s.rightTab = 5;
     else if (ui.rfind("import:", 0) == 0) {
         // İçe aktarma penceresi, bir modelin viewport'a bırakılmış hâli (imleç ortada).
@@ -592,8 +665,39 @@ int Application::run() {
             const float elapsed = std::chrono::duration<float>(now - started).count();
             const ViewportStats st = m_s.viewport.stats();
             const bool gpuView = isRasterMode(m_s.viewMode);
+            // Animasyon render denemesi (--ui animrender): içe aktarma bitip iz oluşunca küçük
+            // çözünürlükte başlar; ekran görüntüsü iş bitince alınır.
+            if (m_opts.uiState == "animrender" && !m_animSmokeStarted && m_jobs.empty() && m_s.activeTrack >= 0) {
+                m_s.output.width = 160;
+                m_s.output.height = 90;
+                m_s.output.turntableSpp = 4;
+                startAnimationRender();
+                m_animSmokeStarted = true;
+            }
+            if (m_opts.uiState == "protools" && !m_animSmokeStarted && frames > 5 && m_jobs.empty() && m_s.compiled) {
+                // Krom kürenin ekrandaki kapladığı alanı bul, sol üst çeyreğine "tıkla".
+                const SceneNode* chrome = nullptr;
+                for (const auto& c : m_s.graph.root()->children)
+                    if (c->name == "Krom Küre") chrome = c.get();
+                float su = 0, sv = 0, n = 0, minU = 1, minV = 1;
+                for (int y = 0; y < 60 && chrome; ++y)
+                    for (int x = 0; x < 80; ++x) {
+                        const float u = (x + 0.5f) / 80.0f, v = (y + 0.5f) / 60.0f;
+                        if (pickAt(u, v) != chrome->uid) continue;
+                        su += u, sv += v, n += 1, minU = std::min(minU, u), minV = std::min(minV, v);
+                    }
+                if (n > 0) {
+                    Vec3f p, nn;
+                    const float u = 0.5f * (su / n + minU), v = 0.5f * (sv / n + minV);
+                    if (pickAt(u, v, &p, &nn)) placeHighlight(p, nn);
+                }
+                m_animSmokeStarted = true;
+            }
+            const bool waitAnim = (m_opts.uiState == "animrender" && !m_animSmokeStarted) ||
+                                  (m_opts.uiState == "protools" && !m_animSmokeStarted) ||
+                                  (m_opts.uiState == "livelink" && m_liveUpdates < 1); // bir yerinde güncelleme bekle
             const bool ready = frames > 30 && !st.interactive && (gpuView || st.converged || st.spp >= m_opts.screenshotSpp) &&
-                               m_jobs.empty() && !m_s.thumbs.busy() && !m_s.finalJob.active.load();
+                               m_jobs.empty() && !m_s.thumbs.busy() && !m_s.finalJob.active.load() && !waitAnim;
             if (ready || elapsed > m_opts.screenshotTimeout) {
                 takeScreenshot(m_opts.screenshotPath);
                 glfwSwapBuffers(m_window);

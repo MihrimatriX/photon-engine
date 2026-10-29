@@ -7,6 +7,8 @@ add_executable(photon_app WIN32
     thumbnails.cpp
     scene_ops.cpp
     final_render.cpp
+    animation.cpp
+    live_link.cpp
     ui_common.cpp
     ui_layout.cpp
     ui_library.cpp
@@ -52,3 +54,8 @@ photon_copy_oidn_dlls(photon_app)
 
 # Hakkında penceresindeki sürüm; tek kaynak kök CMakeLists'teki project(VERSION).
 target_compile_definitions(photon_app PRIVATE PHOTON_VERSION="${PROJECT_VERSION}")
+
+# Canlı bağlantı soketleri (Windows: Winsock).
+if(WIN32)
+    target_link_libraries(photon_app PRIVATE ws2_32)
+endif()

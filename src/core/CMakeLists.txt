@@ -20,6 +20,7 @@ target_sources(photon_core PRIVATE
     threading/thread_pool.cpp
     memory/arena_allocator.cpp
     platform/path.cpp
+    platform/process.cpp
     io/zip.cpp
 )
 
