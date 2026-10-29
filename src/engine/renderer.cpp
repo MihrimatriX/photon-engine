@@ -207,81 +207,27 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
                        const std::atomic<bool>* cancel, RenderPassFilms* passes, AovFilms* aovsOut) {
     Film film(settings.width, settings.height);
     AovFilms localAovs;
-    AovFilms& aovs = aovsOut ? *aovsOut : localAovs;
-    const bool wantAovs = settings.denoiseEnabled || aovsOut != nullptr;
-    const bool wantPasses = passes != nullptr;
-    if (wantAovs) aovs.resize(settings.width, settings.height);
+    AovFilms* aovs = aovsOut ? aovsOut : (settings.denoiseEnabled ? &localAovs : nullptr);
+    if (aovs) aovs->resize(settings.width, settings.height);
     if (passes) passes->resize(settings.width, settings.height);
 
-    auto startTime = std::chrono::high_resolution_clock::now();
-
-    std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
-    PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
-    integrator.setClampIndirect(settings.clampIndirect);
-    const PixelFilterSampler filter(settings.filter);
-    std::unique_ptr<ThreadPool> ownedPool;
-    ThreadPool* pool = makePoolOverride(settings, ownedPool);
-
-    const int w = settings.width;
-    const int h = settings.height;
+    const auto startTime = std::chrono::high_resolution_clock::now();
     const int spp = std::max(1, settings.samplesPerPixel);
-
-    if (!settings.adaptiveSampling) {
-        parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-            const uint64_t tileSeed = 12345; // karo boyutundan bağımsız, deterministik
-            std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
-
-            for (int y = yBegin; y < yEnd; ++y) {
-                for (int x = xBegin; x < xEnd; ++x) {
-                    for (int s = 0; s < spp; ++s) {
-                        PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h, wantAovs,
-                                                    wantPasses);
-                        film.addSample(x, y, ps.L);
-                        if (wantAovs) addAovs(&aovs, x, y, ps);
-                        if (wantPasses) addPasses(passes, x, y, ps);
-                    }
-                }
-            }
-        }, settings.tileSize, pool, cancel);
-    } else {
-        // Uyarlamalı (gürültü eşiği): her piksel en az minAdaptiveSamples alır, sonra her 8
-        // örnekte bir göreli standart hatasına bakılır; eşiğin altına inen piksel durur. Bütçe
-        // böylece kenarlara, kostiklere ve gölgelere gider; düz fon erken biter.
-        const int minSpp = std::clamp(settings.minAdaptiveSamples, 2, spp);
-        const float threshold = std::max(1e-4f, settings.noiseThreshold);
-        std::atomic<uint64_t> taken{0};
-        parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-            std::unique_ptr<Sampler> tileSampler = baseSampler->clone(12345);
-            uint64_t local = 0;
-            for (int y = yBegin; y < yEnd; ++y) {
-                for (int x = xBegin; x < xEnd; ++x) {
-                    for (int s = 0; s < spp; ++s) {
-                        PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h, wantAovs,
-                                                    wantPasses);
-                        film.addSample(x, y, ps.L);
-                        if (wantAovs) addAovs(&aovs, x, y, ps);
-                        if (wantPasses) addPasses(passes, x, y, ps);
-                        ++local;
-                        if (s + 1 >= minSpp && ((s + 1) & 7) == 0 && film.relativeError(x, y) < threshold) break;
-                    }
-                }
-            }
-            taken.fetch_add(local, std::memory_order_relaxed);
-        }, settings.tileSize, pool, cancel);
-        std::cout << "Uyarlamalı: ortalama " << static_cast<double>(taken.load()) / (static_cast<double>(w) * h)
+    const SampleBatchResult r = renderSamples(scene, camera, settings, film, 0, spp, cancel, aovs, passes);
+    if (settings.adaptiveSampling)
+        std::cout << "Uyarlamalı: ortalama "
+                  << static_cast<double>(r.samplesTraced) / (static_cast<double>(settings.width) * settings.height)
                   << " örnek/piksel (hedef " << spp << ")" << std::endl;
-    }
 
     Image out = film.resolve();
     if (film.rejectedSamples() > 0) {
         std::cerr << "Rejected " << film.rejectedSamples() << " non-finite or negative samples." << std::endl;
     }
-    if (settings.denoiseEnabled && !(cancel && cancel->load())) {
-        denoiseWithAovs(out, wantAovs ? &aovs : nullptr);
-    }
+    if (settings.denoiseEnabled && r.completed) denoiseWithAovs(out, aovs);
 
     std::chrono::duration<double> elapsed = std::chrono::high_resolution_clock::now() - startTime;
-    std::cout << "Render " << w << "x" << h << " @ " << spp << " spp: " << elapsed.count() << " s" << std::endl;
+    std::cout << "Render " << settings.width << "x" << settings.height << " @ " << spp << " spp: " << elapsed.count()
+              << " s" << std::endl;
     return out;
 }
 
@@ -313,10 +259,17 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
     if (accum.width() != settings.width || accum.height() != settings.height) {
         accum.resize(settings.width, settings.height);
     }
+    return renderSamples(scene, camera, settings, accum, passIndex, 1, cancel, aovs, passes).completed;
+}
+
+SampleBatchResult Renderer::renderSamples(const Scene& scene, const Camera& camera, const RenderSettings& settings,
+                                          Film& accum, int firstSample, int count, const std::atomic<bool>* cancel,
+                                          AovFilms* aovs, RenderPassFilms* passes) {
+    SampleBatchResult result;
     // Çağıranlar RenderSettings'i eşzamanlı değiştirebilir; boyutlar filmden alınır.
     const int w = accum.width();
     const int h = accum.height();
-    if (w <= 0 || h <= 0) return true;
+    if (w <= 0 || h <= 0 || count <= 0) return result;
     if (aovs && (aovs->albedo.width() != w || aovs->albedo.height() != h)) aovs->resize(w, h);
     if (passes && (passes->depth.width() != w || passes->depth.height() != h)) passes->resize(w, h);
 
@@ -328,11 +281,14 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
     ThreadPool* pool = makePoolOverride(settings, ownedPool);
 
     // Uyarlamalı örnekleme: kendisi ve 3×3 komşuları gürültü eşiğinin altına inen piksel bu
-    // pass'i atlar (komşuluk: temiz bölgenin içinde gürültülü tek piksel kalmasın).
-    const bool adaptive = settings.adaptiveSampling && passIndex >= std::max(2, settings.minAdaptiveSamples);
+    // partiyi atlar (komşuluk: temiz bölgenin içinde gürültülü tek piksel kalmasın). Parti
+    // içinde de her piksel en az minAdaptiveSamples aldıktan sonra 8 örnekte bir kendi
+    // hatasına bakar; bütçe kenarlara, kostiklere ve gölgelere gider, düz fon erken biter.
+    const float threshold = std::max(1e-4f, settings.noiseThreshold);
+    const int minSpp = std::max(2, settings.minAdaptiveSamples);
+    const bool adaptive = settings.adaptiveSampling;
     std::vector<uint8_t> skipMask;
-    if (adaptive) {
-        const float threshold = std::max(1e-4f, settings.noiseThreshold);
+    if (adaptive && firstSample >= minSpp) {
         std::vector<uint8_t> clean(static_cast<size_t>(w) * static_cast<size_t>(h), 0);
         parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
             for (int y = yBegin; y < yEnd; ++y)
@@ -357,26 +313,37 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
 
     const bool wantAovs = aovs != nullptr;
     const bool wantPasses = passes != nullptr;
-    return parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-        // Sobol karıştırması pass'ler boyunca SABİT kalmalı; yoksa ardışık örnekler
+    const int lastSample = firstSample + count;
+    std::atomic<uint64_t> traced{0};
+    result.completed = parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
+        // Sobol karıştırması partiler boyunca SABİT kalmalı; yoksa ardışık örnekler
         // aynı dizinin devamı olmaz ve tabakalanma kaybolur. Piksel ayrışması içeride.
-        const uint64_t tileSeed = 12345;
+        const uint64_t tileSeed = 12345; // karo boyutundan bağımsız, deterministik
         std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
-
+        uint64_t local = 0;
         for (int y = yBegin; y < yEnd; ++y) {
             // Satır başında iptal kontrolü: büyük karolarda bile tepki ~ms.
-            if (cancel && cancel->load(std::memory_order_relaxed)) return;
+            if (cancel && cancel->load(std::memory_order_relaxed)) break;
             for (int x = xBegin; x < xEnd; ++x) {
-                if (adaptive && skipMask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)])
+                if (!skipMask.empty() && skipMask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)])
                     continue;
-                PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, passIndex, w, h,
-                                            wantAovs, wantPasses);
-                accum.addSample(x, y, ps.L);
-                if (wantAovs) addAovs(aovs, x, y, ps);
-                if (wantPasses) addPasses(passes, x, y, ps);
+                for (int s = firstSample; s < lastSample; ++s) {
+                    PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h,
+                                                wantAovs, wantPasses);
+                    accum.addSample(x, y, ps.L);
+                    if (wantAovs) addAovs(aovs, x, y, ps);
+                    if (wantPasses) addPasses(passes, x, y, ps);
+                    ++local;
+                    if (adaptive && s + 1 < lastSample && s + 1 >= minSpp && ((s + 1) & 7) == 0 &&
+                        accum.relativeError(x, y) < threshold)
+                        break;
+                }
             }
         }
+        traced.fetch_add(local, std::memory_order_relaxed);
     }, settings.tileSize, pool, cancel);
+    result.samplesTraced = traced.load();
+    return result;
 }
 
 } // namespace photon

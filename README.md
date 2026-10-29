@@ -90,6 +90,12 @@ grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazılm
   "bir daha sorma"), **imlecin altına bırakma** (model bırakılan yüzeye oturur), çoklu dosya
   bırakma, **son dosyalar** menüsü.
 
+**Cihazlar ve modlar**
+- Render iki eksende ayrılır: hangi cihazda (`RenderDevice`: bugün CPU; GPU arka uçları aynı
+  arayüze eklenecek) ve hangi modda (`RenderSession`: Etkileşimli viewport ya da Son render).
+  Viewport, son render, turntable ve CLI tek yoldan geçer. Makinedeki GPU'lar donanım bilgisiyle
+  listelenir (ör. GTX 1080: sm_61, RT çekirdeği yok). Ayrıntı: `docs/architecture.md` §2b.
+
 **Arayüz**
 - Kütüphane (malzeme / ortam / stüdyo / model / doku), sahne ağacı, özellikler (nesne, malzeme, ortam, ışıklar, kamera, görüntü).
 - Viewport: orbit/pan/zoom, tıkla-seç, çift tıkla pivot, ImGuizmo ile taşı/döndür/ölçekle, yön küpü, seçim çerçevesi.
@@ -156,7 +162,7 @@ build\release\photon_render.exe sahne.photon --res 1920x1080 --spp 256 --out ren
 `--no-denoise`, `--stats stats.json` (süre, Mörnek/sn), `--noise 0.02` (uyarlamalı örnekleme),
 `--min-spp N`, `--clamp 10` (dolaylı parlama sınırı), `--time 60` (süre sınırı),
 `--filter blackman-harris --filter-width 1.5` (piksel filtresi), `--passes` (çıktı `.exr` ise tüm
-render geçişleri tek dosyada). Model olarak `.obj`, `.gltf`, `.glb`, `.fbx`, `.abc` verilebilir.
+render geçişleri tek dosyada), `--device auto|cpu|cuda:0` ve `--list-devices` (render cihazları). Model olarak `.obj`, `.gltf`, `.glb`, `.fbx`, `.abc` verilebilir.
 Projedeki görüntüleyici ayarları PNG/JPEG çıktısına uygulanır.
 
 Görsel regresyon ve tanıtım sahneleri `bench/scenes/` altındadır (`scripts/gen_material_scenes.py`

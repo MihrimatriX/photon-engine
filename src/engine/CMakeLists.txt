@@ -1,6 +1,9 @@
 add_library(photon_engine STATIC
     scene.cpp
     renderer.cpp
+    render_device.cpp
+    render_session.cpp
+    gpu_probe.cpp
     denoiser.cpp
     embree_accel.cpp
 )
@@ -18,6 +21,8 @@ target_link_libraries(photon_engine PUBLIC
 
 target_include_directories(photon_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_compile_features(photon_engine PUBLIC cxx_std_20)
+# GPU sorgusu CUDA sürücüsünü çalışma zamanında yükler (dlopen); derlemede CUDA gerekmez.
+target_link_libraries(photon_engine PRIVATE ${CMAKE_DL_LIBS})
 
 if(PHOTON_OIDN_FOUND)
     target_compile_definitions(photon_engine PUBLIC PHOTON_ENABLE_OIDN)

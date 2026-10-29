@@ -109,6 +109,7 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - **Geçişler:** lob × doğrudan/dolaylı + emisyon/ortam + veri geçişleri, çok katmanlı EXR (CLI `--passes`, Render penceresi).
   - **Entegrasyon:** FBX (ufbx v0.23.1) ve Alembic 1.8.12 (+ Imath 3.2.3, CMake ≥ 3.29) içe aktarma; hiyerarşi/ad/instancing, birim/eksen, malzeme eşleme, gömülü doku önbelleği; içe aktarma penceresi, imlecin altına bırakma, son dosyalar.
   - Testler 133 → 157.
+  - **Cihaz/mod katmanı (F9.7, RTXPT incelemesinden sonra):** `RenderDevice` (CPU; GPU'lar CUDA sürücüsü dinamik yüklenerek listelenir, arka uç yok), `RenderSession` (Interactive / Final: parti boyu, hedef/süre/yakınsama, AOV/geçiş, denoise). Viewport, son render, turntable ve CLI tek yoldan; CLI `--device`, `--list-devices`; Render penceresinde Cihaz; `--ui finalrender` duman testi. RTXPT doğrudan alınmadı: NVIDIA RTX SDKs lisansı, Windows/D3D12, sürücü 595.71+ (GTX 1080'de çalışmaz). Testler → 165.
 - **Sıradaki adımlar:**
   - `docs/EKSIK_ANALIZI.md` öncelik 1: GPU (CUDA), path guiding (Open PGL), alfa kesikleri, doku belleği + mipmap, BLAS/TLAS, otomatik kayıt.
   - Windows/MSVC'de oturum 7 ve 8'in değişiklikleri derlenmedi (yalnız GCC 13). `/W4` uyarıları ve `std::complex` kullanımı kontrol edilmeli; OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli.

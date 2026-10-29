@@ -700,7 +700,8 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
     } else {
         if (st.targetSpp > 0) std::snprintf(line1, sizeof(line1), "%d / %d örnek", st.spp, st.targetSpp);
         else std::snprintf(line1, sizeof(line1), "%d örnek", st.spp);
-        std::snprintf(line2, sizeof(line2), "%s%s%s", ui::formatDuration(st.seconds).c_str(),
+        std::snprintf(line2, sizeof(line2), "%s%s%s%s%s", st.deviceKind.c_str(), st.deviceKind.empty() ? "" : "  •  ",
+                      ui::formatDuration(st.seconds).c_str(),
                       st.interactive ? "  •  hareket" : (st.denoised ? "  •  OIDN" : ""),
                       m_s.viewMode == ViewMode::Clay ? "  •  kil" : "");
     }

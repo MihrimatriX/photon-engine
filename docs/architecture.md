@@ -16,7 +16,7 @@ photon_app ──► photon_ui (tema, widget, orbit kamera, dosya diyaloğu) ─
      │                         ├──► embree4 (varsa)     └──► OIDN (varsa)
      │                         
      └──► imguizmo, glfw, OpenGL
-photon_render (CLI) ──► photon_scene
+photon_render (CLI) ──► photon_scene (render: RenderDevice + RenderSession, uygulamayla aynı yol)
 photon_tests ──► photon_engine, photon_scene, gtest
 ```
 
@@ -34,7 +34,8 @@ photon_tests ──► photon_engine, photon_scene, gtest
    ortam (HDRI + CDF), Embree/BVH
         │  setScene(shared_ptr<const Scene>) ──────► sıradaki pass yeni sahneyi alır
  her kare: setCamera / setDisplay ─────────────────► değiştiyse restart (birikim = 0)
-                                                    pass: parallelFor2D karoları
+                                                    RenderSession(Interactive).advance()
+                                                      → RenderDevice::render (CPU: karolar)
                                                       tracePixel → PathTracer::Li
                                                       Film += örnek, AOV += albedo/normal/alfa
                                                     etkileşimde: 1/2–1/8 çözünürlük + OIDN(fast)
@@ -54,6 +55,60 @@ Kurallar:
 - **İptal:** `parallelFor2D` bir `atomic<bool>` alır; karolar ve satırlar başlamadan önce kontrol eder.
 - **Son render** malzemeleri kopyalanmış (izole) ayrı bir sahneyle kendi iş parçacığında çalışır;
   viewport bu sırada duraklatılır.
+
+## 2b. Cihazlar ve modlar (engine/render_device, engine/render_session)
+
+Render iki eksende ayrılır. Hangi cihazda ("nerede") ve hangi modda ("nasıl") çalışacağı birbirinden
+bağımsızdır. Yol izleme çekirdeği (`PathTracer`) her ikisinde de aynıdır.
+
+```
+             viewport        son render / turntable        photon_render (CLI)
+                 │                     │                            │
+                 ▼                     ▼                            ▼
+          RenderSession(Interactive)   RenderSession(Final) ◄───────┘
+          1 örneklik pass'ler          hedef örnek / süre / yakınsama, büyüyen partiler
+                 └──────────────┬──────────────┘
+                                ▼
+                RenderDevice  ──  setScene() yalnız sahne değişince
+                    │             render(kamera, ayarlar, hedef filmler, örnek aralığı)
+     ┌──────────────┼───────────────────┬───────────────────────────┐
+     ▼              ▼                   ▼                           ▼
+ CpuDevice       CUDA (plan, Faz 9)   OptiX / Vulkan RT / DXR      (Realtime modu:
+ Renderer +      GTX 1080 sm_61:      RT çekirdekli kartlar         kare başına 1 örnek
+ Embree +        hesaplama, CWBVH     (Turing+)                     + zamansal yeniden
+ iş parçacıkları                                                    kullanım + RT denoise)
+```
+
+Katmanların görevleri:
+- **`RenderDevice`**: sahneyi yükler ve bir örnek aralığını hedef filmlere biriktirir.
+  - `features()` hangi çıktıları desteklediğini söyler. Yeni bir GPU arka ucu ilk günden her şeyi
+    desteklemeyebilir; oturum desteklenmeyen çıktıyı kapatır ve uyarır.
+  - `enumerateDevices()` CPU'yu ve CUDA sürücüsüyle bulunan GPU'ları listeler. Sürücü çalışma
+    zamanında yüklenir, derlemede bağımlılık yoktur.
+  - Arka ucu olmayan cihaz nedeniyle birlikte "kullanılamaz" görünür. Örnek: "Pascal, sm_61; RT
+    çekirdeği yok (OptiX 9, DXR 1.1+ ve RTXPT çalışmaz)".
+- **`RenderSession`**: mod politikasını taşır: parti boyu, durma koşulları (hedef, süre,
+  uyarlamalı yakınsama), çıktılar (AOV, geçişler) ve gürültü gidermeli çözüm.
+  - Final modda parti boyu ölçülen hıza göre ~`batchSeconds` sürecek şekilde büyür. Karo-önce
+    örnekleme 1 örneklik pass'lerden ~%7 hızlıdır. Süre sınırı aşılmaz.
+  - Örnekleyici (piksel, örnek indeksi) ikilisine göre deterministiktir. 8 örneklik bir parti,
+    sekiz tek örneklik pass ile bit bit aynı filmi verir; viewport ve son render aynı görüntüye
+    yakınsar (`RenderDevice.BatchEqualsSinglePassesBitForBit`).
+- **Sahne yükleme**: viewport, sahneyi bir sürüm sayacıyla takip eder (`setScene` ve yerinde
+  malzeme düzenlemesinde artar). Kamera hareketi yeniden yükleme yapmaz. CPU'da bu bedavadır; bir
+  GPU cihazında tampon kopyasını yalnız gerektiğinde yapmak anlamına gelir.
+
+**RTXPT ile ilişkisi.** NVIDIA RTX Path Tracing'in (v1.9) kullanılabilir fikri, tek bir yol izleme
+çekirdeğinin Reference ve Realtime modlarında paylaşılmasıdır; bu katman o ayrımı kurar. RTXPT
+kodu doğrudan alınmaz:
+- **Lisans:** NVIDIA RTX SDKs lisansı, açık kaynak değil. Kaynağın açık kaynak lisansına girmesini
+  yasaklar; DLSS/NGX yalnız NVIDIA GPU'lu sistemler için lisanslıdır.
+- **Platform:** Windows-only, D3D12 (Vulkan isteğe bağlı). DXR 1.1 + SM 6.6 + Resource Binding
+  Tier 3 ister; varsayılan Agility SDK ile DXR 1.2 / SM 6.9.
+- **Sürücü:** 595.71+ ister. Pascal'ın son sürücü dalı R580 olduğundan GTX 1080'de çalışmaz.
+
+Alınacak fikirlerin kaynakları yayımlanmış makalelerdir: ReSTIR DI/GI, SHaRC radyans önbelleği,
+ışık BVH'si + uyarlamalı NEE, ışın konileriyle MIP seçimi, opaklık mikro haritaları.
 
 ## 3. İki sahne temsili
 

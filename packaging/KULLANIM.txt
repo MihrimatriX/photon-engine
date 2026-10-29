@@ -55,6 +55,8 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
      --filter blackman-harris    piksel filtresi: box, triangle, gaussian, blackman-harris
      --filter-width 1.5          filtre yarıçapı (piksel)
      --passes                    çıktı .exr ise render geçişleri tek dosyada (aşağıya bakın)
+     --device auto               render cihazı (auto, cpu; GPU'lar --list-devices ile görünür)
+     --list-devices              makinedeki cihazları ve neden kullanılamadıklarını listele
 
   Örnekler (PowerShell, paket klasöründe):
      .\photon_render.exe ornekler\vitrin.photon --out vitrin.png --res 1920x1080 --spp 128
@@ -127,6 +129,8 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
      Depth.Z, Position, Normal, DiffCol (albedo), ObjectID, MaterialID, A (alfa)
   Işık katmanlarının toplamı ana görüntüye (RGB) eşittir: yansımaları ya da difüzü ayrı
   ayarlayıp toplayarak görüntüyü yeniden kurabilirsiniz. ID katmanları maske içindir.
+  Render penceresi > Kalite > Cihaz: render'ın çalıştığı işlemci. Ekran kartları listelenir;
+  GPU desteği gelene kadar seçilemez (üzerine gelince nedeni yazar).
   Render penceresi > Kalite > Piksel filtresi: Blackman-Harris / Gauss kenarları ve ince desenleri
   (moiré) yumuşatır; Kutu en keskin olanıdır (eski projeler Kutu ile açılır).
 
