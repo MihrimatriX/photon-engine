@@ -38,6 +38,9 @@ add_executable(photon_tests
     test_camera_animation.cpp
     test_dcc_import.cpp
     test_package.cpp
+    test_live_link.cpp
+    test_dcc_convert.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/live_link.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE
@@ -45,6 +48,9 @@ target_link_libraries(photon_tests PRIVATE
     photon_engine
     photon_scene
 )
+if(WIN32)
+    target_link_libraries(photon_tests PRIVATE ws2_32) # canlı bağlantı soketleri
+endif()
 
 # Set include directory so tests can find core/math/vec.h etc.
 target_include_directories(photon_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)

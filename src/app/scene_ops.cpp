@@ -16,6 +16,7 @@
 #include "core/platform/path.h"
 
 #include <optional>
+#include <cctype>
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -404,23 +405,130 @@ void Application::requestImport(const std::vector<std::string>& paths, const Vec
 }
 
 void Application::importWithOptions(const std::string& path, const ModelImportOptions& options, bool undoable,
-                                    const Vec3f* placeAt) {
+                                    const Vec3f* placeAt, const std::string& liveKey) {
     const bool hasPoint = placeAt != nullptr;
     const Vec3f point = placeAt ? *placeAt : Vec3f(0.0f);
-    runAsync("İçe aktarılıyor: " + ui::fileName(path), [this, path, undoable, options, hasPoint, point]() -> std::function<void()> {
+    runAsync("İçe aktarılıyor: " + ui::fileName(path), [this, path, undoable, options, hasPoint, point, liveKey]() -> std::function<void()> {
         auto err = std::make_shared<std::string>();
         auto warnings = std::make_shared<std::vector<std::string>>();
         auto extras = std::make_shared<ImportExtras>();
         auto holder = std::make_shared<std::unique_ptr<SceneNode>>(
             importModelFile(path, err.get(), options, warnings.get(), extras.get()));
-        return [this, path, undoable, holder, err, warnings, extras, hasPoint, point] {
+        return [this, path, undoable, holder, err, warnings, extras, hasPoint, point, liveKey] {
             if (!*holder) {
                 setStatus(err->empty() ? "Model yüklenemedi" : *err, true);
                 return;
             }
+            if (!liveKey.empty()) {
+                // DCC'nin gönderdiği dosya geçici klasördedir ve istemci eskilerini siler: anahtar
+                // başına kalıcı bir kopyaya taşınır ki proje (.photon) yeniden açılınca model kaybolmasın.
+                // Her güncellemede kopya yenilenir; proje DCC'den gelen en son hâli açar.
+                const std::string shown = liveKey.substr(liveKey.find('|') + 1);
+                std::string safe;
+                for (const unsigned char c : liveKey) safe.push_back(std::isalnum(c) || c >= 0x80 ? static_cast<char>(c) : '_');
+                std::error_code ec;
+                const auto dir = userDataDir() / "livelink";
+                std::filesystem::create_directories(dir, ec);
+                const auto stable = dir / pathFromUtf8(safe + pathToUtf8(pathFromUtf8(path).extension()));
+                std::filesystem::copy_file(pathFromUtf8(path), stable, std::filesystem::copy_options::overwrite_existing, ec);
+                if (!ec) (*holder)->sourcePath = pathToUtf8(stable);
+                (*holder)->name = shown;
+                // Canlı bağlantı: bu kaynaktan aynı ad daha önce geldiyse yerinde güncelle.
+                if (auto it = m_liveNodes.find(liveKey); it != m_liveNodes.end() && m_s.graph.findByUid(it->second)) {
+                    replaceLive(liveKey, it->second, std::move(*holder), *warnings, extras.get());
+                    return;
+                }
+                m_liveNodes[liveKey] = (*holder)->uid;
+            }
             attachImported(path, std::move(*holder), undoable, *warnings, hasPoint ? &point : nullptr, extras.get());
         };
     });
+}
+
+void Application::setLiveLink(bool enabled) {
+    m_s.liveLinkEnabled = enabled;
+    if (!enabled) {
+        m_liveLink.stop();
+        return;
+    }
+    if (m_liveLink.running()) return;
+    std::string err;
+    auto accepts = [](const std::string& p) {
+        return isSupportedModelFile(p) || isPackageFile(p) || pathToUtf8(pathFromUtf8(p).extension()) == ".photon";
+    };
+    if (!m_liveLink.start(userDataDir() / "livelink.json", accepts, LiveLinkServer::kDefaultPort, &err))
+        setStatus("Canlı bağlantı açılamadı: " + err, true);
+}
+
+void Application::processLiveLink() {
+    LiveLinkRequest r;
+    while (m_liveLink.poll(r)) {
+        const std::string ext = pathToUtf8(pathFromUtf8(r.path).extension());
+        if (isPackageFile(r.path) || ext == ".photon") {
+            openProject(r.path);
+            continue;
+        }
+        const std::string name = r.name.empty() ? pathToUtf8(pathFromUtf8(r.path).stem()) : r.name;
+        const std::string key = r.replace ? (r.source.empty() ? "dcc" : r.source) + "|" + name : std::string();
+        setStatus("Canlı bağlantı: " + (r.source.empty() ? std::string("DCC") : r.source) + " → " + name);
+        importWithOptions(r.path, ModelImportOptions{}, true, nullptr, key);
+    }
+}
+
+void Application::replaceLive(const std::string& liveKey, uint64_t oldUid, std::unique_ptr<SceneNode> node,
+                              const std::vector<std::string>& warnings, ImportExtras* extras) {
+    SceneNode* old = m_s.graph.findByUid(oldUid);
+    if (!old || !old->parent) return;
+    pushUndo();
+    // Kullanıcının atadığı malzemeler parça adına göre korunur; yerleşim ve kullanıcının taşıması da.
+    std::unordered_map<std::string, std::shared_ptr<Material>> mats;
+    forEachMesh(*old, [&](SceneNode& n) { mats.emplace(n.name, n.material); });
+    size_t parts = 0, kept = 0;
+    forEachMesh(*node, [&](SceneNode& n) {
+        ++parts;
+        if (auto it = mats.find(n.name); it != mats.end() && it->second) {
+            n.material = it->second;
+            ++kept;
+        }
+    });
+    node->localTransform = old->localTransform;
+    if (extras && !extras->empty() && m_s.importPrefs.importCameras) {
+        // Kameralar ada göre güncellenir; ışıklara dokunulmaz (kullanıcı ayarlamış olabilir).
+        Transform world = node->localTransform;
+        for (const SceneNode* p = old->parent; p; p = p->parent) world = p->localTransform * world;
+        transformImportExtras(*extras, world);
+        for (CameraTrack& t : extras->cameras) {
+            if (t.keys.size() == 1) {
+                const OrbitCamera cam = orbitFromKey(t.keys.front(), m_s.camera);
+                auto it = std::find_if(m_s.savedCameras.begin(), m_s.savedCameras.end(),
+                                       [&](const AppState::SavedCamera& s) { return s.name == t.name; });
+                if (it != m_s.savedCameras.end()) it->cam = cam;
+                else m_s.savedCameras.push_back({t.name, cam});
+            } else {
+                auto it = std::find_if(m_s.cameraTracks.begin(), m_s.cameraTracks.end(),
+                                       [&](const CameraTrack& c) { return c.name == t.name; });
+                if (it != m_s.cameraTracks.end()) *it = std::move(t);
+                else m_s.cameraTracks.push_back(std::move(t));
+            }
+        }
+    }
+    SceneNode* parent = old->parent;
+    const uint64_t uid = node->uid;
+    node->parent = parent;
+    for (auto& c : parent->children)
+        if (c.get() == old) {
+            c = std::move(node); // eski düğüm burada silinir
+            break;
+        }
+    m_liveNodes[liveKey] = uid;
+    ++m_liveUpdates;
+    m_s.graph.bumpRevision();
+    selectNode(uid);
+    markDocumentChanged();
+    std::string msg = "Canlı güncellendi: " + liveKey.substr(liveKey.find('|') + 1) + " (" + std::to_string(parts) +
+                      " parça, " + std::to_string(kept) + " malzeme korundu)";
+    for (const auto& w : warnings) msg += "  ·  " + w;
+    setStatus(msg, !warnings.empty());
 }
 
 void Application::attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable,
@@ -1055,13 +1163,14 @@ bool Application::openProject(const std::string& path) {
 void Application::openModelDialog() {
     std::string path;
     const std::string all = supportedModelPatterns();
-    FileDialogFilter f[] = {{"3B modeller (FBX, OBJ, glTF, Alembic)", all.c_str()},
+    FileDialogFilter f[] = {{"3B modeller (FBX, OBJ, glTF, Alembic, Max, Maya, Blender)", all.c_str()},
                             {"FBX (Maya, 3ds Max, Blender, C4D)", "*.fbx"},
+                            {"3ds Max / Maya / Blender sahnesi (kurulu uygulamayla)", "*.max;*.ma;*.mb;*.blend"},
                             {"Alembic önbelleği", "*.abc"},
                             {"glTF 2.0", "*.gltf;*.glb"},
                             {"Wavefront OBJ", "*.obj"},
                             {"Tüm dosyalar", "*.*"}};
-    if (showFileDialog(path, FileDialogMode::Open, "Model içe aktar", f, 6)) requestImport({path});
+    if (showFileDialog(path, FileDialogMode::Open, "Model içe aktar", f, 7)) requestImport({path});
 }
 
 void Application::openHdrDialog() {

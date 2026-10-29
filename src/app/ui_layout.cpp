@@ -106,6 +106,17 @@ void Application::drawMenuBar() {
                 else requestImport({pick});
             }
         }
+        {
+            bool live = m_s.liveLinkEnabled;
+            if (ImGui::MenuItem(ICON_REFRESH_CW "  Canlı bağlantı (3ds Max / Maya / Blender)", nullptr, &live)) {
+                setLiveLink(live);
+                savePrefs();
+            }
+            if (m_liveLink.running())
+                ui::Tooltip(("Açık: DCC eklentileri sahneyi tek tıkla gönderir (yalnız bu bilgisayar, port " +
+                             std::to_string(m_liveLink.port()) + "). Kurulum: integrations/README.md").c_str());
+            else ui::Tooltip("Kapalı. Açınca 3ds Max, Maya ve Blender eklentileri sahneyi buraya gönderebilir");
+        }
         if (ImGui::MenuItem(ICON_SETTINGS "  İçe aktarma ayarları…", nullptr, false, m_s.importPrefs.dontAsk)) {
             // "Bir daha sorma" seçilmişse pencereyi geri getirmenin yolu.
             m_s.importPrefs.dontAsk = false;
