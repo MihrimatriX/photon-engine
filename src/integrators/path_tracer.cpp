@@ -206,55 +206,6 @@ Vec3f roundedEdgeNormal(const Scene& scene, const SurfaceInteraction& isect, flo
     return isect.frontFace ? n : -n;
 }
 
-/// Bir köşede ışık seçme dağılımı. Her ışığın o noktaya tahmini katkısı (Light::importance)
-/// ile orantılı + %15 düzgün taban: tahmin kötüyse (gölge, parlak yüzey) bile hiçbir ışık
-/// aç kalmaz ve tahminci yansız kalır. Sıra: lights() sonra ortam. 32'den çok ışıkta
-/// (yayıcı mesh kalabalığı) O(N) maliyet yerine düzgün seçime dönülür.
-struct LightPicker {
-    static constexpr int kMaxAdaptive = 33;
-    float pmfs[kMaxAdaptive]{};
-    int count = 0;
-    bool uniform = true;
-
-    void build(const std::vector<const Light*>& lights, const EnvironmentLight* env, const Vec3f& p, const Vec3f& n) {
-        count = static_cast<int>(lights.size()) + (env ? 1 : 0);
-        uniform = count <= 1 || count > kMaxAdaptive;
-        if (uniform) return;
-        float sum = 0.0f;
-        for (int i = 0; i < count; ++i) {
-            const Light* l = i < static_cast<int>(lights.size()) ? lights[static_cast<size_t>(i)] : env;
-            const float w = l->importance(p, n);
-            pmfs[i] = (w > 0.0f && std::isfinite(w)) ? w : 0.0f;
-            sum += pmfs[i];
-        }
-        if (!(sum > 0.0f) || !std::isfinite(sum)) {
-            uniform = true;
-            return;
-        }
-        const float a = 0.85f / sum, b = 0.15f / static_cast<float>(count);
-        for (int i = 0; i < count; ++i) pmfs[i] = pmfs[i] * a + b;
-    }
-
-    float pmf(int i) const { return uniform ? 1.0f / static_cast<float>(count) : pmfs[i]; }
-
-    int sample(float u, float& pmfOut) const {
-        if (uniform) {
-            pmfOut = 1.0f / static_cast<float>(count);
-            return std::min(static_cast<int>(u * static_cast<float>(count)), count - 1);
-        }
-        float acc = 0.0f;
-        for (int i = 0; i < count - 1; ++i) {
-            acc += pmfs[i];
-            if (u < acc) {
-                pmfOut = pmfs[i];
-                return i;
-            }
-        }
-        pmfOut = pmfs[count - 1];
-        return count - 1;
-    }
-};
-
 } // namespace
 
 Vec3f PathTracer::roundedEdgeNormalForTest(const Scene& scene, const SurfaceInteraction& isect, float radius,
@@ -339,9 +290,11 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
     const auto& lights = scene.lights();
     const int explicitLights = static_cast<int>(lights.size());
     const int lightCount = explicitLights + (env ? 1 : 0);
-    // Işık seçimi köşeye özeldir (bkz. LightPicker); MIS'te bir önceki köşenin dağılımı lazım,
-    // bu yüzden picker yalnız NEE yapılan köşede yeniden kurulur ve sonraki isabete kadar kalır.
-    LightPicker picker;
+    // Işık seçimi köşeye özeldir (lights/light_sampler.h: az ışıkta kapsamlı, çok ışıkta ışık
+    // BVH'si); MIS'te bir önceki köşenin dağılımı lazım, bu yüzden bağlam yalnız NEE yapılan
+    // köşede yeniden kurulur ve sonraki isabete kadar kalır.
+    const LightSampler& lightSampler = scene.lightSampler();
+    LightSampler::Context picker;
     const int shadowSamples = m_shadowQuality;
     bool cameraRay = true; // birincil ışın ya da yalnız delta kırılmalarla devamı
 
@@ -449,11 +402,15 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                 else if (bgd.mode == Background::Mode::Environment && env) bg = env->eval(currentRay.direction);
                 float visible = 0.0f, total = 0.0f;
                 if (lightCount > 0) {
-                    picker.build(lights, env, isect.point, isect.normal);
+                    picker = lightSampler.prepare(isect.point, isect.normal);
                     const int n = 4 * shadowSamples;
                     for (int k = 0; k < n; ++k) {
                         float pmf = 0.0f;
                         const int li = picker.sample(sampler.get1D(), pmf);
+                        if (li < 0 || !(pmf > 0.0f)) {
+                            sampler.get2D();
+                            continue;
+                        }
                         const LightSample ls = li < explicitLights ? lights[static_cast<size_t>(li)]->sampleLi(isect, sampler.get2D())
                                                                    : env->sampleLi(isect, sampler.get2D());
                         const float cosT = ls.wi.dot(isect.normal);
@@ -524,10 +481,14 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
 
         const bool isSpecular = isect.material->isDelta();
         if (lightCount > 0 && !isSpecular) {
-            picker.build(lights, env, isect.point, isect.normal);
+            picker = lightSampler.prepare(isect.point, isect.normal);
             for (int s = 0; s < shadowSamples; ++s) {
                 float lightPmf = 0.0f;
                 const int lightIndex = picker.sample(sampler.get1D(), lightPmf);
+                if (lightIndex < 0 || !(lightPmf > 0.0f)) {
+                    sampler.get2D(); // boyut düzeni sabit kalsın
+                    continue;
+                }
                 LightSample ls;
                 bool fromEnv = false;
 
