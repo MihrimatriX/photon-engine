@@ -184,7 +184,7 @@ bool visit(const Alembic::Abc::IObject& obj, ImportedNode& node, Context& ctx) {
 
 bool AlembicLoader::available() { return true; }
 
-ImportedModel AlembicLoader::load(const std::string& path, std::string* error, double timeSeconds) {
+ImportedModel AlembicLoader::load(const std::string& path, std::string* error, double timeSeconds, float unitMeters) {
     // Akışla açılır: Windows'ta Türkçe karakterli yollar dar (char) dosya API'sinde bozulur.
     std::ifstream stream(pathFromUtf8(path), std::ios::binary);
     if (!stream) {
@@ -217,7 +217,9 @@ ImportedModel AlembicLoader::load(const std::string& path, std::string* error, d
         std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         const bool centimeters = lower.find("maya") != std::string::npos || lower.find("cinema") != std::string::npos ||
                                  lower.find("3ds max") != std::string::npos || lower.find("3dsmax") != std::string::npos;
-        if (centimeters) {
+        if (unitMeters > 0.0f) {
+            if (unitMeters != 1.0f) ctx.model.root.local = Transform::scale(Vec3f(unitMeters));
+        } else if (centimeters) {
             ctx.model.root.local = Transform::scale(Vec3f(0.01f));
             ctx.model.warnings.push_back("Birim santimetre varsayıldı (" + app + ")");
         }

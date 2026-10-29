@@ -19,8 +19,10 @@ public:
     /// Derlemede Alembic desteği var mı (PHOTON_ENABLE_ALEMBIC ve bağımlılık bulundu)?
     static bool available();
 
-    /// @p timeSeconds < 0 → arşivin başlangıç zamanı. Başarısızsa boş model ve @p error dolar.
-    static ImportedModel load(const std::string& path, std::string* error = nullptr, double timeSeconds = -1.0);
+    /// @p timeSeconds < 0 → arşivin başlangıç zamanı. @p unitMeters > 0 → 1 birim kaç metre
+    /// (0 = yazan uygulamadan tahmin). Başarısızsa boş model ve @p error dolar.
+    static ImportedModel load(const std::string& path, std::string* error = nullptr, double timeSeconds = -1.0,
+                              float unitMeters = 0.0f);
 };
 
 } // namespace photon

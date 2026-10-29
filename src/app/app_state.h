@@ -12,6 +12,7 @@
 #include "scene/scene_graph.h"
 #include "scene/material_library.h"
 #include "scene/document.h"
+#include "scene/model_import.h"
 #include "scene/undo_stack.h"
 #include "ui/orbit_camera.h"
 #include "engine/render_settings.h"
@@ -141,6 +142,21 @@ struct AppState {
     bool sceneDirtyInteractive = false;
     OutputSettings output;
     FinalRenderJob finalJob;
+
+    // ── İçe aktarma ──
+    /// İçe aktarma penceresinin hatırlanan seçimleri (prefs.json).
+    struct ImportPrefs {
+        int unit = 0;            ///< 0 otomatik, 1 mm, 2 cm, 3 m, 4 inç (birimsiz biçimler: OBJ, Alembic)
+        bool zUp = false;        ///< Z yukarı → Y yukarı
+        int alembicFrame = 0;    ///< 0 = ilk örnek
+        float alembicFps = 24.0f;
+        bool dontAsk = false;    ///< pencereyi gösterme, bu ayarlarla aktar
+    } importPrefs;
+    std::vector<std::string> importQueue;  ///< pencerede onay bekleyen dosyalar
+    bool importHasPoint = false;           ///< viewport'a bırakıldı: model bu noktaya konur
+    Vec3f importPoint;
+    bool showImportDialog = false;
+    std::vector<std::string> recentFiles;  ///< son projeler ve modeller, en yeni başta (prefs.json)
 
     // ── Arayüz ──
     bool showRenderDialog = false;

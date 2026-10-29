@@ -365,39 +365,75 @@ void Application::loadCornellScene() {
     setStatus("Cornell kutusu yüklendi");
 }
 
-// Model dosyası arka planda okunur (büyük OBJ'ler saniyeler sürebilir); sahneye
+// Model dosyası arka planda okunur (büyük OBJ/FBX'ler saniyeler sürebilir); sahneye
 // ekleme, zemine oturtma ve kadrajlama UI thread'inde tamamlamada yapılır.
-bool Application::importModel(const std::string& path, bool undoable) {
-    runAsync("İçe aktarılıyor: " + ui::fileName(path), [this, path, undoable]() -> std::function<void()> {
+bool Application::importModel(const std::string& path, bool undoable, const Vec3f* placeAt) {
+    importWithOptions(path, ModelImportOptions{}, undoable, placeAt);
+    return true;
+}
+
+ModelImportOptions Application::importOptionsFor(const std::string& path) const {
+    const AppState::ImportPrefs& ip = m_s.importPrefs;
+    ModelImportOptions o;
+    static constexpr float kUnits[] = {0.0f, 0.001f, 0.01f, 1.0f, 0.0254f};
+    o.unitMeters = kUnits[std::clamp(ip.unit, 0, 4)];
+    o.zUp = ip.zUp;
+    if (ip.alembicFrame > 0 && ip.alembicFps > 0.0f) o.alembicTime = static_cast<double>(ip.alembicFrame) / ip.alembicFps;
+    (void)path;
+    return o;
+}
+
+void Application::requestImport(const std::vector<std::string>& paths, const Vec3f* dropPoint) {
+    if (paths.empty()) return;
+    m_s.importHasPoint = dropPoint != nullptr;
+    if (dropPoint) m_s.importPoint = *dropPoint;
+    if (m_s.importPrefs.dontAsk) {
+        for (const auto& p : paths) importWithOptions(p, importOptionsFor(p), true, dropPoint);
+        return;
+    }
+    m_s.importQueue = paths;
+    m_s.showImportDialog = true;
+}
+
+void Application::importWithOptions(const std::string& path, const ModelImportOptions& options, bool undoable,
+                                    const Vec3f* placeAt) {
+    const bool hasPoint = placeAt != nullptr;
+    const Vec3f point = placeAt ? *placeAt : Vec3f(0.0f);
+    runAsync("İçe aktarılıyor: " + ui::fileName(path), [this, path, undoable, options, hasPoint, point]() -> std::function<void()> {
         auto err = std::make_shared<std::string>();
-        auto holder = std::make_shared<std::unique_ptr<SceneNode>>(importModelFile(path, err.get()));
-        return [this, path, undoable, holder, err] {
+        auto warnings = std::make_shared<std::vector<std::string>>();
+        auto holder = std::make_shared<std::unique_ptr<SceneNode>>(importModelFile(path, err.get(), options, warnings.get()));
+        return [this, path, undoable, holder, err, warnings, hasPoint, point] {
             if (!*holder) {
                 setStatus(err->empty() ? "Model yüklenemedi" : *err, true);
                 return;
             }
-            attachImported(path, std::move(*holder), undoable);
+            attachImported(path, std::move(*holder), undoable, *warnings, hasPoint ? &point : nullptr);
         };
     });
-    return true;
 }
 
-void Application::attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable) {
+void Application::attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable,
+                                 const std::vector<std::string>& warnings, const Vec3f* placeAt) {
     if (undoable) pushUndo();
     const bool wasEmpty = m_s.graph.empty();
-    // Zemine oturt: modelin en alt noktası y = 0 olsun; boş sahnede merkeze al.
+    // Zemine oturt: modelin en alt noktası y = 0 olsun; boş sahnede merkeze al. Viewport'a
+    // bırakıldıysa tabanının ortası bırakılan noktaya gelir (yüzeyin üstüne konur).
     const AABB box = SceneGraph::nodeWorldBounds(*node);
     if (box.pMin.x <= box.pMax.x) {
         Vec3f shift(0.0f, -box.pMin.y, 0.0f);
-        if (wasEmpty) {
-            const Vec3f c = box.centroid();
+        const Vec3f c = box.centroid();
+        if (placeAt && !wasEmpty) {
+            shift = Vec3f(placeAt->x - c.x, placeAt->y - box.pMin.y, placeAt->z - c.z);
+        } else if (wasEmpty) {
             shift.x = -c.x;
             shift.z = -c.z;
         }
         node->localTransform = Transform::translate(shift) * node->localTransform;
     }
     const uint64_t uid = node->uid;
-    size_t parts = node->children.size();
+    size_t parts = 0;
+    forEachMesh(*node, [&](SceneNode&) { ++parts; });
     m_s.graph.root()->addChild(std::move(node));
     if (wasEmpty) {
         if (m_s.lights.empty()) {
@@ -407,9 +443,12 @@ void Application::attachImported(const std::string& path, std::unique_ptr<SceneN
         frameAll();
     }
     selectNode(uid); // applyStudio seçimi temizler; bu yüzden en sonda
+    addRecent(path);
 
     markDocumentChanged();
-    setStatus("İçe aktarıldı: " + ui::fileName(path) + " (" + std::to_string(parts) + " parça)");
+    std::string msg = "İçe aktarıldı: " + ui::fileName(path) + " (" + std::to_string(parts) + " parça)";
+    for (const auto& w : warnings) msg += "  ·  " + w;
+    setStatus(msg, !warnings.empty());
 }
 
 // ── Malzeme / ortam / stüdyo ─────────────────────────────────────────────
@@ -862,6 +901,7 @@ void Application::saveProject() {
         return;
     }
     m_s.documentDirty = false;
+    addRecent(m_s.projectPath);
     setStatus("Kaydedildi: " + ui::fileName(m_s.projectPath));
 }
 
@@ -890,8 +930,13 @@ bool Application::openProject(const std::string& path) {
     m_s.graph.setRoot(SceneGraph::cloneTree(*loaded.root(), false));
     m_s.lights = d.lights;
     m_s.environment = d.environment;
+    // Kamera ve render alanları uygulamaya özgü ve serbest biçimli: yanlış türde bir değer (ör.
+    // NaN'ın JSON'da null yazılması) eskiden istisnayla uygulamayı kapatıyordu. O ana kadar
+    // okunanlar kalır, kalanı varsayılanda kalır, kullanıcıya uyarı gösterilir.
+    try {
     readCamera(d.camera, m_s.camera);
-    m_s.settings.tmo = static_cast<ToneMapOperator>(d.render.value("toneMap", static_cast<int>(m_s.settings.tmo)));
+    m_s.settings.tmo = static_cast<ToneMapOperator>(
+        std::clamp(d.render.value("toneMap", static_cast<int>(m_s.settings.tmo)), 0, static_cast<int>(ToneMapOperator::Linear)));
     m_s.settings.exposure = d.render.value("exposure", m_s.settings.exposure);
     m_s.settings.maxBounces = d.render.value("maxBounces", m_s.settings.maxBounces);
     m_s.imager = imagerFromJson(d.render.value("imager", json::object()));
@@ -920,7 +965,11 @@ bool Application::openProject(const std::string& path) {
         readCamera(cj.value("camera", json::object()), sc.cam);
         m_s.savedCameras.push_back(sc);
     }
+    } catch (const json::exception& e) {
+        err += (err.empty() ? "" : "; ") + std::string("kamera/render ayarlarının bir kısmı okunamadı (") + e.what() + ")";
+    }
     m_s.projectPath = path;
+    addRecent(path);
     m_s.undo.clear();
     clearSelection();
     markDocumentChanged();
@@ -931,8 +980,14 @@ bool Application::openProject(const std::string& path) {
 
 void Application::openModelDialog() {
     std::string path;
-    FileDialogFilter f[] = {{"3B modeller (OBJ, glTF)", "*.obj;*.gltf;*.glb"}, {"Tüm dosyalar", "*.*"}};
-    if (showFileDialog(path, FileDialogMode::Open, "Model içe aktar", f, 2)) importModel(path);
+    const std::string all = supportedModelPatterns();
+    FileDialogFilter f[] = {{"3B modeller (FBX, OBJ, glTF, Alembic)", all.c_str()},
+                            {"FBX (Maya, 3ds Max, Blender, C4D)", "*.fbx"},
+                            {"Alembic önbelleği", "*.abc"},
+                            {"glTF 2.0", "*.gltf;*.glb"},
+                            {"Wavefront OBJ", "*.obj"},
+                            {"Tüm dosyalar", "*.*"}};
+    if (showFileDialog(path, FileDialogMode::Open, "Model içe aktar", f, 6)) requestImport({path});
 }
 
 void Application::openHdrDialog() {
