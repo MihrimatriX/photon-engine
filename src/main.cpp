@@ -5,7 +5,8 @@
 //   photon_render --cornell     [...]
 // Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json,
 //   --noise 0.02 (uyarlamalı örnekleme: göreli hata hedefi), --min-spp N,
-//   --clamp 10 (dolaylı parlama sınırı), --time SN (süre sınırı; ilerlemeli render)
+//   --clamp 10 (dolaylı parlama sınırı), --time SN (süre sınırı; ilerlemeli render),
+//   --filter box|triangle|gaussian|blackman-harris, --filter-width PİKSEL
 // stats.json: süre, örnek sayısı, Mray/s (milyon birincil ışın / saniye).
 #include "scene/project_io.h"
 #include "scene/model_import.h"
@@ -50,12 +51,15 @@ struct Options {
     int minSpp = 16;
     float clamp = -1.0f;  ///< < 0 → projedeki değer
     float timeLimit = 0.0f;
+    std::string filter;        ///< boş → projedeki değer
+    float filterWidth = 0.0f;  ///< ≤ 0 → projedeki / filtrenin varsayılanı
 };
 
 void usage() {
     std::cout << "photon_render <sahne.photon | model.obj | --cornell> [--out dosya.png|.jpg|.exr] [--spp N]\n"
                  "              [--res GxY] [--threads N] [--bounces N] [--no-denoise] [--stats stats.json]\n"
-                 "              [--noise 0.02] [--min-spp N] [--clamp X] [--time saniye]\n";
+                 "              [--noise 0.02] [--min-spp N] [--clamp X] [--time saniye]\n"
+                 "              [--filter box|triangle|gaussian|blackman-harris] [--filter-width piksel]\n";
 }
 
 // Proje dosyasındaki orbit kamera alanlarından (hedef, yarıçap, θ, φ) kamera.
@@ -99,6 +103,8 @@ int main(int argc, char** argv) {
         else if (a == "--min-spp") o.minSpp = std::max(2, std::atoi(next().c_str()));
         else if (a == "--clamp") o.clamp = static_cast<float>(std::atof(next().c_str()));
         else if (a == "--time") o.timeLimit = static_cast<float>(std::atof(next().c_str()));
+        else if (a == "--filter") o.filter = next();
+        else if (a == "--filter-width") o.filterWidth = static_cast<float>(std::atof(next().c_str()));
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (!a.empty() && a[0] != '-') o.input = a;
         else { usage(); return 2; }
@@ -174,6 +180,20 @@ int main(int argc, char** argv) {
     if (o.noise > 0.0f) rs.noiseThreshold = o.noise;
     rs.minAdaptiveSamples = o.minSpp;
     rs.clampIndirect = o.clamp >= 0.0f ? o.clamp : data.render.value("clampIndirect", 0.0f);
+    {
+        // Proje (yoksa kutu: eski projeler öyle render edildi; model/Cornell modunda Blackman–Harris).
+        const bool fromProject = !o.cornell && !isSupportedModelFile(o.input);
+        const std::string name = !o.filter.empty() ? o.filter
+                                 : data.render.value("pixelFilter", std::string(fromProject ? "box" : "blackman-harris"));
+        PixelFilter pf{PixelFilterType::Box, 1.0f};
+        if (!parsePixelFilter(name.c_str(), pf.type)) {
+            std::cerr << "Bilinmeyen filtre: " << name << std::endl;
+            return 2;
+        }
+        pf.width = o.filterWidth > 0.0f ? o.filterWidth
+                                        : data.render.value("filterWidth", pf.type == PixelFilterType::Box ? 1.0f : 1.5f);
+        rs.filter = pf;
+    }
     const ImagerSettings imager = imagerFromJson(data.render.value("imager", nlohmann::json::object()));
     auto camera = cameraFromJson(data.camera, static_cast<float>(o.width) / static_cast<float>(o.height));
 

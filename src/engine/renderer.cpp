@@ -61,13 +61,15 @@ struct PixelSample {
 // path tracer ilk kesişimi bize bildirir (ayrı bir birincil ışın atılmaz): ıskalayan
 // kamera ışınına arka plan rengi/şeffaflık uygulanır, çarpanda albedo ve normal alınır.
 PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& integrator,
-                       Sampler& sampler, int x, int y, int sampleIndex,
+                       const PixelFilterSampler& filter, Sampler& sampler, int x, int y, int sampleIndex,
                        int width, int height, bool wantAovs) {
     sampler.startPixel(x, y);
     sampler.startSample(sampleIndex);
 
-    Vec2f jitter = sampler.get2D();
-    Vec2f screen = rasterToScreen(static_cast<float>(x) + jitter.x, static_cast<float>(y) + jitter.y,
+    // Alt-piksel konumu filtrenin dağılımından (filtre önem örneklemesi): örnek pikselin
+    // merkezinden filtre yarıçapı kadar uzağa düşebilir, ağırlığı yine 1'dir.
+    const Vec2f offset = filter.sample(sampler.get2D());
+    Vec2f screen = rasterToScreen(static_cast<float>(x) + 0.5f + offset.x, static_cast<float>(y) + 0.5f + offset.y,
                                   width, height);
     Vec2f lensSample = sampler.get2D();
     Ray ray = camera.generateRay(screen.x, screen.y, lensSample);
@@ -147,6 +149,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
     std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
     PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
     integrator.setClampIndirect(settings.clampIndirect);
+    const PixelFilterSampler filter(settings.filter);
     std::unique_ptr<ThreadPool> ownedPool;
     ThreadPool* pool = makePoolOverride(settings, ownedPool);
 
@@ -162,7 +165,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
             for (int y = yBegin; y < yEnd; ++y) {
                 for (int x = xBegin; x < xEnd; ++x) {
                     for (int s = 0; s < spp; ++s) {
-                        PixelSample ps = tracePixel(scene, camera, integrator, *tileSampler, x, y, s, w, h, wantAovs);
+                        PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h, wantAovs);
                         film.addSample(x, y, ps.L);
                         if (wantAovs) addAovs(&aovs, x, y, ps);
                     }
@@ -182,7 +185,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
             for (int y = yBegin; y < yEnd; ++y) {
                 for (int x = xBegin; x < xEnd; ++x) {
                     for (int s = 0; s < spp; ++s) {
-                        PixelSample ps = tracePixel(scene, camera, integrator, *tileSampler, x, y, s, w, h, wantAovs);
+                        PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h, wantAovs);
                         film.addSample(x, y, ps.L);
                         if (wantAovs) addAovs(&aovs, x, y, ps);
                         ++local;
@@ -246,6 +249,7 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
     std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
     PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
     integrator.setClampIndirect(settings.clampIndirect);
+    const PixelFilterSampler filter(settings.filter);
     std::unique_ptr<ThreadPool> ownedPool;
     ThreadPool* pool = makePoolOverride(settings, ownedPool);
 
@@ -290,7 +294,7 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
             for (int x = xBegin; x < xEnd; ++x) {
                 if (adaptive && skipMask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)])
                     continue;
-                PixelSample ps = tracePixel(scene, camera, integrator, *tileSampler, x, y, passIndex, w, h, wantAovs);
+                PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, passIndex, w, h, wantAovs);
                 accum.addSample(x, y, ps.L);
                 if (wantAovs) addAovs(aovs, x, y, ps);
             }
