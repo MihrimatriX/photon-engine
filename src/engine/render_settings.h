@@ -5,6 +5,7 @@
 /// @file render_settings.h
 /// @brief Global render configuration structure for PhotonEngine.
 
+#include "core/image/pixel_filter.h"
 #include "core/image/tone_mapping.h"
 
 namespace photon {
@@ -30,6 +31,8 @@ struct RenderSettings {
     bool denoiseEnabled = false;       ///< Apply OIDN when available; else soft blur fallback
     float aoStrength = 0.0f;           ///< Contact AO strength (short-range; not full GI)
     int shadowQuality = 1;             ///< NEE / AO sample multiplier (1–4)
+    /// Piksel yeniden yapılandırma filtresi (filtre önem örneklemesi). Kutu/1 = eski davranış.
+    PixelFilter filter;
 };
 
 } // namespace photon

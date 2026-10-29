@@ -145,6 +145,18 @@ void Application::drawRenderDialog() {
             ImGui::EndDisabled();
             ui::Prop("Sekme sayısı");
             ui::SliderI("##mb", &m_s.settings.maxBounces, 1, 32);
+            ui::Prop("Piksel filtresi", "Kenar yumuşatma çekirdeği. Blackman-Harris: temiz kenar, az bulanıklık "
+                                        "(önerilen). Kutu: en keskin ama merdivenli kenar ve titreşen ince ayrıntı");
+            {
+                const char* names[] = {"Kutu", "Üçgen", "Gauss", "Blackman-Harris"};
+                int ft = static_cast<int>(m_s.settings.filter.type);
+                if (ImGui::Combo("##pf", &ft, names, 4)) {
+                    m_s.settings.filter.type = static_cast<PixelFilterType>(ft);
+                    m_s.settings.filter.width = ft == 0 ? 1.0f : (ft == 1 ? 2.0f : 1.5f);
+                }
+                ui::Prop("Filtre genişliği", "Piksel. Büyüdükçe daha yumuşak, daha az titreşim");
+                ui::SliderF("##pfw", &m_s.settings.filter.width, 0.5f, 4.0f, "%.2f px");
+            }
             ui::EndProps();
         }
         const double mp = static_cast<double>(out.width) * out.height / 1e6;

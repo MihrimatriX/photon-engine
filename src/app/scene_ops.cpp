@@ -846,6 +846,7 @@ void Application::saveProject() {
                 {"maxBounces", m_s.settings.maxBounces}, {"denoise", m_s.denoise},
                 {"imager", imagerToJson(m_s.imager)}, {"clampIndirect", m_s.settings.clampIndirect},
                 {"adaptive", m_s.settings.adaptiveSampling}, {"noiseThreshold", m_s.settings.noiseThreshold},
+                {"pixelFilter", pixelFilterName(m_s.settings.filter.type)}, {"filterWidth", m_s.settings.filter.width},
                 {"output", {{"width", m_s.output.width}, {"height", m_s.output.height},
                             {"spp", m_s.output.spp}, {"format", m_s.output.format}}}};
     {
@@ -897,6 +898,13 @@ bool Application::openProject(const std::string& path) {
     m_s.settings.clampIndirect = d.render.value("clampIndirect", 0.0f);
     m_s.settings.adaptiveSampling = d.render.value("adaptive", m_s.settings.adaptiveSampling);
     m_s.settings.noiseThreshold = d.render.value("noiseThreshold", m_s.settings.noiseThreshold);
+    // Filtre alanı olmayan eski projeler kutu filtreyle render edilmişti; öyle kalır.
+    {
+        PixelFilter pf{PixelFilterType::Box, 1.0f};
+        const std::string name = d.render.value("pixelFilter", std::string("box"));
+        if (parsePixelFilter(name.c_str(), pf.type)) pf.width = d.render.value("filterWidth", pf.type == PixelFilterType::Box ? 1.0f : 1.5f);
+        m_s.settings.filter = pf;
+    }
     m_s.denoise = d.render.value("denoise", m_s.denoise);
     if (auto o = d.render.find("output"); o != d.render.end() && o->is_object()) {
         m_s.output.width = o->value("width", m_s.output.width);

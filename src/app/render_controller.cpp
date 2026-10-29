@@ -97,7 +97,8 @@ void RenderController::setSettings(const RenderSettings& rs) {
         changed = rs.maxBounces != m_settings.maxBounces || rs.aoStrength != m_settings.aoStrength ||
                   rs.shadowQuality != m_settings.shadowQuality ||
                   rs.adaptiveSampling != m_settings.adaptiveSampling ||
-                  rs.noiseThreshold != m_settings.noiseThreshold || rs.clampIndirect != m_settings.clampIndirect;
+                  rs.noiseThreshold != m_settings.noiseThreshold || rs.clampIndirect != m_settings.clampIndirect ||
+                  !(rs.filter == m_settings.filter);
         m_settings = rs;
     }
     if (changed) restart(true);

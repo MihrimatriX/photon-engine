@@ -16,6 +16,7 @@ target_sources(photon_core PRIVATE
     image/image_io.cpp
     image/tone_mapping.cpp
     image/imager.cpp
+    image/pixel_filter.cpp
     threading/thread_pool.cpp
     memory/arena_allocator.cpp
     platform/path.cpp
