@@ -54,6 +54,8 @@ struct MaterialPreset {
     float abbe = 0.0f;             ///< 0 = dispersiyon yok
 
     // ── Gelişmiş: Principled ──
+    float diffuseRoughness = 0.0f; ///< EON difüz pürüzlülüğü (0 = Lambert)
+    float sheenRoughness = 0.3f;   ///< Charlie sheen lif dağınıklığı
     float subsurface = 0.0f;
     Color3f subsurfaceRadius{1.0f, 0.2f, 0.1f};
     float subsurfaceScale = 0.05f;
