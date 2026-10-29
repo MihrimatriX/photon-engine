@@ -37,6 +37,7 @@ add_executable(photon_tests
     test_render_session.cpp
     test_camera_animation.cpp
     test_camera_light_tools.cpp
+    test_realtime_scene.cpp
     test_dcc_import.cpp
     test_package.cpp
     test_live_link.cpp

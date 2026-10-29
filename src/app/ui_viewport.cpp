@@ -14,6 +14,8 @@
 #include "core/math/constants.h"
 #include "camera/orthographic_camera.h"
 #include "materials/disney.h"
+#include "core/image/imager.h"
+#include "scene/realtime_scene.h"
 
 #include <ImGuizmo.h>
 #include <imgui_internal.h>
@@ -574,7 +576,9 @@ void Application::renderRasterView() {
     f.grid = m_s.environment.groundEnabled;
 
     static const std::shared_ptr<const TriangleMesh> unitSphere = makePrimitiveMesh(PrimitiveKind::Sphere);
+    const bool realtime = m_s.viewMode == ViewMode::Realtime;
     std::unordered_map<const Material*, Color3f> colors;
+    std::unordered_map<const Material*, std::shared_ptr<const RasterView::Material>> pbr;
     auto colorOf = [&](const Material* m) -> Color3f {
         if (!m) return Color3f(0.7f);
         auto it = colors.find(m);
@@ -583,6 +587,35 @@ void Application::renderRasterView() {
         const Color3f c = p.kind == MaterialKind::Glass ? Color3f(0.72f, 0.82f, 0.9f) : p.baseColor;
         return colors[m] = c;
     };
+    // Gerçek zamanlı mod: malzemenin PBR parametreleri ve yüklü dokuları (ışın izleyicininkilerle aynı).
+    auto pbrOf = [&](const Material* m) -> std::shared_ptr<const RasterView::Material> {
+        if (!realtime || !m) return nullptr;
+        auto it = pbr.find(m);
+        if (it != pbr.end()) return it->second;
+        const MaterialPreset p = MaterialLibrary::presetFromMaterial(*m, "");
+        auto r = std::make_shared<RasterView::Material>();
+        r->baseColor = p.baseColor;
+        r->metallic = p.metallic;
+        r->roughness = p.roughness;
+        r->specular = p.specular;
+        r->clearCoat = p.clearCoat;
+        r->clearCoatRoughness = p.clearCoatRoughness;
+        r->emission = p.baseColor * p.emissive;
+        if (p.kind == MaterialKind::Glass) {
+            r->glass = true;
+            r->ior = p.ior;
+            r->tint = (p.baseColor * p.absorbColor).clamp(0.0f, 1.0f);
+        }
+        if (const auto* d = dynamic_cast<const DisneyMaterial*>(m)) {
+            r->albedo = d->albedoImage();
+            r->roughnessMap = d->roughnessImage();
+            r->metalnessMap = d->metalnessImage();
+            r->normalMap = d->normalImage();
+            r->boxMapping = d->textureMapping() == DisneyMaterial::TextureMapping::Box;
+            r->texScale = d->textureScale();
+        }
+        return pbr[m] = r;
+    };
     std::vector<RasterView::Item> items;
     size_t tris = 0;
     auto walk = [&](auto&& self, const SceneNode& n, const Mat4f& parent, bool parentSel) -> void {
@@ -590,20 +623,113 @@ void Application::renderRasterView() {
         const Mat4f world = parent * n.localTransform.matrix();
         const bool sel = parentSel || isNodeSelected(n.uid);
         if (n.type == SceneNodeType::Mesh && n.mesh) {
-            items.push_back({n.mesh, world, colorOf(n.material.get()), sel});
+            items.push_back({n.mesh, world, colorOf(n.material.get()), sel, pbrOf(n.material.get())});
             tris += n.mesh->numTriangles();
         } else if (n.type == SceneNodeType::Sphere && n.sphereRadius > 0.0f) {
             // Birim küre (merkez 0, 0.5, 0; yarıçap 0.5) → düğümün merkezine ve yarıçapına.
             const Mat4f m = world * Transform::scale(Vec3f(2.0f * n.sphereRadius)).matrix() *
                             Transform::translate(Vec3f(0.0f, -0.5f, 0.0f)).matrix();
-            items.push_back({unitSphere, m, colorOf(n.material.get()), sel});
+            items.push_back({unitSphere, m, colorOf(n.material.get()), sel, pbrOf(n.material.get())});
             tris += unitSphere->numTriangles();
         }
         for (const auto& c : n.children) self(self, *c, world, sel);
     };
     walk(walk, *m_s.graph.root(), Mat4f::identity(), false);
     m_rasterTris = tris;
+    if (realtime) {
+        prepareRealtime(box);
+        f.realtime = &m_rtInputs;
+    }
     m_rasterTex = m_raster.render(f, items, raster ? m_s.viewMode : ViewMode::Wire, !raster);
+}
+
+// Gerçek zamanlı modun sahne girdileri. Ortamın pişirilmesi (1024×512, ~10 ms) ve ton eşleme LUT'u
+// yalnız girdileri değişince; ışıklar, zemin ve temas izleri her kare (ucuz). Hepsi ışın
+// izleyicinin kullandığı tanımlardan gelir: aynı HDRI/gök, aynı ışıklar, aynı zemin dörtgeni.
+void Application::prepareRealtime(const AABB& box) {
+    RasterView::Realtime& rt = m_rtInputs;
+    const EnvironmentDesc& e = m_s.environment;
+    const bool hasBox = box.pMin.x <= box.pMax.x;
+    rt.sceneBounds = box;
+    rt.ground = e.groundEnabled && hasBox && !m_s.graph.empty();
+    rt.groundShadowOnly = e.groundShadowOnly;
+    rt.groundColor = e.groundColor;
+    rt.groundRoughness = e.groundRoughness;
+    if (rt.ground) rt.groundQuad = placeGroundUnder(box);
+    const bool groundInEnv = rt.ground && !rt.groundShadowOnly;
+
+    const SkyParams& s = e.sky;
+    char key[1400];
+    std::snprintf(key, sizeof(key), "%d|%s|%g %g %g|%g %g %g|%g|%g|%g %g %g %g %g %g %g %d|%d %g %g %d %g %g %g|%d %g %g %g",
+                  static_cast<int>(e.kind), e.hdrPath.c_str(), e.zenith.r, e.zenith.g, e.zenith.b, e.horizon.r, e.horizon.g,
+                  e.horizon.b, e.rotationDeg, e.intensity, s.sunElevationDeg, s.sunAzimuthDeg, s.turbidity, s.ozone,
+                  s.groundAlbedo, s.sunSizeDeg, s.sunStrength, s.width, e.skyFromLocation ? 1 : 0, e.latitude, e.longitude,
+                  e.dayOfYear, e.hour, e.utcOffset, e.northOffsetDeg, groundInEnv ? 1 : 0, e.groundColor.r, e.groundColor.g,
+                  e.groundColor.b);
+    if (!rt.env || m_rtEnvKey != key) {
+        const auto light = buildEnvironment(e, m_s.envCache);
+        rt.env = light ? std::make_shared<const RealtimeEnvironment>(
+                             bakeRealtimeEnvironment(*light, 1024, groundInEnv ? e.groundColor : Color3f(-1.0f)))
+                       : nullptr;
+        m_rtEnvKey = key;
+    }
+    if (!rt.lut || m_rtLutOp != static_cast<int>(m_s.settings.tmo)) {
+        rt.lut = std::make_shared<const ToneLut>(buildToneLut(m_s.settings.tmo));
+        m_rtLutOp = static_cast<int>(m_s.settings.tmo);
+    }
+    rt.exposure = std::exp2(m_s.settings.exposure);
+    whiteBalanceMatrix(m_s.imager.whiteBalanceK, m_s.imager.tint, rt.whiteBalance);
+    rt.background = static_cast<int>(e.background.mode);
+    rt.backgroundColor = e.background.color;
+
+    // Işıklar (+ fiziksel gökte güneş). Zeminin ışıklardan aldığı pay (alt yarıküre radyansı):
+    // güneşsiz liste (güneş pişirilen ortamda zaten var), zeminde 9 noktanın ortalaması.
+    static const RealtimeEnvironment kNoEnv;
+    rt.lights = packRealtimeLights(m_s.lights, rt.env ? *rt.env : kNoEnv, box);
+    rt.groundExtra = Color3f(0.0f);
+    if (groundInEnv) {
+        const auto noSun = packRealtimeLights(m_s.lights, kNoEnv, box);
+        const Vec3f c = box.centroid();
+        const float y = rt.groundQuad.corner.y, R = 0.5f * (box.pMax - box.pMin).length();
+        Color3f E(0.0f);
+        for (int i = 0; i < 9; ++i) {
+            const float a = static_cast<float>(i) * TWO_PI / 8.0f;
+            const Vec3f p = i == 0 ? Vec3f(c.x, y, c.z) : Vec3f(c.x + R * std::cos(a), y, c.z + R * std::sin(a));
+            E += realtimeIrradiance(noSun, p, Vec3f(0, 1, 0));
+        }
+        rt.groundExtra = e.groundColor * E * (INV_PI / 9.0f);
+    }
+
+    // Temas gölgesi: nesnelerin zemindeki izleri. En üst düzey düğümler; grup ise bir alt düzeyi
+    // (içe aktarılmış bir modelin parçaları ayrı izler bıraksın). Büyükten küçüğe en çok 32.
+    rt.footprints.clear();
+    rt.footprintGaps.clear();
+    if (rt.ground) {
+        struct Fp {
+            Vec4f f;
+            float gap, size;
+        };
+        std::vector<Fp> fps;
+        auto add = [&](const SceneNode& n) {
+            if (!n.visible) return;
+            const AABB b = SceneGraph::nodeWorldBounds(n);
+            if (!(b.pMin.x <= b.pMax.x)) return;
+            const Vec3f ctr = b.centroid(), half = (b.pMax - b.pMin) * 0.5f;
+            fps.push_back({Vec4f(ctr.x, ctr.z, half.x, half.z), b.pMin.y - rt.groundQuad.corner.y, std::max(half.x, half.z)});
+        };
+        for (const auto& c : m_s.graph.root()->children) {
+            if (!c->visible) continue;
+            if (c->type == SceneNodeType::Group && !c->children.empty())
+                for (const auto& cc : c->children) add(*cc);
+            else
+                add(*c);
+        }
+        std::sort(fps.begin(), fps.end(), [](const Fp& a, const Fp& b) { return a.size > b.size; });
+        for (size_t i = 0; i < fps.size() && i < 32; ++i) {
+            rt.footprints.push_back(fps[i].f);
+            rt.footprintGaps.push_back(fps[i].gap);
+        }
+    }
 }
 
 // Kompozisyon kılavuzları ve çıktı kadrajı. Kamera dikey görüş açısını korur: çıktı ile viewport'un
@@ -681,13 +807,15 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 2));
     // Görüntü modu: ikon + ad + ok; açılır listede tüm modlar ve tel kafes bindirmesi.
     {
-        static const char* kModeIcons[kViewModeCount] = {ICON_SPARKLES, ICON_CIRCLE, ICON_CUBOID, ICON_GRID_3X3, ICON_CONTRAST};
+        static const char* kModeIcons[kViewModeCount] = {ICON_SPARKLES, ICON_CIRCLE, ICON_CUBOID, ICON_GRID_3X3, ICON_CONTRAST, ICON_GAUGE};
         static const char* kModeHints[kViewModeCount] = {
             "Işın izleme: son görüntü, malzemeler ve ışık",
             "Işın izleme, tüm yüzeyler mat gri: ışık ve formu değerlendirmek için",
             "GPU: anında, gölgesiz; büyük modellerde yerleştirme için",
             "GPU: üçgen ağı (arkadaki çizgiler gizli)",
-            "GPU: yüzey yönleri renkli (ters dönmüş yüzleri bulmak için)"};
+            "GPU: yüzey yönleri renkli (ters dönmüş yüzleri bulmak için)",
+            "GPU: oyun motoru gibi anında PBR — aynı ışıklar, gölge, HDRI yansımaları, dokular. Hızlı "
+            "yerleştirme ve animasyon önizlemesi; son görüntü için Render"};
         const int cur = static_cast<int>(m_s.viewMode);
         char label[96];
         std::snprintf(label, sizeof(label), "%s  %s  " ICON_CHEVRON_DOWN, kModeIcons[cur], viewModeName(m_s.viewMode));
@@ -699,12 +827,13 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
         ImGui::PopStyleVar();
         ui::Tooltip("Görüntü modu (Z ile sırayla değiştir)");
         if (ImGui::BeginPopup("viewmodes")) {
-            for (int i = 0; i < kViewModeCount; ++i) {
-                const ViewMode m = static_cast<ViewMode>(i);
+            for (const ViewMode m : kViewModeOrder) {
+                const int i = static_cast<int>(m);
                 char item[96];
                 std::snprintf(item, sizeof(item), "%s  %s", kModeIcons[i], viewModeName(m));
-                if (ImGui::MenuItem(item, i == 2 ? "GPU" : nullptr, cur == i, !isRasterMode(m) || m_rasterOk)) setViewMode(m);
+                if (ImGui::MenuItem(item, isRasterMode(m) ? "GPU" : nullptr, cur == i, !isRasterMode(m) || m_rasterOk)) setViewMode(m);
                 ui::Tooltip(kModeHints[i]);
+                if (m == ViewMode::Clay) ImGui::Separator(); // ışın izleme | GPU yardımcı modları
             }
             ImGui::Separator();
             ImGui::MenuItem(ICON_GRID_3X3 "  Tel kafes bindir", nullptr, &m_s.wireOverlay,

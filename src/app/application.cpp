@@ -394,9 +394,14 @@ void Application::handleShortcuts() {
     }
     if (pressed(ImGuiKey_I)) isolateSelection();
     if (pressed(ImGuiKey_Z)) {
-        // Z: görüntü modları arasında döngü (GPU yoksa yalnız Render ↔ Kil).
-        const int count = m_rasterOk ? kViewModeCount : 2;
-        setViewMode(static_cast<ViewMode>((static_cast<int>(m_s.viewMode) + (shift ? count - 1 : 1)) % count));
+        // Z: görüntü modları arasında kViewModeOrder sırasıyla döngü (GPU yoksa yalnız Render ↔ Kil).
+        int pos = 0;
+        for (int i = 0; i < kViewModeCount; ++i)
+            if (kViewModeOrder[i] == m_s.viewMode) pos = i;
+        const int step = shift ? kViewModeCount - 1 : 1;
+        do pos = (pos + step) % kViewModeCount;
+        while (!m_rasterOk && isRasterMode(kViewModeOrder[pos]));
+        setViewMode(kViewModeOrder[pos]);
     }
     if (pressed(ImGuiKey_F2)) beginRename();
     // Tek tuşlu kısayollar yalnız viewport ya da sahne paneli üzerindeyken değil,
@@ -564,6 +569,38 @@ int Application::run() {
     else if (ui == "wire") { setViewMode(ViewMode::Wire); selectFirst(); }
     else if (ui == "normals") setViewMode(ViewMode::Normals);
     else if (ui == "clay") setViewMode(ViewMode::Clay);
+    else if (ui == "realtime") setViewMode(ViewMode::Realtime);
+    else if (ui == "textured" || ui == "realtime-tex") {
+        // Dokulu malzemeler (albedo + normal + pürüzlülük, kutu eşleme) ve gölge yakalayıcı zemin.
+        auto assign = [&](const char* node, const char* preset) {
+            const MaterialPreset* p = m_s.materials.findById(preset);
+            auto set = [](auto&& self, SceneNode& n, const std::shared_ptr<Material>& m) -> void {
+                n.material = m;
+                for (auto& c : n.children) self(self, *c, m);
+            };
+            for (auto& c : m_s.graph.root()->children)
+                if (p && c->name == node) set(set, *c, MaterialLibrary::createMaterial(*p));
+        };
+        assign("Kaide", "wood_table");
+        assign("Küp", "red_leather");
+        assign("Altın Küre", "metal_plate");
+        rebuildScene();
+        if (ui == "realtime-tex") setViewMode(ViewMode::Realtime);
+    }
+    else if (ui == "catcher" || ui == "realtime-catcher") {
+        // Gölge yakalayıcı zemin + düz beyaz arka plan (ürün fotoğrafı / web görseli).
+        m_s.environment.groundShadowOnly = true;
+        m_s.environment.background.mode = Background::Mode::Color;
+        m_s.environment.background.color = Color3f(0.9f);
+        rebuildScene();
+        if (ui == "realtime-catcher") setViewMode(ViewMode::Realtime);
+    }
+    else if (ui == "sun" || ui == "realtime-sun") {
+        // Güneşi HDRI'nin içinde olan açık gök: ışın izleyici ile gerçek zamanlı modun gölgeleri.
+        for (const auto& st : m_s.studios)
+            if (st.id == "outdoor_sun") applyStudio(st);
+        if (ui == "realtime-sun") setViewMode(ViewMode::Realtime);
+    }
     else if (ui == "overlay") m_s.wireOverlay = true;
     else if (ui == "shapes") {
         for (int k = 0; k < kPrimitiveCount; ++k) addPrimitive(static_cast<PrimitiveKind>(k));

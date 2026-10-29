@@ -110,7 +110,13 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - **Entegrasyon:** FBX (ufbx v0.23.1) ve Alembic 1.8.12 (+ Imath 3.2.3, CMake ≥ 3.29) içe aktarma; hiyerarşi/ad/instancing, birim/eksen, malzeme eşleme, gömülü doku önbelleği; içe aktarma penceresi, imlecin altına bırakma, son dosyalar.
   - Testler 133 → 157.
   - **Cihaz/mod katmanı (F9.7, RTXPT incelemesinden sonra):** `RenderDevice` (CPU; GPU'lar CUDA sürücüsü dinamik yüklenerek listelenir, arka uç yok), `RenderSession` (Interactive / Final: parti boyu, hedef/süre/yakınsama, AOV/geçiş, denoise). Viewport, son render, turntable ve CLI tek yoldan; CLI `--device`, `--list-devices`; Render penceresinde Cihaz; `--ui finalrender` duman testi. RTXPT doğrudan alınmadı: NVIDIA RTX SDKs lisansı, Windows/D3D12, sürücü 595.71+ (GTX 1080'de çalışmaz). Testler → 165.
+  - **Doğrulama:** Embree + OIDN derlemesi, ASan + UBSan + LSan temiz; Embree ile kendi BVH aynı görüntü (relMSE 3e-5).
+  - **3ds Max / Maya / Blender:** `integrations/` (canlı bağlantı betikleri, ortak istemci + `sync_client.py`), `app/live_link.*` (127.0.0.1, 128-bit jeton, JSON satırı, yerinde güncelleme), `scene/dcc_convert.*` + `core/platform/process.*` (kabuksuz süreç, zaman aşımı), FBX kamera/ışık/kamera animasyonu (`ImportExtras`), `scene/camera_animation.*` + zaman çizelgesi, `.photonpack` (`core/io/zip`, `scene/mesh_binary`, `scene/package`).
+  - **Kamera ve ışık araçları:** `placeLightForHighlight` (document), Kelvin (`temperatureColor`, `LightDesc.temperatureK`, proje `"temperature"`), lens kaydırma (`setShift`; GPU izdüşümünde de), iki noktalı perspektif, kompozisyon kılavuzları ve çıktı kadrajı.
+  - **Gerçek zamanlı mod (Faz 8):** `scene/realtime_scene.*` (ortam pişirme, HDRI güneşi ayıklama, SH9, ışık listesi, gölge izdüşümü, ton LUT'u) + `app/raster_view.*` (`ViewMode::Realtime`, PBR shader, 2×2 PCSS gölge atlası, cam atlası, arka plan, cam iki geçiş). Ayrıntı `docs/architecture.md` §2c. Testler → 203.
 - **Sıradaki adımlar:**
+  - Gerçek zamanlı mod: LTC alan ışıkları, SSR, GTAO, TAA, imager efektleri, IES dokusu (`docs/EKSIK_ANALIZI.md`).
+  - Gerçek 3ds Max / Maya / Blender ile canlı bağlantı ve doğrudan açma denemesi (bu ortamda yok); Windows'ta `CreateProcessW` yolu.
   - `docs/EKSIK_ANALIZI.md` öncelik 1: GPU (CUDA), path guiding (Open PGL), alfa kesikleri, doku belleği + mipmap, BLAS/TLAS, otomatik kayıt.
   - Windows/MSVC'de oturum 7 ve 8'in değişiklikleri derlenmedi (yalnız GCC 13). `/W4` uyarıları ve `std::complex` kullanımı kontrol edilmeli; OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli.
   - Kostikler: cam arkası ve delta ışık + parlak yüzey yolları hâlâ gürültülü (parlama sınırı geçici çözüm). Path guiding (Open PGL) ya da MNEE.

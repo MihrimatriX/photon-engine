@@ -125,6 +125,12 @@ public:
 
     Color3f emitted(const SurfaceInteraction&) const override { return m_emission; }
 
+    /// Yüklü doku görüntüleri (gerçek zamanlı mod GPU'ya yükler); yoksa nullptr.
+    std::shared_ptr<const Image> albedoImage() const { return m_albedoTex; }
+    std::shared_ptr<const Image> normalImage() const { return m_normalTex; }
+    std::shared_ptr<const Image> roughnessImage() const { return m_roughnessTex; }
+    std::shared_ptr<const Image> metalnessImage() const { return m_metalnessTex; }
+
     const std::string& albedoMap() const { return m_albedoMap; }
     const std::string& normalMap() const { return m_normalMap; }
     const std::string& roughnessMap() const { return m_roughnessMap; }
