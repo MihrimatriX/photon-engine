@@ -105,7 +105,8 @@ TEST(MaterialPreset, KindSelectsBsdf) {
 
     MaterialPreset frost = glass;
     frost.roughness = 0.45f;
-    auto* rough = dynamic_cast<Dielectric*>(MaterialLibrary::createMaterial(frost).get());
+    auto frostMat = MaterialLibrary::createMaterial(frost); // işaretçi bu satırdan sonra da yaşamalı
+    auto* rough = dynamic_cast<Dielectric*>(frostMat.get());
     ASSERT_NE(rough, nullptr);
     EXPECT_GT(rough->roughness(), 0.0f);
 
