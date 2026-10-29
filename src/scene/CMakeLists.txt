@@ -6,6 +6,7 @@ add_library(photon_scene STATIC
     document.cpp
     model_import.cpp
     project_io.cpp
+    camera_animation.cpp
     primitives.cpp
 )
 
