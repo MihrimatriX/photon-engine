@@ -25,6 +25,9 @@ const char* formatNote(const std::string& ext) {
     if (ext == ".abc") return "Alembic: hiyerarşi ve yüz kümeleri (malzeme dilimleri); birim aşağıdan";
     if (ext == ".gltf" || ext == ".glb") return "glTF: metre, Y yukarı (standart)";
     if (ext == ".obj") return "OBJ: birim bilgisi yok, aşağıdan seçin";
+    if (ext == ".max") return "3ds Max sahnesi: kurulu 3ds Max arka planda FBX'e çevirir (ilk açılış uzun sürebilir)";
+    if (ext == ".ma" || ext == ".mb") return "Maya sahnesi: kurulu Maya (mayapy) arka planda FBX'e çevirir";
+    if (ext == ".blend") return "Blender sahnesi: kurulu Blender arka planda FBX'e çevirir";
     return "";
 }
 
@@ -53,7 +56,7 @@ void Application::drawImportDialog() {
         const std::string ext = lowerExt(p);
         anyUnitless = anyUnitless || ext == ".obj" || ext == ".abc";
         anyAlembic = anyAlembic || ext == ".abc";
-        anyFbx = anyFbx || ext == ".fbx";
+        anyFbx = anyFbx || ext == ".fbx" || ext == ".max" || ext == ".ma" || ext == ".mb" || ext == ".blend";
         ImGui::PushFont(ui::fonts().semibold, 0.0f);
         ImGui::TextUnformatted((std::string(ICON_BOX "  ") + ui::fileName(p)).c_str());
         ImGui::PopFont();

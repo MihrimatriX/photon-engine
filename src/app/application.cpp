@@ -111,6 +111,7 @@ void Application::loadPrefs() {
         for (const auto& r : j.value("recent", nlohmann::json::array()))
             if (r.is_string()) m_s.recentFiles.push_back(r.get<std::string>());
         m_s.output.device = j.value("renderDevice", m_s.output.device);
+        m_s.liveLinkEnabled = j.value("liveLink", m_s.liveLinkEnabled);
     } catch (const nlohmann::json::exception&) {
         // yanlış türde alan: o ana kadar okunanlar kalır
     }
@@ -123,6 +124,7 @@ void Application::savePrefs() {
                    {"lights", p.importLights}, {"cameras", p.importCameras}};
     j["recent"] = m_s.recentFiles;
     j["renderDevice"] = m_s.output.device; // makineye özgü: projeye değil tercihlere
+    j["liveLink"] = m_s.liveLinkEnabled;
     const fs::path file = pathFromUtf8(m_s.userDir) / "prefs.json";
     const fs::path tmp = fs::path(file).concat(".tmp");
     {
@@ -143,6 +145,7 @@ void Application::addRecent(const std::string& path) {
 }
 
 Application::~Application() {
+    m_liveLink.stop();
     cancelFinalRender();
     joinFinalRender();
     m_s.viewport.stop();
@@ -463,6 +466,7 @@ void Application::frame(float dt) {
 
     m_s.thumbs.uploadReady();
     processDrops();
+    processLiveLink();
     pollAsync();
     compileIfDirty();
 
@@ -509,6 +513,8 @@ int Application::run() {
     initImGui();
     loadAssets();
     m_s.viewport.start();
+    // Ekran görüntüsü modunda kapalı (testler port açmasın); --ui livelink bunu dener.
+    setLiveLink(m_s.liveLinkEnabled && (m_opts.screenshotPath.empty() || m_opts.uiState == "livelink"));
 
     if (!m_opts.openPath.empty()) {
         if (isSupportedModelFile(m_opts.openPath)) importModel(m_opts.openPath, false);
@@ -611,7 +617,8 @@ int Application::run() {
                 startAnimationRender();
                 m_animSmokeStarted = true;
             }
-            const bool waitAnim = m_opts.uiState == "animrender" && !m_animSmokeStarted;
+            const bool waitAnim = (m_opts.uiState == "animrender" && !m_animSmokeStarted) ||
+                                  (m_opts.uiState == "livelink" && m_liveUpdates < 1); // bir yerinde güncelleme bekle
             const bool ready = frames > 30 && !st.interactive && (gpuView || st.converged || st.spp >= m_opts.screenshotSpp) &&
                                m_jobs.empty() && !m_s.thumbs.busy() && !m_s.finalJob.active.load() && !waitAnim;
             if (ready || elapsed > m_opts.screenshotTimeout) {

@@ -165,6 +165,7 @@ struct AppState {
         bool importLights = true;  ///< FBX: dosyadaki ışıkları sahneye ekle
         bool importCameras = true; ///< FBX: kameraları kayıtlı kamera / animasyon olarak ekle
     } importPrefs;
+    bool liveLinkEnabled = true; ///< 3ds Max / Maya / Blender'dan gönderme (yalnız bu bilgisayardan)
     std::vector<std::string> importQueue;  ///< pencerede onay bekleyen dosyalar
     bool importHasPoint = false;           ///< viewport'a bırakıldı: model bu noktaya konur
     Vec3f importPoint;

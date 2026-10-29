@@ -10,6 +10,7 @@
 #pragma once
 
 #include "app/app_state.h"
+#include "app/live_link.h"
 #include "scene/primitives.h"
 
 #include <imgui.h>
@@ -17,6 +18,7 @@
 #include <functional>
 #include <future>
 #include <string>
+#include <unordered_map>
 
 struct GLFWwindow;
 
@@ -143,7 +145,12 @@ public:
     /// sorma" seçiliyse doğrudan). @p dropPoint: viewport'ta bırakılan yer.
     void requestImport(const std::vector<std::string>& paths, const Vec3f* dropPoint = nullptr);
     void importWithOptions(const std::string& path, const ModelImportOptions& options, bool undoable,
-                           const Vec3f* placeAt);
+                           const Vec3f* placeAt, const std::string& liveKey = {});
+    // Canlı bağlantı (live_link.h): DCC'den gelen istekler
+    void processLiveLink();
+    void setLiveLink(bool enabled);
+    void replaceLive(const std::string& liveKey, uint64_t oldUid, std::unique_ptr<SceneNode> node,
+                     const std::vector<std::string>& warnings, ImportExtras* extras);
     void attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable,
                         const std::vector<std::string>& warnings = {}, const Vec3f* placeAt = nullptr,
                         ImportExtras* extras = nullptr);
@@ -192,6 +199,9 @@ public:
     void applyTrackTime(float t);
     void startAnimationRender();
     bool m_animSmokeStarted = false; ///< --ui animrender denemesi başladı mı
+    LiveLinkServer m_liveLink;
+    std::unordered_map<std::string, uint64_t> m_liveNodes; ///< "kaynak|ad" → canlı güncellenen düğüm
+    int m_liveUpdates = 0; ///< yerinde güncelleme sayısı (--ui livelink denemesi bekler)
     void buildTrackFromSavedCameras();
     void cancelFinalRender();
     void joinFinalRender();
