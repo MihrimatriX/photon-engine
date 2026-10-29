@@ -48,6 +48,8 @@ private:
     LaunchOptions m_opts;
     std::vector<std::string> m_pendingDrops;
     unsigned int m_viewTex = 0;
+    ImVec2 m_vpOrigin{0.0f, 0.0f}; ///< Son karede viewport'un ekran dikdörtgeni (dosya bırakma hedefi)
+    ImVec2 m_vpSize{0.0f, 0.0f};
     int m_viewTexW = 0;
     int m_viewTexH = 0;
     bool m_viewHasAlpha = false;
@@ -135,8 +137,20 @@ public:
     void newScene();
     void loadSampleScene();
     void loadCornellScene();
-    bool importModel(const std::string& path, bool undoable = true);
-    void attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable);
+    /// Kütüphane modeli ya da proje: pencere yok, varsayılan seçenekler.
+    bool importModel(const std::string& path, bool undoable = true, const Vec3f* placeAt = nullptr);
+    /// Dışarıdan gelen dosyalar (bırakma, dosya diyaloğu): içe aktarma penceresi (ya da "bir daha
+    /// sorma" seçiliyse doğrudan). @p dropPoint: viewport'ta bırakılan yer.
+    void requestImport(const std::vector<std::string>& paths, const Vec3f* dropPoint = nullptr);
+    void importWithOptions(const std::string& path, const ModelImportOptions& options, bool undoable,
+                           const Vec3f* placeAt);
+    void attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable,
+                        const std::vector<std::string>& warnings = {}, const Vec3f* placeAt = nullptr);
+    ModelImportOptions importOptionsFor(const std::string& path) const;
+    void drawImportDialog();
+    void loadPrefs();
+    void savePrefs();
+    void addRecent(const std::string& path);
     void applyMaterialPreset(uint64_t nodeUid, const MaterialPreset& preset);
     void applyEnvironment(const EnvAsset& env);
     void applyEnvironmentNow(const EnvAsset& env);

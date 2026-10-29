@@ -11,7 +11,11 @@ namespace photon {
 
 /// İçe aktarma seçenekleri (içe aktarma penceresi; proje yeniden yüklemede varsayılanlar).
 struct ModelImportOptions {
-    /// Ek ölçek: dosyanın kendi birim dönüşümünün üstüne. 0.01 = "dosya santimetre", 0.001 = "mm".
+    /// Dosyadaki 1 birimin metre karşılığı; 0 = otomatik. Yalnız birim bilgisi taşımayan
+    /// biçimlerde kullanılır: OBJ (otomatik = metre) ve Alembic (otomatik = yazan uygulamadan
+    /// tahmin). FBX ve glTF kendi birimlerini bildirir.
+    float unitMeters = 0.0f;
+    /// Ek ölçek (her biçimde, birim dönüşümünün üstüne).
     float scale = 1.0f;
     /// Z yukarı → Y yukarı (CAD ve bazı OBJ dışa aktarıcıları). FBX kendi eksenini bildirir.
     bool zUp = false;

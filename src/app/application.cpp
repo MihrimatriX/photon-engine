@@ -9,6 +9,8 @@
 #include "core/image/image_io.h"
 #include "core/platform/path.h"
 
+#include <nlohmann/json.hpp>
+
 #include <GLFW/glfw3.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
@@ -18,6 +20,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 
 #ifndef GL_CLAMP_TO_EDGE
@@ -85,6 +88,53 @@ Application::Application(LaunchOptions options) : m_opts(std::move(options)) {
     gApp = this;
     m_s.assetsRoot = findAssetsRoot();
     m_s.userDir = findUserDir();
+    loadPrefs();
+}
+
+// Kullanıcı tercihleri (prefs.json): içe aktarma penceresinin seçimleri ve son kullanılanlar.
+// Bozuk ya da eksik dosya sessizce varsayılanlara döner.
+void Application::loadPrefs() {
+    std::ifstream in(pathFromUtf8(m_s.userDir) / "prefs.json");
+    if (!in) return;
+    const nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return;
+    try {
+        if (auto ip = j.find("import"); ip != j.end() && ip->is_object()) {
+            AppState::ImportPrefs& p = m_s.importPrefs;
+            p.unit = std::clamp(ip->value("unit", p.unit), 0, 4);
+            p.zUp = ip->value("zUp", p.zUp);
+            p.alembicFps = std::clamp(ip->value("alembicFps", p.alembicFps), 1.0f, 1000.0f);
+            p.dontAsk = ip->value("dontAsk", p.dontAsk);
+        }
+        for (const auto& r : j.value("recent", nlohmann::json::array()))
+            if (r.is_string()) m_s.recentFiles.push_back(r.get<std::string>());
+    } catch (const nlohmann::json::exception&) {
+        // yanlış türde alan: o ana kadar okunanlar kalır
+    }
+}
+
+void Application::savePrefs() {
+    const AppState::ImportPrefs& p = m_s.importPrefs;
+    nlohmann::json j;
+    j["import"] = {{"unit", p.unit}, {"zUp", p.zUp}, {"alembicFps", p.alembicFps}, {"dontAsk", p.dontAsk}};
+    j["recent"] = m_s.recentFiles;
+    const fs::path file = pathFromUtf8(m_s.userDir) / "prefs.json";
+    const fs::path tmp = fs::path(file).concat(".tmp");
+    {
+        std::ofstream out(tmp);
+        if (!out) return;
+        out << j.dump(2);
+    }
+    std::error_code ec;
+    fs::rename(tmp, file, ec);
+}
+
+void Application::addRecent(const std::string& path) {
+    auto& r = m_s.recentFiles;
+    r.erase(std::remove(r.begin(), r.end(), path), r.end());
+    r.insert(r.begin(), path);
+    if (r.size() > 12) r.resize(12);
+    savePrefs();
 }
 
 Application::~Application() {
@@ -257,10 +307,24 @@ void Application::processDrops() {
     if (m_pendingDrops.empty()) return;
     std::vector<std::string> drops;
     drops.swap(m_pendingDrops);
+    // Modeller birlikte içe aktarılır (tek pencere). Viewport'un üstüne bırakıldıysa imlecin
+    // altındaki yüzey (zemin ya da bir nesne) hedef nokta olur.
+    std::vector<std::string> models;
+    for (const auto& p : drops)
+        if (isSupportedModelFile(p)) models.push_back(p);
+    if (!models.empty()) {
+        const ImVec2 mp = ImGui::GetIO().MousePos;
+        Vec3f hit;
+        const bool overViewport = m_vpSize.x > 0 && m_vpSize.y > 0 && mp.x >= m_vpOrigin.x && mp.y >= m_vpOrigin.y &&
+                                  mp.x < m_vpOrigin.x + m_vpSize.x && mp.y < m_vpOrigin.y + m_vpSize.y;
+        const bool placed = overViewport && !m_s.graph.empty() &&
+                            pickAt((mp.x - m_vpOrigin.x) / m_vpSize.x, (mp.y - m_vpOrigin.y) / m_vpSize.y, &hit);
+        requestImport(models, placed ? &hit : nullptr);
+    }
     for (const auto& p : drops) {
         const fs::path fp = pathFromUtf8(p);
         if (isSupportedModelFile(p)) {
-            importModel(p);
+            continue;
         } else if (hasExt(fp, {".hdr", ".exr"})) {
             EnvAsset a;
             a.id = pathToUtf8(fp.stem());
@@ -413,6 +477,7 @@ void Application::frame(float dt) {
     drawSceneTree();
     drawProperties();
     drawRenderDialog();
+    drawImportDialog();
     drawAboutWindows();
     ImGui::Render();
     renderRasterView();
@@ -484,6 +549,11 @@ int Application::run() {
     else if (ui == "light") { selectLight(0); m_s.leftTab = 2; }
     else if (ui == "camera") { m_s.rightTab = 4; m_s.leftTab = 3; }
     else if (ui == "image") m_s.rightTab = 5;
+    else if (ui.rfind("import:", 0) == 0) {
+        // İçe aktarma penceresi, bir modelin viewport'a bırakılmış hâli (imleç ortada).
+        const Vec3f dropPoint(0.6f, 0.0f, 0.4f);
+        requestImport({ui.substr(7)}, &dropPoint);
+    }
     if (!m_opts.saveProjectPath.empty()) {
         m_s.projectPath = m_opts.saveProjectPath;
         saveProject();

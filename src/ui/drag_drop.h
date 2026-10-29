@@ -40,8 +40,7 @@ inline bool isTextureExtension(const std::string& path) {
 
 inline bool isModelExtension(const std::string& path) {
     const std::string e = lowerExt(path);
-    // ponytail: OBJ + glTF 2.0 only; FBX needs Assimp (Faz 7 / v2)
-    return e == ".obj" || e == ".gltf" || e == ".glb";
+    return e == ".obj" || e == ".gltf" || e == ".glb" || e == ".fbx" || e == ".abc";
 }
 
 } // namespace photon

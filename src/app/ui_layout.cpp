@@ -74,6 +74,31 @@ void Application::drawMenuBar() {
         ImGui::Separator();
         if (ImGui::MenuItem(ICON_BOX "  Model içe aktar…", "Ctrl+O")) openModelDialog();
         if (ImGui::MenuItem(ICON_GLOBE "  HDRI ortam aç…")) openHdrDialog();
+        if (ImGui::BeginMenu(ICON_FOLDER_OPEN "  Son kullanılanlar", !m_s.recentFiles.empty())) {
+            std::string pick;
+            for (const auto& r : m_s.recentFiles) {
+                const bool project = r.size() > 7 && r.compare(r.size() - 7, 7, ".photon") == 0;
+                if (ImGui::MenuItem((std::string(project ? ICON_FOLDER_OPEN "  " : ICON_BOX "  ") + ui::fileName(r)).c_str()))
+                    pick = r;
+                ui::Tooltip(r.c_str());
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("      Listeyi temizle")) {
+                m_s.recentFiles.clear();
+                savePrefs();
+            }
+            ImGui::EndMenu();
+            if (!pick.empty()) {
+                if (pick.size() > 7 && pick.compare(pick.size() - 7, 7, ".photon") == 0) openProject(pick);
+                else requestImport({pick});
+            }
+        }
+        if (ImGui::MenuItem(ICON_SETTINGS "  İçe aktarma ayarları…", nullptr, false, m_s.importPrefs.dontAsk)) {
+            // "Bir daha sorma" seçilmişse pencereyi geri getirmenin yolu.
+            m_s.importPrefs.dontAsk = false;
+            savePrefs();
+            setStatus("İçe aktarma penceresi yeniden açık: sonraki içe aktarmada ayarlar sorulacak");
+        }
         ImGui::Separator();
         if (ImGui::MenuItem(ICON_IMAGE_DOWN "  Viewport görüntüsünü kaydet…", "Ctrl+E")) exportViewport();
         ImGui::Separator();

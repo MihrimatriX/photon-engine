@@ -78,6 +78,8 @@ void Application::drawViewport() {
     }
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const ImVec2 size = ImGui::GetContentRegionAvail();
+    m_vpOrigin = origin;
+    m_vpSize = size;
     const int pw = std::max(1, static_cast<int>(size.x));
     const int ph = std::max(1, static_cast<int>(size.y));
     m_s.viewportPxW = pw;
@@ -247,7 +249,10 @@ void Application::drawViewport() {
                 if (s.id == static_cast<const char*>(p->Data)) applyStudio(s);
         }
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kPayloadModel)) {
-            importModel(static_cast<const char*>(p->Data));
+            // Kütüphane modeli imlecin altındaki yüzeye (zemin ya da başka bir nesnenin üstü) konur.
+            Vec3f hit;
+            if (pickAt(u, v, &hit)) importModel(static_cast<const char*>(p->Data), true, &hit);
+            else importModel(static_cast<const char*>(p->Data));
         }
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kPayloadPrimitive)) {
             // Şekil imlecin altındaki yüzeye (zemin ya da başka bir nesnenin üstü) konur.
@@ -762,7 +767,7 @@ void Application::drawWelcome(const ImVec2& origin, const ImVec2& size) {
     const ImVec2 ts = ImGui::CalcTextSize(title);
     dl->AddText(ImVec2(p.x + (w - ts.x) * 0.5f, dz0.y + 72), ui::col(pal.text), title);
     ImGui::PopFont();
-    const char* sub = "OBJ  •  glTF  •  GLB      HDR / EXR ortamlar";
+    const char* sub = "FBX  •  OBJ  •  glTF  •  Alembic      HDR / EXR ortamlar";
     const ImVec2 ss = ImGui::CalcTextSize(sub);
     dl->AddText(ImVec2(p.x + (w - ss.x) * 0.5f, dz0.y + 100), ui::col(pal.textDim), sub);
 

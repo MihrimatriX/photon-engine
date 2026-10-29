@@ -83,7 +83,7 @@ std::unique_ptr<SceneNode> importModelFile(const std::string& path, std::string*
             model = FbxLoader::load(path, &err);
         } else {
 #ifdef PHOTON_HAS_ALEMBIC
-            model = AlembicLoader::load(path, &err, options.alembicTime);
+            model = AlembicLoader::load(path, &err, options.alembicTime, options.unitMeters);
 #else
             err = "Bu sürüm Alembic desteği olmadan derlendi (.abc).";
 #endif
@@ -132,7 +132,9 @@ std::unique_ptr<SceneNode> importModelFile(const std::string& path, std::string*
     group->sourcePath = path;
     Transform fix;
     if (options.zUp) fix = Transform::rotateX(-0.5f * PI);
-    if (options.scale > 0.0f && options.scale != 1.0f) fix = Transform::scale(Vec3f(options.scale)) * fix;
+    float s = options.scale > 0.0f ? options.scale : 1.0f;
+    if (ext == ".obj" && options.unitMeters > 0.0f) s *= options.unitMeters;
+    if (s != 1.0f) fix = Transform::scale(Vec3f(s)) * fix;
     group->localTransform = fix * group->localTransform;
     return group;
 }
