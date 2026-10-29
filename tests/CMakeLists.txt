@@ -36,6 +36,7 @@ add_executable(photon_tests
     test_render_passes.cpp
     test_render_session.cpp
     test_camera_animation.cpp
+    test_dcc_import.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE
@@ -71,7 +72,8 @@ if(PHOTON_ALEMBIC_FOUND)
         target_link_libraries(photon_tests PRIVATE Alembic)
     endif()
 endif()
-target_compile_definitions(photon_tests PRIVATE PHOTON_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets")
+target_compile_definitions(photon_tests PRIVATE PHOTON_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
+                                               PHOTON_TEST_DATA="${CMAKE_SOURCE_DIR}/tests/data")
 
 photon_copy_oidn_dlls(photon_tests)
 

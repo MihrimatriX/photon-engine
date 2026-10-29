@@ -2,6 +2,8 @@
 // olarak yükleme.
 #pragma once
 
+#include "scene/camera_animation.h"
+#include "scene/document.h"
 #include "scene/scene_node.h"
 #include <memory>
 #include <string>
@@ -23,6 +25,22 @@ struct ModelImportOptions {
     double alembicTime = -1.0;
 };
 
+/// Model dosyasından gelen kameralar ve ışıklar (FBX: 3ds Max, Maya, Blender sahneleri).
+/// İçe aktarılan grubun YEREL uzayındadır: uygulama modeli yerleştirdikten (zemine oturtma,
+/// bırakılan nokta) sonra grubun dünya dönüşümüyle transformImportExtras() çağırır; böylece
+/// DCC'deki kadraj ve ışık düzeni modelle birlikte taşınır.
+struct ImportExtras {
+    std::vector<LightDesc> lights;
+    /// Her kamera bir iz: tek anahtarlı = sabit kamera (kayıtlı kamera olur), çok anahtarlı =
+    /// her karede örneklenmiş animasyon.
+    std::vector<CameraTrack> cameras;
+    bool empty() const { return lights.empty() && cameras.empty(); }
+};
+
+/// Grubun dünya dönüşümünü kameralara ve ışıklara uygular. Nokta/spot şiddeti ölçeğin karesiyle
+/// çarpılır (aynı uzaklık oranında aynı aydınlık); alan ışığı boyutları ölçeklenir.
+void transformImportExtras(ImportExtras& extras, const Transform& toWorld);
+
 /// Desteklenen model uzantısı mı (.obj, .gltf, .glb, .fbx, .abc)?
 bool isSupportedModelFile(const std::string& path);
 
@@ -34,8 +52,10 @@ std::string supportedModelPatterns();
 /// kullanan düğümler geometriyi paylaşır. Mesh düğümlerinin sourceIndex'i dosyadaki kararlı
 /// sıradır (proje yeniden yüklemede eşleme). Malzemesi olmayan parçalar nötr gri plastik alır.
 /// Başarısızsa nullptr ve @p error dolar; @p warnings (varsa) kayıpsız olmayan dönüşümleri sayar.
+/// @p extras doluysa dosyadaki kameralar ve ışıklar (yalnız FBX) da okunur.
 std::unique_ptr<SceneNode> importModelFile(const std::string& path, std::string* error = nullptr,
                                            const ModelImportOptions& options = {},
-                                           std::vector<std::string>* warnings = nullptr);
+                                           std::vector<std::string>* warnings = nullptr,
+                                           ImportExtras* extras = nullptr);
 
 } // namespace photon

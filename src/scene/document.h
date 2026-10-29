@@ -87,6 +87,8 @@ std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& de
 
 /// Yönlü ışığın ışığın GİTTİĞİ yön vektörü (azimut/yükseklikten).
 Vec3f directionalTravelDir(const LightDesc& d);
+/// Yönlü ışığın geldiği yön (azimut/yükseklik, derece) → birim vektör.
+Vec3f sphericalDirection(float azimuthDeg, float elevationDeg);
 
 /// Tek renkli/geçişli prosedürel gökyüzü + iki "pencere" (krom yansımaları için).
 std::shared_ptr<const Image> makeProceduralSky(const Color3f& zenith, const Color3f& horizon);

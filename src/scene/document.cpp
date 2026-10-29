@@ -32,6 +32,8 @@ Vec3f sphericalDir(float azimuthDeg, float elevationDeg) {
 
 } // namespace
 
+Vec3f sphericalDirection(float azimuthDeg, float elevationDeg) { return sphericalDir(azimuthDeg, elevationDeg); }
+
 Vec3f directionalTravelDir(const LightDesc& d) {
     return -sphericalDir(d.azimuthDeg, d.elevationDeg);
 }
