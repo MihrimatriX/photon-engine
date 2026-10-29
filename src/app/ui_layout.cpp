@@ -174,9 +174,8 @@ void Application::drawMenuBar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Görünüm")) {
-        for (int i = 0; i < kViewModeCount; ++i) {
-            const ViewMode m = static_cast<ViewMode>(i);
-            if (ImGui::MenuItem(viewModeName(m), i == 0 ? "Z" : nullptr, m_s.viewMode == m, !isRasterMode(m) || m_rasterOk))
+        for (const ViewMode m : kViewModeOrder) {
+            if (ImGui::MenuItem(viewModeName(m), m == ViewMode::Render ? "Z" : nullptr, m_s.viewMode == m, !isRasterMode(m) || m_rasterOk))
                 setViewMode(m);
         }
         ImGui::Separator();

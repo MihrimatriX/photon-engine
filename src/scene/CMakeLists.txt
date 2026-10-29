@@ -11,6 +11,7 @@ add_library(photon_scene STATIC
     package.cpp
     dcc_convert.cpp
     primitives.cpp
+    realtime_scene.cpp
 )
 
 target_link_libraries(photon_scene PUBLIC

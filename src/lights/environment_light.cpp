@@ -296,11 +296,13 @@ float EnvironmentLight::pdfLi(const Vec3f& wi, const Vec3f&) const {
 Color3f EnvironmentLight::eval(const Vec3f& direction) const {
     Color3f sun;
     if (m_sunPdfWeight > 0.0f && direction.normalized().dot(m_sunDir) >= m_sunCosMax) sun = m_sunRadiance;
-    if (!m_envMap || m_envMap->width() <= 0) {
-        return Color3f(0.5f) * m_intensity + sun;
-    }
-    Vec2f uv = directionToEquirect(direction, m_rotation);
-    return sampleEquirect(*m_envMap, uv.x, uv.y) * m_intensity + sun;
+    return evalSky(direction) + sun;
+}
+
+Color3f EnvironmentLight::evalSky(const Vec3f& direction) const {
+    if (!m_envMap || m_envMap->width() <= 0) return Color3f(0.5f) * m_intensity;
+    const Vec2f uv = directionToEquirect(direction, m_rotation);
+    return sampleEquirect(*m_envMap, uv.x, uv.y) * m_intensity;
 }
 
 Color3f EnvironmentLight::power() const {

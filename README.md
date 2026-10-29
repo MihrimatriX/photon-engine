@@ -68,6 +68,13 @@ grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazılm
 - **Görüntüleyici (imager):** bloom, yıldız parlaması (glare), beyaz dengesi (K + ton), kontrast,
   doygunluk, vinyet, renk sapması; viewport ve son render'da (EXR ham kalır).
 - Ton eşleme: **Khronos PBR Nötr** (ürün renkleri için), AgX, ACES, Hable; EV pozlama; sRGB + titreşimli 8-bit.
+- **Işık ve kamera araçları (Maverick / KeyShot / Marmoset tarzı):** *Parlamayı yerleştir* — modelde
+  tıklanan noktaya ışığın yansıması düşer (ayna kuralı, ışığın uzaklığı korunur); ışık rengi **Kelvin**
+  (1500–12000 K, hazır değerler); **lens kaydırma** ve tek tıkla **iki noktalı perspektif** (mimaride
+  dikeyler paralel); **kompozisyon kılavuzları** (üçler, altın oran, merkez) ve render en-boy oranında
+  **çıktı kadrajı**.
+
+![Parlamayı yerleştir, Kelvin, üçler kuralı ve 4:5 çıktı kadrajı](docs/img/v4-protools.jpg)
 
 ![Bokeh, bloom ve yıldız parlaması](docs/img/v2-bokeh.jpg)
 
@@ -90,11 +97,29 @@ grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazılm
   "bir daha sorma"), **imlecin altına bırakma** (model bırakılan yüzeye oturur), çoklu dosya
   bırakma, **son dosyalar** menüsü.
 
+**3ds Max, Maya ve Blender**
+- **Canlı bağlantı:** DCC içindeki *Gönder* düğmesi sahneyi (dokular gömülü, kameralar, ışıklar,
+  pişirilmiş animasyon) PhotonEngine'e yollar; aynı sahne yeniden gelince model yerinde güncellenir,
+  PhotonEngine'de atanan malzemeler korunur. Yalnız bu bilgisayardan, jetonlu yerel TCP.
+- **`.max`, `.ma`/`.mb`, `.blend` dosyalarını doğrudan açma:** makinede kurulu DCC'nin komut satırı
+  aracı (3dsmaxbatch, mayapy, blender -b) arka planda FBX'e çevirir; sonuç önbelleklenir.
+- **Kamera animasyonu:** FBX/DCC kameraları her kare örneklenerek zaman çizelgesine gelir; anahtar
+  kare ekleme, Catmull-Rom yolu, kare dizisi render.
+- **Kendi paket biçimimiz `.photonpack`:** sahne, tüm dokular/HDRI/IES ve ikili geometri tek dosyada
+  (ZIP); başka makinede kaynak model olmadan açılır. Ayrıntı: `integrations/README.md`.
+
 **Cihazlar ve modlar**
 - Render iki eksende ayrılır: hangi cihazda (`RenderDevice`: bugün CPU; GPU arka uçları aynı
   arayüze eklenecek) ve hangi modda (`RenderSession`: Etkileşimli viewport ya da Son render).
   Viewport, son render, turntable ve CLI tek yoldan geçer. Makinedeki GPU'lar donanım bilgisiyle
   listelenir (ör. GTX 1080: sm_61, RT çekirdeği yok). Ayrıntı: `docs/architecture.md` §2b.
+- **Gerçek zamanlı mod (oyun motoru gibi):** viewport'ta OpenGL ile anında PBR — GGX metal/pürüzlülük,
+  aynı ışıklar, 4 ışığa kadar **PCSS yumuşak gölge** (temasta keskin, uzakta yumuşak), HDRI'den SH9
+  difüz + mip zincirinden yansıma, **HDRI'deki güneş ayıklanıp gölge düşürür**, dokular (kutu eşleme
+  dahil), cam (kısmi gölge, Fresnel), zemin + temas gölgesi, gölge yakalayıcı, ışın izleyicinin ton
+  eşlemesi 3B LUT ile birebir. Yazılım GL'inde (llvmpipe) bile ~50 fps. Ayrıntı: §2c.
+
+![Işın izleme (sol) ve gerçek zamanlı mod (sağ): HDRI'deki güneşin gölgeleri, dokular, cam](docs/img/v4-realtime.jpg)
 
 **Arayüz**
 - Kütüphane (malzeme / ortam / stüdyo / model / doku), sahne ağacı, özellikler (nesne, malzeme, ortam, ışıklar, kamera, görüntü).

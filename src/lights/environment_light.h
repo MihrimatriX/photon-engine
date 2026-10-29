@@ -74,6 +74,12 @@ public:
 
     /// Verilen dünya yönündeki arka plan radyansı.
     Color3f eval(const Vec3f& direction) const;
+    /// Güneş diski hariç radyans (gerçek zamanlı mod güneşi ayrı, gölgeli bir ışık olarak çizer).
+    Color3f evalSky(const Vec3f& direction) const;
+    const Vec3f& sunDirection() const { return m_sunDir; }
+    /// Disk radyansı (yoğunluk dahil) ve yarı açının kosinüsü.
+    const Color3f& sunRadiance() const { return m_sunRadiance; }
+    float sunCosMax() const { return m_sunCosMax; }
 
     /// sampleLi'nin katı açı (solid angle) PDF'i. İki aşırı yükleme de parlaklık
     /// CDF'ini kullanır (normal kullanılmaz).

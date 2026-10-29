@@ -53,6 +53,10 @@ Vec3f placeLightForHighlight(LightDesc& d, const Vec3f& eye, const Vec3f& point,
     return r;
 }
 
+Color3f lightEmission(const LightDesc& d) {
+    return (d.temperatureK > 0.0f ? temperatureColor(d.temperatureK) : d.color) * d.intensity;
+}
+
 Vec3f directionalTravelDir(const LightDesc& d) {
     return -sphericalDir(d.azimuthDeg, d.elevationDeg);
 }
@@ -63,7 +67,7 @@ std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& de
     std::vector<std::shared_ptr<Light>> out;
     for (const LightDesc& d : descs) {
         if (!d.enabled || d.intensity <= 0.0f) continue;
-        const Color3f L = (d.temperatureK > 0.0f ? temperatureColor(d.temperatureK) : d.color) * d.intensity;
+        const Color3f L = lightEmission(d);
         switch (d.type) {
             case LightDesc::Type::Area: {
                 Vec3f n = d.target - d.position;

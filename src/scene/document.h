@@ -85,6 +85,10 @@ void resolveSunPosition(EnvironmentDesc& env);
 nlohmann::json imagerToJson(const ImagerSettings& s);
 ImagerSettings imagerFromJson(const nlohmann::json& j);
 
+/// Işığın renk × güç değeri (Kelvin açıksa sıcaklığın rengi): nokta/spot için şiddet I (W/sr),
+/// alan için radyans L, yönlü için ışınım E.
+Color3f lightEmission(const LightDesc& d);
+
 /// LightDesc listesinden render ışıkları (yalnız etkin olanlar).
 std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& descs);
 

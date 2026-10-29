@@ -66,6 +66,10 @@ private:
     RasterView m_raster;               ///< GPU görüntü modları (Katı, Tel kafes, Normaller, bindirme)
     bool m_rasterOk = false;           ///< Sürücü gerekli GL işlevlerini verdi mi
     unsigned int m_rasterTex = 0;      ///< Son GPU çiziminin dokusu (kimlik sabit kalır)
+    // Gerçek zamanlı mod: ortam ve ton eşleme yalnız girdileri değişince yeniden hazırlanır.
+    RasterView::Realtime m_rtInputs;
+    std::string m_rtEnvKey;
+    int m_rtLutOp = -1;
     size_t m_rasterTris = 0;           ///< Son GPU çizimindeki üçgen sayısı (rozet)
     /// ImGui::Render() sonrası, çizim listesi GPU'ya gitmeden hemen önce: GPU modunun
     /// dokusunu bu karenin kamerasıyla günceller (bir kare gecikme olmaz).
@@ -178,6 +182,8 @@ public:
     /// Kamerayı yatay bakışa getirir, konuyu kadrajda tutmak için dikey lens kaydırması uygular.
     void applyTwoPointPerspective();
     void drawCompositionGuides(const ImVec2& origin, const ImVec2& size);
+    /// Gerçek zamanlı modun girdileri: ortam/LUT önbellekten, ışıklar ve zemin her kare.
+    void prepareRealtime(const AABB& sceneBounds);
     void saveProjectAs();
     void savePackageAs();
     void saveProject();
