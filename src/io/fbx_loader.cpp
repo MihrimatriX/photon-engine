@@ -207,6 +207,170 @@ bool convertNode(const ufbx_node* node, ImportedNode& out, Context& ctx) {
     return hasContent;
 }
 
+
+/// Modelin dünya uzayı sınırları (kameraların hedef uzaklığı ve ışık şiddeti ölçeği için).
+void accumulateBounds(const ImportedNode& n, const Transform& parent, const ImportedModel& model, AABB& box) {
+    const Transform world = parent * n.local;
+    for (int k : n.meshes) {
+        const AABB b = model.meshes[static_cast<size_t>(k)].mesh->bounds();
+        for (int c = 0; c < 8; ++c) {
+            const Vec3f p((c & 1) ? b.pMax.x : b.pMin.x, (c & 2) ? b.pMax.y : b.pMin.y, (c & 4) ? b.pMax.z : b.pMin.z);
+            box.merge(world.transformPoint(p));
+        }
+    }
+    for (const ImportedNode& c : n.children) accumulateBounds(c, world, model, box);
+}
+
+Vec3f vec(const ufbx_vec3& v) {
+    return Vec3f(static_cast<float>(v.x), static_cast<float>(v.y), static_cast<float>(v.z));
+}
+
+/// Kamera düğümünün o anki görünümü. target_camera_axes ile kamera yerel −Z'ye bakar.
+ImportedCameraKey cameraKey(const ufbx_node* node, const ufbx_camera* cam, const AABB& box, float time) {
+    ImportedCameraKey k;
+    k.time = time;
+    const ufbx_matrix& m = node->node_to_world;
+    k.eye = vec(ufbx_transform_position(&m, ufbx_vec3{0, 0, 0}));
+    Vec3f fwd = vec(ufbx_transform_direction(&m, ufbx_vec3{0, 0, -1}));
+    fwd = fwd.lengthSquared() > 1e-12f ? fwd.normalized() : Vec3f(0, 0, -1);
+    // Hedef: modelin merkezinin bakış doğrultusundaki izdüşümü (yörünge merkezi olarak doğal);
+    // model kameranın arkasındaysa sınır boyunun yarısı kadar ileri.
+    const bool hasBox = box.pMin.x <= box.pMax.x;
+    const float diag = hasBox ? (box.pMax - box.pMin).length() : 2.0f;
+    float d = hasBox ? (box.centroid() - k.eye).dot(fwd) : 0.0f;
+    if (!(d > 0.05f * diag)) d = std::max(0.5f * diag, 1e-3f);
+    k.target = k.eye + fwd * d;
+    float fov = static_cast<float>(cam->field_of_view_deg.y);
+    if (!(fov > 0.1f)) {
+        // Görüş açısı yazılmamış (film sığdırma kuralı yok): odak uzaklığı ve film yüksekliğinden.
+        const double filmIn = cam->aperture_size_inch.y > 0.0 ? cam->aperture_size_inch.y : cam->film_size_inch.y;
+        const double filmMm = filmIn * 25.4;
+        fov = (cam->focal_length_mm > 0.0 && filmMm > 0.0)
+                  ? static_cast<float>(2.0 * std::atan(filmMm / (2.0 * cam->focal_length_mm)) * 180.0 / 3.14159265358979)
+                  : 35.0f;
+    }
+    k.fovDeg = std::clamp(fov, 1.0f, 170.0f);
+    return k;
+}
+
+void readCameras(const ufbx_scene* scene, const AABB& box, ImportedModel& model) {
+    const double fps = scene->settings.frames_per_second > 0.0 ? scene->settings.frames_per_second : 24.0;
+    const ufbx_anim* anim = scene->anim;
+    double t0 = anim ? anim->time_begin : 0.0, t1 = anim ? anim->time_end : 0.0;
+    if (anim && !(t1 > t0) && scene->anim_curves.count > 0) {
+        // Yığının zaman aralığı yazılmamış (bazı dışa aktarıcılar): eğrilerin anahtarlarından.
+        t0 = scene->anim_curves.data[0]->min_time;
+        t1 = scene->anim_curves.data[0]->max_time;
+        for (size_t i = 1; i < scene->anim_curves.count; ++i) {
+            t0 = std::min(t0, scene->anim_curves.data[i]->min_time);
+            t1 = std::max(t1, scene->anim_curves.data[i]->max_time);
+        }
+    }
+    std::vector<size_t> camNodes;
+    for (size_t i = 0; i < scene->nodes.count; ++i)
+        if (scene->nodes.data[i]->camera) camNodes.push_back(i);
+    if (camNodes.empty()) return;
+    for (size_t i : camNodes) {
+        const ufbx_node* n = scene->nodes.data[i];
+        ImportedCamera c;
+        c.name = str(n->name).empty() ? "Kamera" : str(n->name);
+        c.orthographic = n->camera->projection_mode == UFBX_PROJECTION_MODE_ORTHOGRAPHIC;
+        c.orthoHeight = static_cast<float>(n->camera->orthographic_size.y);
+        c.fps = static_cast<float>(fps);
+        c.keys.push_back(cameraKey(n, n->camera, box, 0.0f));
+        model.cameras.push_back(std::move(c));
+    }
+    // Animasyon: her karede sahne değerlendirilir (ebeveyn zinciri, eksen ve birim dönüşümleri
+    // ufbx'in kendi kurallarıyla). Kamera hiç kıpırdamıyorsa tek anahtar kalır.
+    if (!anim || !(t1 > t0)) return;
+    int frames = static_cast<int>(std::floor((t1 - t0) * fps + 0.5)) + 1;
+    double step = 1.0 / fps;
+    constexpr int kMaxFrames = 3000;
+    if (frames > kMaxFrames) {
+        step = (t1 - t0) / (kMaxFrames - 1);
+        frames = kMaxFrames;
+        model.warnings.push_back("Kamera animasyonu çok uzun: " + std::to_string(kMaxFrames) + " örneğe seyreltildi");
+    }
+    std::vector<std::vector<ImportedCameraKey>> sampled(camNodes.size());
+    for (int f = 0; f < frames; ++f) {
+        const double t = std::min(t1, t0 + step * f);
+        ufbx_error err;
+        ufbx_scene* ev = ufbx_evaluate_scene(scene, anim, t, nullptr, &err);
+        if (!ev) break;
+        for (size_t c = 0; c < camNodes.size(); ++c) {
+            const ufbx_node* n = ev->nodes.data[camNodes[c]];
+            if (n && n->camera) sampled[c].push_back(cameraKey(n, n->camera, box, static_cast<float>(t - t0)));
+        }
+        ufbx_free_scene(ev);
+    }
+    for (size_t c = 0; c < camNodes.size(); ++c) {
+        auto& s = sampled[c];
+        if (s.size() < 2) continue;
+        bool moves = false;
+        for (const ImportedCameraKey& k : s)
+            moves = moves || (k.eye - s.front().eye).length() > 1e-5f || (k.target - s.front().target).length() > 1e-5f ||
+                    std::abs(k.fovDeg - s.front().fovDeg) > 1e-3f;
+        if (moves) model.cameras[c].keys = std::move(s);
+    }
+}
+
+/// FBX ışık şiddetleri uygulamalar arasında standart değildir (Maya azalmasız "1", Max fotometrik,
+/// Blender watt). Göreli oranlar korunur; mutlak düzey, şiddeti 1 olan bir ışığın modelin
+/// merkezinde ~2 ışınım (irradiance) vereceği şekilde ölçeklenir. Kullanıcı Işıklar sekmesinden ayarlar.
+void readLights(const ufbx_scene* scene, const AABB& box, ImportedModel& model) {
+    const bool hasBox = box.pMin.x <= box.pMax.x;
+    const Vec3f center = hasBox ? box.centroid() : Vec3f(0.0f);
+    const float diag = hasBox ? (box.pMax - box.pMin).length() : 2.0f;
+    for (size_t i = 0; i < scene->nodes.count; ++i) {
+        const ufbx_node* n = scene->nodes.data[i];
+        const ufbx_light* fl = n->light;
+        if (!fl || !fl->cast_light) continue;
+        ImportedLight l;
+        l.name = str(n->name).empty() ? "Işık" : str(n->name);
+        const ufbx_matrix& m = n->node_to_world;
+        l.position = vec(ufbx_transform_position(&m, ufbx_vec3{0, 0, 0}));
+        Vec3f dir = vec(ufbx_transform_direction(&m, ufbx_vec3{0, 0, -1}));
+        l.direction = dir.lengthSquared() > 1e-12f ? dir.normalized() : Vec3f(0, -1, 0);
+        l.color = col(fl->color);
+        const float u = std::max(0.0f, static_cast<float>(fl->intensity));
+        const float d = std::max(0.05f * diag, (center - l.position).length());
+        l.aimDistance = d;
+        constexpr float kTargetIrradiance = 2.0f;
+        switch (fl->type) {
+            case UFBX_LIGHT_DIRECTIONAL:
+                l.type = ImportedLight::Type::Directional;
+                l.intensity = kTargetIrradiance * u;
+                break;
+            case UFBX_LIGHT_SPOT: {
+                l.type = ImportedLight::Type::Spot;
+                l.intensity = kTargetIrradiance * u * d * d;
+                const float outer = std::clamp(static_cast<float>(fl->outer_angle), 1.0f, 179.0f);
+                const float inner = std::clamp(static_cast<float>(fl->inner_angle), 0.0f, outer);
+                l.coneAngleDeg = outer;
+                l.coneBlend = std::clamp(1.0f - inner / outer, 0.0f, 1.0f);
+                break;
+            }
+            case UFBX_LIGHT_AREA: {
+                l.type = ImportedLight::Type::Area;
+                // Maya alan ışığı yerel −1..1 karesidir; boyut düğüm ölçeğinden gelir.
+                l.width = std::max(1e-3f, 2.0f * vec(ufbx_transform_direction(&m, ufbx_vec3{1, 0, 0})).length());
+                l.height = std::max(1e-3f, 2.0f * vec(ufbx_transform_direction(&m, ufbx_vec3{0, 1, 0})).length());
+                l.intensity = kTargetIrradiance * u * d * d / (l.width * l.height);
+                break;
+            }
+            default: // nokta, hacim
+                l.type = ImportedLight::Type::Point;
+                l.intensity = kTargetIrradiance * u * d * d;
+                break;
+        }
+        model.lights.push_back(std::move(l));
+    }
+    if (!model.lights.empty())
+        model.warnings.push_back(std::to_string(model.lights.size()) +
+                                 " ışık alındı; FBX şiddetleri uygulamalar arasında farklı olduğundan düzey "
+                                 "ölçeklendi, oranlar korundu");
+}
+
 } // namespace
 
 ImportedModel FbxLoader::load(const std::string& path, std::string* error) {
@@ -219,7 +383,12 @@ ImportedModel FbxLoader::load(const std::string& path, std::string* error) {
     opts.geometry_transform_handling = UFBX_GEOMETRY_TRANSFORM_HANDLING_MODIFY_GEOMETRY;
     opts.inherit_mode_handling = UFBX_INHERIT_MODE_HANDLING_COMPENSATE;
     opts.generate_missing_normals = true;
-    opts.ignore_animation = true; // statik içe aktarma: dosyadaki dinlenme (rest) pozu
+    // Kameralar yerel −Z'ye bakar, +Y yukarı (OpenGL kuralı); yönlü ışıklar da −Z'ye. FBX'in
+    // kendi kuralı kamera için +X, ışık için −Y'dir.
+    opts.target_camera_axes = ufbx_coordinate_axes{UFBX_COORDINATE_AXIS_POSITIVE_X, UFBX_COORDINATE_AXIS_POSITIVE_Y,
+                                                   UFBX_COORDINATE_AXIS_POSITIVE_Z};
+    opts.target_light_axes = opts.target_camera_axes;
+    // Animasyon yüklenir (kamera animasyonu için); mesh'ler yine dosyadaki dinlenme pozundan okunur.
     ufbx_error err;
     ufbx_scene* scene = ufbx_load_file(path.c_str(), &opts, &err);
     if (!scene) {
@@ -235,12 +404,16 @@ ImportedModel FbxLoader::load(const std::string& path, std::string* error) {
     ctx.originalUnitMeters = scene->settings.original_unit_meters > 0.0 ? scene->settings.original_unit_meters : 1.0;
     convertNode(scene->root_node, ctx.model.root, ctx);
     ctx.model.root.name = pathToUtf8(pathFromUtf8(path).stem());
+    AABB box = AABB::empty();
+    accumulateBounds(ctx.model.root, Transform(), ctx.model, box);
+    readCameras(scene, box, ctx.model);
+    readLights(scene, box, ctx.model);
     if (ctx.unsupportedOpacity > 0)
         ctx.model.warnings.push_back(std::to_string(ctx.unsupportedOpacity) + " malzemede opaklık (alfa) yok sayıldı");
     if (ctx.missingTextures > 0)
         ctx.model.warnings.push_back(std::to_string(ctx.missingTextures) + " doku dosyası bulunamadı");
     ufbx_free_scene(scene);
-    if (ctx.model.meshes.empty() && error) *error = "FBX dosyasında görünür mesh yok: " + path;
+    if (ctx.model.empty() && error) *error = "FBX dosyasında görünür mesh, kamera ya da ışık yok: " + path;
     return std::move(ctx.model);
 }
 

@@ -1,0 +1,163 @@
+; FBX 7.4.0 project file
+; PhotonEngine test sahnesi (elle yazıldı): 1 m küp, 1 saniyede x = 0 → 3 kayan 35 mm kamera,
+; renkli nokta ışık, aşağı bakan spot (iç 20°, dış 40°), eğik yönlü ışık. Y yukarı, metre, 30 fps.
+FBXHeaderExtension:  {
+	FBXHeaderVersion: 1003
+	FBXVersion: 7400
+	Creator: "PhotonEngine test"
+}
+GlobalSettings:  {
+	Version: 1000
+	Properties70:  {
+		P: "UpAxis", "int", "Integer", "",1
+		P: "UpAxisSign", "int", "Integer", "",1
+		P: "FrontAxis", "int", "Integer", "",2
+		P: "FrontAxisSign", "int", "Integer", "",1
+		P: "CoordAxis", "int", "Integer", "",0
+		P: "CoordAxisSign", "int", "Integer", "",1
+		P: "UnitScaleFactor", "double", "Number", "",100
+		P: "OriginalUnitScaleFactor", "double", "Number", "",100
+		P: "TimeMode", "enum", "", "",6
+		P: "TimeSpanStart", "KTime", "Time", "",0
+		P: "TimeSpanStop", "KTime", "Time", "",46186158000
+	}
+}
+Objects:  {
+	Model: 1000, "Model::Kutu", "Mesh" {
+		Version: 232
+		Properties70:  {
+			P: "Lcl Translation", "Lcl Translation", "", "A",0,0,0
+		}
+	}
+	Geometry: 2000, "Geometry::Kutu", "Mesh" {
+		Vertices: *24 {
+			a: -0.5,-0.5,-0.5,0.5,-0.5,-0.5,0.5,0.5,-0.5,-0.5,0.5,-0.5,-0.5,-0.5,0.5,0.5,-0.5,0.5,0.5,0.5,0.5,-0.5,0.5,0.5
+		}
+		PolygonVertexIndex: *24 {
+			a: 0,3,2,-2,4,5,6,-8,0,1,5,-5,2,3,7,-7,1,2,6,-6,0,4,7,-4
+		}
+		GeometryVersion: 124
+	}
+	Model: 3000, "Model::Cekim", "Camera" {
+		Version: 232
+		Properties70:  {
+			P: "Lcl Translation", "Lcl Translation", "", "A",0,1,5
+			P: "Lcl Rotation", "Lcl Rotation", "", "A",0,90,0
+		}
+	}
+	NodeAttribute: 4000, "NodeAttribute::Cekim", "Camera" {
+		Properties70:  {
+			P: "ApertureMode", "enum", "", "",2
+			P: "FocalLength", "Number", "", "A",35
+			P: "FilmWidth", "double", "Number", "",1.41732283464567
+			P: "FilmHeight", "double", "Number", "",0.94488188976378
+		}
+		TypeFlags: "Camera"
+		GeometryVersion: 124
+		Position: 0,0,0
+		Up: 0,1,0
+		LookAt: 0,0,0
+		ShowInfoOnMoving: 1
+		ShowAudio: 0
+		AudioColor: 0,1,0
+		CameraOrthoZoom: 1
+	}
+	Model: 5000, "Model::Lamba", "Light" {
+		Version: 232
+		Properties70:  {
+			P: "Lcl Translation", "Lcl Translation", "", "A",2,3,1
+		}
+	}
+	NodeAttribute: 6000, "NodeAttribute::Lamba", "Light" {
+		Properties70:  {
+			P: "LightType", "enum", "", "",0
+			P: "Color", "Color", "", "A",1,0.5,0.25
+			P: "Intensity", "Number", "", "A",100
+		}
+		TypeFlags: "Light"
+		GeometryVersion: 124
+	}
+	Model: 5100, "Model::Spot", "Light" {
+		Version: 232
+		Properties70:  {
+			P: "Lcl Translation", "Lcl Translation", "", "A",0,4,0
+		}
+	}
+	NodeAttribute: 6100, "NodeAttribute::Spot", "Light" {
+		Properties70:  {
+			P: "LightType", "enum", "", "",2
+			P: "Color", "Color", "", "A",1,1,1
+			P: "Intensity", "Number", "", "A",200
+			P: "InnerAngle", "Number", "", "A",20
+			P: "OuterAngle", "Number", "", "A",40
+		}
+		TypeFlags: "Light"
+		GeometryVersion: 124
+	}
+	Model: 5200, "Model::Gunes", "Light" {
+		Version: 232
+		Properties70:  {
+			P: "Lcl Translation", "Lcl Translation", "", "A",0,10,0
+			P: "Lcl Rotation", "Lcl Rotation", "", "A",45,0,0
+		}
+	}
+	NodeAttribute: 6200, "NodeAttribute::Gunes", "Light" {
+		Properties70:  {
+			P: "LightType", "enum", "", "",1
+			P: "Color", "Color", "", "A",1,1,1
+			P: "Intensity", "Number", "", "A",100
+		}
+		TypeFlags: "Light"
+		GeometryVersion: 124
+	}
+	AnimationStack: 7000, "AnimStack::Take 001", "" {
+		Properties70:  {
+			P: "LocalStop", "KTime", "Time", "",46186158000
+			P: "ReferenceStop", "KTime", "Time", "",46186158000
+		}
+	}
+	AnimationLayer: 8000, "AnimLayer::BaseLayer", "" {
+	}
+	AnimationCurveNode: 9000, "AnimCurveNode::T", "" {
+		Properties70:  {
+			P: "d|X", "Number", "", "A",0
+			P: "d|Y", "Number", "", "A",1
+			P: "d|Z", "Number", "", "A",5
+		}
+	}
+	AnimationCurve: 10000, "AnimCurve::", "" {
+		Default: 0
+		KeyVer: 4009
+		KeyTime: *2 {
+			a: 0,46186158000
+		}
+		KeyValueFloat: *2 {
+			a: 0,3
+		}
+		KeyAttrFlags: *1 {
+			a: 260
+		}
+		KeyAttrDataFloat: *4 {
+			a: 0,0,218434821,0
+		}
+		KeyAttrRefCount: *1 {
+			a: 2
+		}
+	}
+}
+Connections:  {
+	C: "OO",1000,0
+	C: "OO",2000,1000
+	C: "OO",3000,0
+	C: "OO",4000,3000
+	C: "OO",5000,0
+	C: "OO",6000,5000
+	C: "OO",5100,0
+	C: "OO",6100,5100
+	C: "OO",5200,0
+	C: "OO",6200,5200
+	C: "OO",8000,7000
+	C: "OO",9000,8000
+	C: "OP",9000,3000, "Lcl Translation"
+	C: "OP",10000,9000, "d|X"
+}

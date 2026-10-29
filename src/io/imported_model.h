@@ -32,11 +32,45 @@ struct ImportedNode {
     std::vector<ImportedNode> children;
 };
 
+/// DCC kamerasının bir anahtarı. Konumlar dosyanın dünya uzayında (kök düğümün ebeveyni).
+struct ImportedCameraKey {
+    float time = 0.0f;   ///< saniye, animasyonun başından
+    Vec3f eye{0.0f};
+    Vec3f target{0.0f, 0.0f, -1.0f};
+    float fovDeg = 35.0f; ///< dikey
+};
+
+/// DCC kamerası (FBX). Tek anahtar = sabit kamera; birden çok = her karede örneklenmiş animasyon.
+struct ImportedCamera {
+    std::string name;
+    bool orthographic = false;
+    float orthoHeight = 2.0f;
+    float fps = 24.0f;
+    std::vector<ImportedCameraKey> keys;
+};
+
+/// DCC ışığı (FBX), motor birimlerine dönüştürülmüş şiddetle. Konum/yön dosyanın dünya uzayında.
+struct ImportedLight {
+    enum class Type { Point, Spot, Directional, Area };
+    Type type = Type::Point;
+    std::string name;
+    Vec3f position{0.0f};
+    Vec3f direction{0.0f, -1.0f, 0.0f}; ///< ışığın ilerlediği yön (spot, yönlü, alan)
+    float aimDistance = 1.0f;           ///< spot/alan: hedef noktaya uzaklık
+    Color3f color{1.0f};
+    float intensity = 1.0f;
+    float coneAngleDeg = 45.0f;         ///< spot: tam koni açısı
+    float coneBlend = 0.15f;
+    float width = 1.0f, height = 1.0f;  ///< alan: dörtgen boyutu
+};
+
 struct ImportedModel {
     std::vector<ImportedMesh> meshes;
     ImportedNode root;
+    std::vector<ImportedCamera> cameras;
+    std::vector<ImportedLight> lights;
     std::vector<std::string> warnings;
-    bool empty() const { return meshes.empty(); }
+    bool empty() const { return meshes.empty() && cameras.empty() && lights.empty(); }
 };
 
 /// Üçgen köşelerini (konum, normal, UV) toplar; aynı köşeleri birleştirerek indeksli bir mesh kurar.

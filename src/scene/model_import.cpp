@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 
 namespace photon {
@@ -64,8 +65,96 @@ std::string supportedModelPatterns() {
     return alembicAvailable() ? "*.fbx;*.obj;*.gltf;*.glb;*.abc" : "*.fbx;*.obj;*.gltf;*.glb";
 }
 
+namespace {
+
+/// Dosyanın dünya uzayındaki (kök düğümün ebeveyni) kamera ve ışıkları grubun yerel uzayına alır.
+void collectExtras(const ImportedModel& model, ImportExtras& out) {
+    const Transform toLocal = model.root.local.inverse();
+    for (const ImportedCamera& c : model.cameras) {
+        CameraTrack t;
+        t.name = c.name;
+        t.fps = std::clamp(c.fps, 1.0f, 240.0f);
+        t.smooth = true; // her kare örneklendi: Hermite eğrisi örnekleri birebir izler
+        for (const ImportedCameraKey& k : c.keys) {
+            CameraKey key;
+            key.time = k.time;
+            key.eye = toLocal.transformPoint(k.eye);
+            key.target = toLocal.transformPoint(k.target);
+            key.fovDeg = k.fovDeg;
+            t.keys.push_back(key);
+        }
+        if (!t.empty()) out.cameras.push_back(std::move(t));
+    }
+    for (const ImportedLight& l : model.lights) {
+        LightDesc d;
+        d.name = l.name;
+        d.color = l.color;
+        d.intensity = l.intensity;
+        d.visibleToCamera = false;
+        const Vec3f pos = toLocal.transformPoint(l.position);
+        const Vec3f aim = toLocal.transformPoint(l.position + l.direction * l.aimDistance);
+        switch (l.type) {
+            case ImportedLight::Type::Point:
+                d.type = LightDesc::Type::Point;
+                d.position = pos;
+                break;
+            case ImportedLight::Type::Spot:
+                d.type = LightDesc::Type::Spot;
+                d.position = pos;
+                d.target = aim;
+                d.coneAngleDeg = l.coneAngleDeg;
+                d.coneBlend = l.coneBlend;
+                break;
+            case ImportedLight::Type::Area:
+                d.type = LightDesc::Type::Area;
+                d.position = pos;
+                d.target = aim;
+                d.width = l.width;
+                d.height = l.height;
+                break;
+            case ImportedLight::Type::Directional: {
+                d.type = LightDesc::Type::Directional;
+                const Vec3f from = -toLocal.transformVector(l.direction).normalized();
+                d.elevationDeg = std::asin(std::clamp(from.y, -1.0f, 1.0f)) * RAD_TO_DEG;
+                d.azimuthDeg = std::atan2(from.z, from.x) * RAD_TO_DEG;
+                d.position = pos;
+                break;
+            }
+        }
+        out.lights.push_back(std::move(d));
+    }
+}
+
+} // namespace
+
+void transformImportExtras(ImportExtras& extras, const Transform& toWorld) {
+    // Ortalama ölçek: birim dönüşümü ve kullanıcı ölçeği tekdüzedir.
+    const float s = (toWorld.transformVector(Vec3f(1, 0, 0)).length() + toWorld.transformVector(Vec3f(0, 1, 0)).length() +
+                     toWorld.transformVector(Vec3f(0, 0, 1)).length()) / 3.0f;
+    for (CameraTrack& t : extras.cameras)
+        for (CameraKey& k : t.keys) {
+            k.eye = toWorld.transformPoint(k.eye);
+            k.target = toWorld.transformPoint(k.target);
+            k.focusDistance *= s;
+        }
+    for (LightDesc& d : extras.lights) {
+        const Vec3f from = sphericalDirection(d.azimuthDeg, d.elevationDeg);
+        d.position = toWorld.transformPoint(d.position);
+        d.target = toWorld.transformPoint(d.target);
+        d.width *= s;
+        d.height *= s;
+        if (d.type == LightDesc::Type::Point || d.type == LightDesc::Type::Spot) d.intensity *= s * s;
+        if (d.type == LightDesc::Type::Directional) {
+            const Vec3f f = toWorld.transformVector(from).normalized();
+            d.elevationDeg = std::asin(std::clamp(f.y, -1.0f, 1.0f)) * RAD_TO_DEG;
+            d.azimuthDeg = std::atan2(f.z, f.x) * RAD_TO_DEG;
+        }
+    }
+}
+
 std::unique_ptr<SceneNode> importModelFile(const std::string& path, std::string* error,
-                                           const ModelImportOptions& options, std::vector<std::string>* warnings) {
+                                           const ModelImportOptions& options, std::vector<std::string>* warnings,
+                                           ImportExtras* extras) {
     const std::string ext = lowerExtension(path);
     std::error_code ec;
     if (!std::filesystem::exists(pathFromUtf8(path), ec)) {
@@ -93,6 +182,7 @@ std::unique_ptr<SceneNode> importModelFile(const std::string& path, std::string*
             return nullptr;
         }
         if (warnings) warnings->insert(warnings->end(), model.warnings.begin(), model.warnings.end());
+        if (extras) collectExtras(model, *extras);
         // Kök her zaman grup: proje dosyası sourcePath'i ondan okur.
         group = std::make_unique<SceneNode>(pathToUtf8(p.stem()), SceneNodeType::Group);
         group->localTransform = model.root.local;
@@ -135,6 +225,8 @@ std::unique_ptr<SceneNode> importModelFile(const std::string& path, std::string*
     float s = options.scale > 0.0f ? options.scale : 1.0f;
     if (ext == ".obj" && options.unitMeters > 0.0f) s *= options.unitMeters;
     if (s != 1.0f) fix = Transform::scale(Vec3f(s)) * fix;
+    // Kamera ve ışıklar grubun yerel uzayında: düzeltme (Z yukarı, ölçek) grubun dönüşümünde,
+    // uygulama onları grubun dünya dönüşümüyle birlikte alır.
     group->localTransform = fix * group->localTransform;
     return group;
 }
