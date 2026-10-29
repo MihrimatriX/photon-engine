@@ -47,18 +47,7 @@ void dropCallback(GLFWwindow*, int count, const char** paths) {
 }
 
 // Kullanıcı verisi: %APPDATA%/PhotonEngine (Windows) ya da ~/.photon-engine.
-std::string findUserDir() {
-    fs::path base;
-#ifdef _WIN32
-    if (const wchar_t* appdata = _wgetenv(L"APPDATA")) base = fs::path(appdata) / "PhotonEngine";
-#else
-    if (const char* home = std::getenv("HOME")) base = fs::path(home) / ".photon-engine";
-#endif
-    if (base.empty()) base = fs::current_path() / "photon-user";
-    std::error_code ec;
-    fs::create_directories(base, ec);
-    return pathToUtf8(base);
-}
+std::string findUserDir() { return pathToUtf8(userDataDir()); }
 
 unsigned int makeCheckerTexture() {
     constexpr int N = 16;

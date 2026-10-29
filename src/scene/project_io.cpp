@@ -263,9 +263,55 @@ std::shared_ptr<TriangleMesh> meshFromJson(const json& g, const Material* mat) {
 
 std::unique_ptr<SceneNode> nodeFromJson(const json& j, LoadCtx& ctx);
 
-// İçe aktarılmış model grubu: dosya yeniden okunur, kaydedilmiş çocukların
-// ayarları sourceIndex eşleşmesiyle uygulanır; kayıtta olmayan çocuklar
-// (kullanıcının sildiği parçalar) atılır.
+// İçe aktarılmış model grubu: dosya yeniden okunur ve kayıttaki ağaç yeniden kurulur. Dosyadan
+// gelen mesh düğümleri (sourceIndex) taze içe aktarmadan alınır, ayarları (ad, dönüşüm, malzeme)
+// kayıttan uygulanır; ara gruplar (FBX/Alembic hiyerarşisi ya da kullanıcının kurduğu gruplar)
+// kayıttan oluşturulur. Kayıtta olmayan parçalar (kullanıcının sildikleri) atılır. Eski projeler
+// (düz liste) de aynı yoldan açılır.
+void collectSourceMeshes(std::unique_ptr<SceneNode>& node, std::unordered_map<int, std::unique_ptr<SceneNode>>& pool) {
+    std::vector<std::unique_ptr<SceneNode>> kids = std::move(node->children);
+    node->children.clear();
+    for (auto& c : kids) {
+        if (c->sourceIndex >= 0 && c->type == SceneNodeType::Mesh) {
+            const int k = c->sourceIndex;
+            collectSourceMeshes(c, pool); // (mesh yaprağıdır; yine de altını boşalt)
+            c->parent = nullptr;
+            pool[k] = std::move(c);
+        } else {
+            collectSourceMeshes(c, pool);
+        }
+    }
+}
+
+void rebuildSourceChildren(const json& children, SceneNode& parent,
+                           std::unordered_map<int, std::unique_ptr<SceneNode>>& pool, LoadCtx& ctx) {
+    for (const auto& cj : children) {
+        const int k = cj.value("sourceIndex", -1);
+        if (k >= 0) {
+            auto it = pool.find(k);
+            if (it == pool.end() || !it->second) {
+                // Kaynak dosya değişti: parça artık yok. Gömülü geometrisi varsa (kopya) onu kullan.
+                if (auto extra = nodeFromJson(cj, ctx)) parent.addChild(std::move(extra));
+                continue;
+            }
+            std::unique_ptr<SceneNode> node = std::move(it->second);
+            pool.erase(it);
+            applyCommon(*node, cj, ctx);
+            SceneNode* added = parent.addChild(std::move(node));
+            rebuildSourceChildren(cj.value("children", json::array()), *added, pool, ctx);
+            continue;
+        }
+        if (!cj.contains("source") && cj.value("type", std::string("group")) == "group") {
+            auto g = std::make_unique<SceneNode>("Grup", SceneNodeType::Group);
+            applyCommon(*g, cj, ctx);
+            SceneNode* added = parent.addChild(std::move(g));
+            rebuildSourceChildren(cj.value("children", json::array()), *added, pool, ctx);
+            continue;
+        }
+        if (auto extra = nodeFromJson(cj, ctx)) parent.addChild(std::move(extra));
+    }
+}
+
 std::unique_ptr<SceneNode> sourceGroupFromJson(const json& j, LoadCtx& ctx) {
     const std::string src = resolvePath(j.value("source", std::string()), ctx.base);
     std::string err;
@@ -275,19 +321,9 @@ std::unique_ptr<SceneNode> sourceGroupFromJson(const json& j, LoadCtx& ctx) {
         return nullptr;
     }
     applyCommon(*group, j, ctx);
-    std::vector<std::unique_ptr<SceneNode>> imported = std::move(group->children);
-    group->children.clear();
-    for (const auto& cj : j.value("children", json::array())) {
-        const int k = cj.value("sourceIndex", -1);
-        auto it = std::find_if(imported.begin(), imported.end(),
-                               [k](const std::unique_ptr<SceneNode>& c) { return c && c->sourceIndex == k; });
-        if (k < 0 || it == imported.end()) {
-            if (auto extra = nodeFromJson(cj, ctx)) group->addChild(std::move(extra));
-            continue;
-        }
-        applyCommon(**it, cj, ctx);
-        group->addChild(std::move(*it));
-    }
+    std::unordered_map<int, std::unique_ptr<SceneNode>> pool;
+    collectSourceMeshes(group, pool);
+    rebuildSourceChildren(j.value("children", json::array()), *group, pool, ctx);
     return group;
 }
 
