@@ -183,11 +183,16 @@ TEST(Sky, SunDiskSamplingMatchesPdfAndIrradiance) {
     IndependentSampler rng(3);
     double E = 0.0;
     const int N = 400000;
+    // Yalnız ışık örneklemesiyle (MIS'siz) ışınım: telafisiz tam dağılım (sampleLiFull) gerekir.
     for (int i = 0; i < N; ++i) {
-        const LightSample ls = env.sampleLi(si, rng.get2D());
+        const LightSample ls = env.sampleLiFull(rng.get2D());
         if (!ls.isValid()) continue;
-        if (i < 200) EXPECT_NEAR(env.pdfLi(ls.wi), ls.pdf, ls.pdf * 1e-3f);
         E += ls.Li.g * std::max(0.0f, ls.wi.y) / ls.pdf;
+    }
+    // MIS'te kullanılan telafili örnekleme: dönen pdf, pdfLi ile aynı (ağırlıklar bunu kullanır).
+    for (int i = 0; i < 200; ++i) {
+        const LightSample ls = env.sampleLi(si, rng.get2D());
+        if (ls.isValid()) EXPECT_NEAR(env.pdfLi(ls.wi), ls.pdf, ls.pdf * 1e-3f);
     }
     E /= N;
     // Referans: güneş (analitik) + gök (görüntü üzerinde kareleme).

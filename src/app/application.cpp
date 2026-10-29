@@ -9,6 +9,8 @@
 #include "core/image/image_io.h"
 #include "core/platform/path.h"
 
+#include <nlohmann/json.hpp>
+
 #include <GLFW/glfw3.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
@@ -18,6 +20,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 
 #ifndef GL_CLAMP_TO_EDGE
@@ -47,18 +50,7 @@ void dropCallback(GLFWwindow*, int count, const char** paths) {
 }
 
 // Kullanıcı verisi: %APPDATA%/PhotonEngine (Windows) ya da ~/.photon-engine.
-std::string findUserDir() {
-    fs::path base;
-#ifdef _WIN32
-    if (const wchar_t* appdata = _wgetenv(L"APPDATA")) base = fs::path(appdata) / "PhotonEngine";
-#else
-    if (const char* home = std::getenv("HOME")) base = fs::path(home) / ".photon-engine";
-#endif
-    if (base.empty()) base = fs::current_path() / "photon-user";
-    std::error_code ec;
-    fs::create_directories(base, ec);
-    return pathToUtf8(base);
-}
+std::string findUserDir() { return pathToUtf8(userDataDir()); }
 
 unsigned int makeCheckerTexture() {
     constexpr int N = 16;
@@ -96,6 +88,55 @@ Application::Application(LaunchOptions options) : m_opts(std::move(options)) {
     gApp = this;
     m_s.assetsRoot = findAssetsRoot();
     m_s.userDir = findUserDir();
+    loadPrefs();
+}
+
+// Kullanıcı tercihleri (prefs.json): içe aktarma penceresinin seçimleri ve son kullanılanlar.
+// Bozuk ya da eksik dosya sessizce varsayılanlara döner.
+void Application::loadPrefs() {
+    std::ifstream in(pathFromUtf8(m_s.userDir) / "prefs.json");
+    if (!in) return;
+    const nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return;
+    try {
+        if (auto ip = j.find("import"); ip != j.end() && ip->is_object()) {
+            AppState::ImportPrefs& p = m_s.importPrefs;
+            p.unit = std::clamp(ip->value("unit", p.unit), 0, 4);
+            p.zUp = ip->value("zUp", p.zUp);
+            p.alembicFps = std::clamp(ip->value("alembicFps", p.alembicFps), 1.0f, 1000.0f);
+            p.dontAsk = ip->value("dontAsk", p.dontAsk);
+        }
+        for (const auto& r : j.value("recent", nlohmann::json::array()))
+            if (r.is_string()) m_s.recentFiles.push_back(r.get<std::string>());
+        m_s.output.device = j.value("renderDevice", m_s.output.device);
+    } catch (const nlohmann::json::exception&) {
+        // yanlış türde alan: o ana kadar okunanlar kalır
+    }
+}
+
+void Application::savePrefs() {
+    const AppState::ImportPrefs& p = m_s.importPrefs;
+    nlohmann::json j;
+    j["import"] = {{"unit", p.unit}, {"zUp", p.zUp}, {"alembicFps", p.alembicFps}, {"dontAsk", p.dontAsk}};
+    j["recent"] = m_s.recentFiles;
+    j["renderDevice"] = m_s.output.device; // makineye özgü: projeye değil tercihlere
+    const fs::path file = pathFromUtf8(m_s.userDir) / "prefs.json";
+    const fs::path tmp = fs::path(file).concat(".tmp");
+    {
+        std::ofstream out(tmp);
+        if (!out) return;
+        out << j.dump(2);
+    }
+    std::error_code ec;
+    fs::rename(tmp, file, ec);
+}
+
+void Application::addRecent(const std::string& path) {
+    auto& r = m_s.recentFiles;
+    r.erase(std::remove(r.begin(), r.end(), path), r.end());
+    r.insert(r.begin(), path);
+    if (r.size() > 12) r.resize(12);
+    savePrefs();
 }
 
 Application::~Application() {
@@ -268,10 +309,24 @@ void Application::processDrops() {
     if (m_pendingDrops.empty()) return;
     std::vector<std::string> drops;
     drops.swap(m_pendingDrops);
+    // Modeller birlikte içe aktarılır (tek pencere). Viewport'un üstüne bırakıldıysa imlecin
+    // altındaki yüzey (zemin ya da bir nesne) hedef nokta olur.
+    std::vector<std::string> models;
+    for (const auto& p : drops)
+        if (isSupportedModelFile(p)) models.push_back(p);
+    if (!models.empty()) {
+        const ImVec2 mp = ImGui::GetIO().MousePos;
+        Vec3f hit;
+        const bool overViewport = m_vpSize.x > 0 && m_vpSize.y > 0 && mp.x >= m_vpOrigin.x && mp.y >= m_vpOrigin.y &&
+                                  mp.x < m_vpOrigin.x + m_vpSize.x && mp.y < m_vpOrigin.y + m_vpSize.y;
+        const bool placed = overViewport && !m_s.graph.empty() &&
+                            pickAt((mp.x - m_vpOrigin.x) / m_vpSize.x, (mp.y - m_vpOrigin.y) / m_vpSize.y, &hit);
+        requestImport(models, placed ? &hit : nullptr);
+    }
     for (const auto& p : drops) {
         const fs::path fp = pathFromUtf8(p);
         if (isSupportedModelFile(p)) {
-            importModel(p);
+            continue;
         } else if (hasExt(fp, {".hdr", ".exr"})) {
             EnvAsset a;
             a.id = pathToUtf8(fp.stem());
@@ -408,6 +463,7 @@ void Application::frame(float dt) {
     m_s.viewport.setSettings(m_s.settings);
     m_s.viewport.setDenoise(m_s.denoise);
     m_s.viewport.setTargetSpp(m_s.previewSpp);
+    m_s.viewport.setDevice(m_s.output.device);
     m_s.viewport.setTransparentPreview(m_s.environment.background.mode == Background::Mode::Transparent);
     // GPU modlarında ışın izleyici durur (CPU boşa yanmasın); sahne yine derlenir (seçim ışınları için).
     m_s.viewport.setPaused(m_s.finalJob.active.load() || isRasterMode(m_s.viewMode));
@@ -424,6 +480,7 @@ void Application::frame(float dt) {
     drawSceneTree();
     drawProperties();
     drawRenderDialog();
+    drawImportDialog();
     drawAboutWindows();
     ImGui::Render();
     renderRasterView();
@@ -463,6 +520,16 @@ int Application::run() {
             }
     };
     if (ui == "render") m_s.showRenderDialog = true;
+    else if (ui == "finalrender") {
+        // Son render yolunun uçtan uca denemesi: küçük çıktı geçici klasöre, pencere açık.
+        m_s.showRenderDialog = true;
+        m_s.output.width = 480;
+        m_s.output.height = 270;
+        m_s.output.spp = 16;
+        m_s.output.format = 0;
+        m_s.output.path = pathToUtf8(fs::temp_directory_path() / "photon_final_smoke.png");
+        startFinalRender();
+    }
     else if (ui == "shortcuts") m_s.showShortcuts = true;
     else if (ui == "about") m_s.showAbout = true;
     else if (ui == "multi" || ui == "group") {
@@ -495,6 +562,11 @@ int Application::run() {
     else if (ui == "light") { selectLight(0); m_s.leftTab = 2; }
     else if (ui == "camera") { m_s.rightTab = 4; m_s.leftTab = 3; }
     else if (ui == "image") m_s.rightTab = 5;
+    else if (ui.rfind("import:", 0) == 0) {
+        // İçe aktarma penceresi, bir modelin viewport'a bırakılmış hâli (imleç ortada).
+        const Vec3f dropPoint(0.6f, 0.0f, 0.4f);
+        requestImport({ui.substr(7)}, &dropPoint);
+    }
     if (!m_opts.saveProjectPath.empty()) {
         m_s.projectPath = m_opts.saveProjectPath;
         saveProject();
@@ -520,8 +592,8 @@ int Application::run() {
             const float elapsed = std::chrono::duration<float>(now - started).count();
             const ViewportStats st = m_s.viewport.stats();
             const bool gpuView = isRasterMode(m_s.viewMode);
-            const bool ready = frames > 30 && !st.interactive && (gpuView || st.spp >= m_opts.screenshotSpp) &&
-                               m_jobs.empty() && !m_s.thumbs.busy();
+            const bool ready = frames > 30 && !st.interactive && (gpuView || st.converged || st.spp >= m_opts.screenshotSpp) &&
+                               m_jobs.empty() && !m_s.thumbs.busy() && !m_s.finalJob.active.load();
             if (ready || elapsed > m_opts.screenshotTimeout) {
                 takeScreenshot(m_opts.screenshotPath);
                 glfwSwapBuffers(m_window);

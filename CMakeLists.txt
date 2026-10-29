@@ -156,6 +156,75 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cgltf)
 
+# ufbx – FBX (ikili/ASCII) yükleyici, MIT ya da kamu malı (tek .c + .h). Deponun tamamı
+# (~78 MB test verisi) yerine yalnız iki dosya, sabit sürüm ve SHA-256 ile indirilir.
+set(PHOTON_UFBX_VERSION v0.23.1)
+set(PHOTON_UFBX_DIR "${CMAKE_BINARY_DIR}/_deps/ufbx-${PHOTON_UFBX_VERSION}")
+foreach(entry
+        "ufbx.h|f787be529af577efc04f3e3e735844a08556718dbb613d1211c2b313d72895dc"
+        "ufbx.c|4a956c26a708e40d82ecb0aeaee54da709d5ba7c144c9642174970059bda7e1d"
+        "LICENSE|0dd48ebadf52273c736256325c8f078c03c8bb4facee22a4122de0ad3f615391")
+    string(REPLACE "|" ";" parts "${entry}")
+    list(GET parts 0 fname)
+    list(GET parts 1 fhash)
+    file(DOWNLOAD "https://raw.githubusercontent.com/ufbx/ufbx/${PHOTON_UFBX_VERSION}/${fname}"
+         "${PHOTON_UFBX_DIR}/${fname}" EXPECTED_HASH SHA256=${fhash} TLS_VERIFY ON)
+endforeach()
+enable_language(C)
+add_library(photon_ufbx STATIC "${PHOTON_UFBX_DIR}/ufbx.c")
+target_include_directories(photon_ufbx SYSTEM PUBLIC "${PHOTON_UFBX_DIR}")
+set_target_properties(photon_ufbx PROPERTIES C_STANDARD 99 POSITION_INDEPENDENT_CODE ON)
+# UFBX_UBSAN: DEFLATE açıcıdaki 64 bitten büyük kaydırmalar "& 63" ile maskelenir. Olmadan ufbx
+# x64'te donanımın maskelemesine güvenir (C'de tanımsız davranış); UBSan derlemesinde açma bozuluyordu
+# ("Bad DEFLATE data"). Maliyeti iç döngüde bir AND.
+target_compile_definitions(photon_ufbx PRIVATE UFBX_UBSAN)
+
+# Alembic (.abc, BSD-3) + Imath (BSD-3): Maya/Houdini/Blender/C4D önbellek (cache) biçimi.
+# Önce kurulu paket (vcpkg "alembic", sistem), yoksa sabit sürümlerden derlenir (Ogawa arka
+# ucu; HDF5 yok). Alembic 1.8.12'nin kendi CMake'i ≥ 3.29 ister; daha eskide kapalı kalır.
+option(PHOTON_ENABLE_ALEMBIC "Alembic (.abc) import" ON)
+set(PHOTON_ALEMBIC_FOUND FALSE)
+if(PHOTON_ENABLE_ALEMBIC)
+    find_package(Alembic CONFIG QUIET)
+    if(Alembic_FOUND)
+        set(PHOTON_ALEMBIC_FOUND TRUE)
+        message(STATUS "Alembic: found ${Alembic_VERSION}")
+    elseif(CMAKE_VERSION VERSION_LESS 3.29)
+        message(STATUS "Alembic: off — bundled build needs CMake >= 3.29 (or install vcpkg 'alembic')")
+    else()
+        set(BUILD_SHARED_LIBS OFF)
+        # IMATH_INSTALL açık kalır: Alembic'in install(EXPORT) kuralı Imath'ı bir dışa aktarım
+        # kümesinde görmek ister (yalnız yapılandırma kuralı; bizim derlememiz kurulum yapmaz).
+        set(IMATH_INSTALL_PKG_CONFIG OFF CACHE BOOL "" FORCE)
+        set(PYTHON OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(Imath
+            GIT_REPOSITORY https://github.com/AcademySoftwareFoundation/Imath.git
+            GIT_TAG        v3.2.3
+            GIT_SHALLOW    TRUE
+            SYSTEM)
+        FetchContent_MakeAvailable(Imath)
+        # Alembic <Imath/half.h> biçiminde içerir; Imath'ın derleme ağacı yalnız src/Imath'ı
+        # verir (kurulumda include/Imath olur). Üst klasör de eklenir.
+        target_include_directories(Imath SYSTEM INTERFACE "$<BUILD_INTERFACE:${imath_SOURCE_DIR}/src>")
+        set(USE_TESTS OFF CACHE BOOL "" FORCE)
+        set(USE_BINARIES OFF CACHE BOOL "" FORCE)
+        set(USE_HDF5 OFF CACHE BOOL "" FORCE)
+        set(USE_PYALEMBIC OFF CACHE BOOL "" FORCE)
+        set(ALEMBIC_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+        set(ALEMBIC_DEBUG_WARNINGS_AS_ERRORS OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(alembic
+            GIT_REPOSITORY https://github.com/alembic/alembic.git
+            GIT_TAG        1.8.12
+            GIT_SHALLOW    TRUE
+            SYSTEM)
+        FetchContent_MakeAvailable(alembic)
+        if(TARGET Alembic::Alembic OR TARGET Alembic)
+            set(PHOTON_ALEMBIC_FOUND TRUE)
+            message(STATUS "Alembic: building 1.8.12 (Imath 3.2.3)")
+        endif()
+    endif()
+endif()
+
 # nlohmann/json – project files, material and studio presets (MIT)
 find_package(nlohmann_json CONFIG QUIET)
 if(NOT nlohmann_json_FOUND)

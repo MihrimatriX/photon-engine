@@ -6,6 +6,7 @@
 #include "ui/widgets.h"
 #include "ui/file_dialog.h"
 #include "engine/denoiser.h"
+#include "engine/render_device.h"
 #include "core/color/transfer.h"
 #include "core/platform/path.h"
 
@@ -134,6 +135,30 @@ void Application::drawRenderDialog() {
     }
     if (ui::Section(ICON_GAUGE, "Kalite")) {
         if (ui::BeginProps("q")) {
+            ui::Prop("Cihaz", "Viewport ve son render'ın çalıştığı işlemci. GPU'lar bulunursa listelenir; GPU arka "
+                              "ucu gelene kadar seçilemez (nedeni üzerine gelince yazar)");
+            {
+                const auto& devices = enumerateDevices();
+                auto labelOf = [&](const std::string& id) {
+                    if (id == "auto") return std::string("Otomatik (") + devices.front().name + ")";
+                    for (const DeviceInfo& d : devices)
+                        if (d.id == id) return std::string(deviceKindName(d.kind)) + " · " + d.name;
+                    return id;
+                };
+                const std::string before = out.device;
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::BeginCombo("##dev", labelOf(out.device).c_str())) {
+                    if (ImGui::Selectable(labelOf("auto").c_str(), out.device == "auto")) out.device = "auto";
+                    for (const DeviceInfo& d : devices) {
+                        ImGui::BeginDisabled(!d.usable);
+                        if (ImGui::Selectable(labelOf(d.id).c_str(), out.device == d.id)) out.device = d.id;
+                        ImGui::EndDisabled();
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", d.note.c_str());
+                    }
+                    ImGui::EndCombo();
+                }
+                if (out.device != before) savePrefs();
+            }
             ui::Prop("Örnek sayısı", "Piksel başına ışın sayısı. Daha çok = daha az gürültü, daha uzun süre");
             ui::SliderI("##spp", &out.spp, 8, 8192, "%d", ImGuiSliderFlags_Logarithmic);
             ui::Prop("Süre sınırı", "0 = yok. Dolunca o ana dek olan örneklerle bitirir");
@@ -145,6 +170,18 @@ void Application::drawRenderDialog() {
             ImGui::EndDisabled();
             ui::Prop("Sekme sayısı");
             ui::SliderI("##mb", &m_s.settings.maxBounces, 1, 32);
+            ui::Prop("Piksel filtresi", "Kenar yumuşatma çekirdeği. Blackman-Harris: temiz kenar, az bulanıklık "
+                                        "(önerilen). Kutu: en keskin ama merdivenli kenar ve titreşen ince ayrıntı");
+            {
+                const char* names[] = {"Kutu", "Üçgen", "Gauss", "Blackman-Harris"};
+                int ft = static_cast<int>(m_s.settings.filter.type);
+                if (ImGui::Combo("##pf", &ft, names, 4)) {
+                    m_s.settings.filter.type = static_cast<PixelFilterType>(ft);
+                    m_s.settings.filter.width = ft == 0 ? 1.0f : (ft == 1 ? 2.0f : 1.5f);
+                }
+                ui::Prop("Filtre genişliği", "Piksel. Büyüdükçe daha yumuşak, daha az titreşim");
+                ui::SliderF("##pfw", &m_s.settings.filter.width, 0.5f, 4.0f, "%.2f px");
+            }
             ui::EndProps();
         }
         const double mp = static_cast<double>(out.width) * out.height / 1e6;
@@ -180,7 +217,18 @@ void Application::drawRenderDialog() {
                 markDocumentChanged();
             }
             ImGui::EndDisabled();
+            ui::Prop("Render geçişleri", "Yalnız EXR: tek dosyada katmanlar. Işık: DiffDir/Ind, GlossDir/Ind, "
+                                         "TransDir/Ind, Emit, Env (toplamı beauty). Veri: Depth, Position, Normal, "
+                                         "DiffCol (albedo), ObjectID, MaterialID. Nuke, Fusion, After Effects ve "
+                                         "Blender compositor'da açılır");
+            ImGui::BeginDisabled(out.format != 2);
+            ui::Toggle("passes", &out.passes);
+            ImGui::EndDisabled();
             ui::EndProps();
+        }
+        if (out.format == 2 && out.passes) {
+            const double mb = static_cast<double>(out.width) * out.height * 20.0 * 14.0 / (1024.0 * 1024.0);
+            ImGui::TextColored(pal.textDim, ICON_LAYERS "  Geçişler render sırasında ~%.0f MB bellek kullanır", mb);
         }
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - 6);
         ImGui::InputTextWithHint("##path", "Resimler/PhotonEngine/render_….png", &out.path);

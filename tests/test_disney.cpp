@@ -2,6 +2,7 @@
 // sonlu değerler, VNDF örnekleme ile pdf tutarlılığı ve doku/parametre çözümü.
 
 #include <gtest/gtest.h>
+#include "samplers/independent_sampler.h"
 #include "materials/disney.h"
 #include "core/image/image.h"
 #include "core/math/constants.h"
@@ -175,18 +176,32 @@ TEST(DisneyMaterial, AnisotropyFollowsTangent) {
     EXPECT_GT(std::abs(along - across), 1e-4f);
 }
 
-TEST(DisneyMaterial, SheenAddsAtWideHalfAngle) {
-    DisneyMaterial mat(Color3f(0.2f, 0.3f, 0.8f), 0.0f, 0.8f, 0.3f);
+// Kadife/kumaş: sheen koyu kumaşın kenarlarını (yatay bakışta) aydınlatır, dik bakışta
+// neredeyse etkisizdir (Charlie sheen; lif dağılımı yatay mikro-normallerde yoğun).
+TEST(DisneyMaterial, SheenBrightensGrazingRim) {
+    DisneyMaterial mat(Color3f(0.02f, 0.03f, 0.08f), 0.0f, 0.8f, 0.3f);
     SurfaceInteraction si;
-    si.normal = Vec3f(0, 1, 0);
+    si.normal = si.ng = Vec3f(0, 1, 0);
     si.tangent = Vec3f(1, 0, 0);
-    Vec3f wo = Vec3f(0.95f, 0.1f, 0.0f).normalized();
-    Vec3f wi = Vec3f(-0.95f, 0.1f, 0.0f).normalized();
+    auto albedo = [&](const Vec3f& wo) {
+        IndependentSampler rng(5);
+        float sum = 0.0f;
+        constexpr int n = 40000;
+        for (int i = 0; i < n; ++i) {
+            BSDFSample bs;
+            if (!mat.sampleFull(wo, si, rng.get1D(), rng.get2D(), bs) || bs.pdf <= 0.0f) continue;
+            sum += bs.f.luminance() * std::abs(bs.wi.dot(si.normal)) / bs.pdf;
+        }
+        return sum / n;
+    };
+    const Vec3f grazing = Vec3f(0.99f, 0.14f, 0.0f).normalized();
+    const Vec3f normal(0, 1, 0);
     mat.setSheen(0.0f);
-    float plain = mat.eval(wo, wi, si).luminance();
+    const float plainRim = albedo(grazing), plainFront = albedo(normal);
     mat.setSheen(1.0f);
-    float cloth = mat.eval(wo, wi, si).luminance();
-    EXPECT_GT(cloth, plain);
+    const float clothRim = albedo(grazing), clothFront = albedo(normal);
+    EXPECT_GT(clothRim, plainRim + 0.1f);
+    EXPECT_LT(clothFront - plainFront, 0.5f * (clothRim - plainRim));
 }
 
 TEST(DisneyMaterial, DiffuseTransmissionGoesThrough) {

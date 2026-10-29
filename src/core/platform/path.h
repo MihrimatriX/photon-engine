@@ -32,4 +32,8 @@ std::filesystem::path executableDir();
 /// assets/ klasörü (UTF-8): exe'nin yanında, yoksa üst klasörlerde aranır.
 std::string findAssetsRoot();
 
+/// Kullanıcı verisi klasörü (oluşturulur): %APPDATA%/PhotonEngine (Windows) ya da
+/// ~/.photon-engine. Ayarlar, kullanıcı malzemeleri, küçük resimler, gömülü doku önbelleği.
+std::filesystem::path userDataDir();
+
 } // namespace photon

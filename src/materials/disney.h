@@ -15,11 +15,13 @@
 
 namespace photon {
 
-/// @brief Simplified Disney Principled BRDF.
+/// @brief Principled BSDF (Disney parametrizasyonu, OpenPBR tarzı enerji korunumlu katmanlar).
 ///
-/// Combines a Burley diffuse lobe and a Cook-Torrance GGX specular microfacet lobe,
-/// parameterized by metallic, roughness, and specular strength. Optional texture maps
-/// (albedo / normal / roughness / metalness) are sampled at SurfaceInteraction::uv.
+/// Katmanlar (üstten alta): clearcoat → sheen → yalıtkan GGX speküler → difüz (EON) /
+/// yüzey altı / ince geçirgenlik. Metal payı tabanın yerine F82 tonlu iletken GGX koyar.
+/// Her katman altındakini kendi yönlü albedosu kadar zayıflatır (albedo ölçekleme, Kulla–Conty
+/// 2017), bu yüzden beyaz plastik de beyaz metal gibi fırın testinde ≈ 1 yansıtır.
+/// Doku haritaları (albedo / normal / pürüzlülük / metallik) SurfaceInteraction::uv'de okunur.
 class DisneyMaterial : public Material {
 public:
     DisneyMaterial(const Color3f& baseColor, float metallic, float roughness, float specular)
@@ -33,6 +35,8 @@ public:
     float pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const override;
 
     Color3f evalPdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si, float& pdfOut) const override;
+    /// Difüz (EON, yüzey altı yok) / parlak (speküler, sheen, kaplama, pul) / geçirgen (ince yaprak).
+    LobeSplit evalSplit(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const override;
 
     /// Lob seçimi @p uc ile, yön @p u ile. Yüzey altı lobu seçilirse subsurface = true döner.
     bool sampleFull(const Vec3f& wo, const SurfaceInteraction& si, float uc, const Vec2f& u,
@@ -54,6 +58,14 @@ public:
     void setClearCoatRoughness(float v) { m_clearCoatRoughness = std::max(0.001f, v); }
     void setAnisotropy(float v) { m_anisotropy = std::clamp(v, 0.0f, 1.0f); }
     void setSheen(float v) { m_sheen = std::clamp(v, 0.0f, 1.0f); }
+    /// Kumaş parlamasının (Charlie sheen) lif dağınıklığı: küçük → ince, keskin kenar parlaması
+    /// (saten); büyük → geniş, yumuşak hale (kadife, yün).
+    void setSheenRoughness(float v) { m_sheenRoughness = std::clamp(v, 0.02f, 1.0f); }
+    float sheenRoughness() const { return m_sheenRoughness; }
+    /// Difüz pürüzlülüğü (OpenPBR "base_diffuse_roughness", EON modeli): 0 = Lambert; büyüdükçe
+    /// yüzey "düzleşir" (kil, beton, kumaş, ay tozu). Speküler pürüzlülükten bağımsızdır.
+    void setDiffuseRoughness(float v) { m_diffuseRoughness = std::clamp(v, 0.0f, 1.0f); }
+    float diffuseRoughness() const { return m_diffuseRoughness; }
     /// Thin-surface diffuse transmission. Burley random-walk SSS does not fit this BRDF.
     void setDiffuseTransmission(float v) { m_diffuseTransmission = std::clamp(v, 0.0f, 1.0f); }
     void setEmission(const Color3f& e) { m_emission = e; }
@@ -132,6 +144,8 @@ public:
         float clearCoatRoughness = 0.03f;
         float anisotropy = 0.0f;
         float sheen = 0.0f;
+        float sheenRoughness = 0.3f;
+        float diffuseRoughness = 0.0f;
         float diffuseTransmission = 0.0f;
         float subsurface = 0.0f;
         Color3f edgeTint{1.0f};
@@ -156,6 +170,8 @@ private:
     float m_clearCoatRoughness = 0.03f;
     float m_anisotropy = 0.0f;
     float m_sheen = 0.0f;
+    float m_sheenRoughness = 0.3f;
+    float m_diffuseRoughness = 0.0f;
     float m_diffuseTransmission = 0.0f;
     float m_subsurface = 0.0f;
     Color3f m_subsurfaceRadius{1.0f, 0.2f, 0.1f};

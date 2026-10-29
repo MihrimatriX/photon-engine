@@ -37,7 +37,8 @@ Son render, viewport'tan bağımsız bir iş parçacığında, malzemeleri kopya
 (izole) bir sahneyle çalışır: kullanıcı render sürerken düzenleme yapsa bile
 çıktı etkilenmez. Viewport bu sırada duraklatılır ki tüm çekirdekler render'a
 gitsin. Örnek sayısı ya da süre sınırına ulaşınca OIDN (yüksek kalite) ile
-gürültü giderilir ve seçilen biçimde kaydedilir.
+gürültü giderilir ve seçilen biçimde kaydedilir. Render, CLI ile aynı yoldan geçer:
+seçilen RenderDevice üzerinde Final modlu bir RenderSession.
 
 ### `src/app/main_app.cpp`
 
@@ -99,6 +100,11 @@ UI thread'i hiçbir zaman bir render pass'ini beklemez. Akış:
 Malzeme gibi yerinde değiştirilen nesneler için lockScene()/edit(): mevcut
 pass iptal edilir ve thread boşa çıkana kadar (en fazla bir satır) beklenir.
 
+Render, seçilen RenderDevice üzerinde Etkileşimli modlu bir RenderSession ile yapılır
+(son render ve CLI ile aynı çekirdek ve aynı cihaz katmanı). Sahne cihaza yalnız
+değiştiğinde yüklenir (sürüm sayacı): kamera hareketi bir GPU cihazında yeniden yükleme
+gerektirmez.
+
 ### `src/app/scene_ops.cpp`
 
 scene_ops.cpp — Belge üzerindeki tüm işlemler: sahne derleme, geri al/yinele,
@@ -127,6 +133,12 @@ ui_common.cpp — Panel başlığı, küçük resim kartı ve TRS ayrıştırma/
 
 ui_common.h — Panellerin paylaştığı küçük yardımcılar: panel başlığı, küçük
 resim kartı, dönüşümü konum/dönüş/ölçeğe ayırma ve geri birleştirme.
+
+### `src/app/ui_import.cpp`
+
+ui_import.cpp — İçe aktarma penceresi: bırakılan ya da seçilen model dosyaları için birim,
+yukarı eksen ve Alembic karesi. KeyShot'un "Import" penceresine karşılık gelir; ayarlar
+hatırlanır ve "bir daha sorma" ile pencere atlanabilir (Dosya menüsünden geri açılır).
 
 ### `src/app/ui_layout.cpp`
 
@@ -310,6 +322,26 @@ fotoğrafik son işlemler. Octane'nin "Imager"ı ve KeyShot'ın "Image Styles" k
   renk sapması → bloom → yıldız parlaması (glare) → beyaz dengesi → kontrast/doygunluk → vinyet
 Hepsi doğrusal (scene-linear) değerlerde çalışır; parlak noktalar gerçek HDR değerleriyle
 taştığı için bloom ve glare fiziksel bir merceğe benzer davranır. Varsayılanlar etkisizdir.
+
+### `src/core/image/pixel_filter.cpp`
+
+pixel_filter.cpp — Piksel filtreleri ve ters CDF tablosuyla filtre önem örneklemesi.
+
+### `src/core/image/pixel_filter.h`
+
+pixel_filter.h — Piksel yeniden yapılandırma filtresi, filtre önem örneklemesiyle (FIS).
+
+Bir piksel, sensörde sonlu bir alanı temsil eder; görüntü değeri = sahnenin bir filtre
+çekirdeğiyle ağırlıklı ortalamasıdır. Kutu filtre (her örnek yalnız kendi pikseline)
+keskin ama merdivenli kenar ve titreşen ince ayrıntı verir. Daha geniş, yumuşak çekirdekler
+(Blackman–Harris, Gauss) bu örtüşmeyi (aliasing) bastırır.
+
+Uygulama: örnekler pikselin içine düzgün değil, FİLTRENİN KENDİ DAĞILIMIYLA (filtre ∝ pdf)
+yerleştirilir ve ağırlık sabit 1 olur (PBRT-v4 FilterSampler, Cycles). Komşu piksellere
+"sıçratma" (splat) gerekmez; her piksel kendi örneklerini toplar, filtre pozitif olduğu için
+ağırlık işareti değişmez ve OIDN'in AOV kuralına (aynı alt-piksel konumu) uyulur.
+Filtre ayrılabilir: x ve y ofsetleri aynı 1B tablodan bağımsız çekilir; Sobol'ün ilk iki
+boyutunun tabakalanması ters CDF dönüşümüyle korunur.
 
 ### `src/core/image/tone_mapping.cpp`
 
@@ -505,6 +537,67 @@ Embree yalnız "ışın neye, hangi t'de, hangi barisentrik (u,v) ile çarptı" 
 cevaplar. Normal, UV ve teğet gibi gölgelendirme verisi motorun kendi kodunda
 (Triangle::fillHit) hesaplanır; böylece iki hızlandırıcı aynı görüntüyü üretir.
 
+### `src/engine/gpu_probe.cpp`
+
+gpu_probe.cpp — CUDA sürücü API'sinin dinamik yüklenmesi ve cihaz bilgisinin okunması.
+
+### `src/engine/gpu_probe.h`
+
+gpu_probe.h — Makinedeki NVIDIA GPU'ları CUDA sürücü API'siyle sorgular.
+
+Sürücü kitaplığı (Windows: nvcuda.dll, Linux: libcuda.so.1) çalışma zamanında yüklenir;
+derleme CUDA Toolkit'e bağlı değildir ve sürücüsü olmayan makinede boş liste döner.
+Yalnız bilgi toplanır (ad, bellek, hesaplama yeteneği); hiçbir çekirdek çalıştırılmaz.
+
+### `src/engine/render_device.cpp`
+
+render_device.cpp — CPU cihazı ve cihaz listesi / seçimi.
+
+### `src/engine/render_device.h`
+
+render_device.h — Render cihazı soyutlaması (F9.7): "nerede" çalışıldığı.
+
+Motor bir sahneyi bir cihazda render eder. Bugün tek gerçek cihaz CPU'dur (Embree +
+iş parçacığı havuzu). GPU arka uçları (CUDA: GTX 1080 sm_61; OptiX / Vulkan RT /
+D3D12 DXR: RT çekirdekli kartlar) aynı arayüzü uygulayacak; render döngüleri
+(RenderSession), arayüz ve CLI cihazın türünü bilmez.
+
+Arayüzün şekli Cycles'ın Device'ı ve PBRT-v4'ün CPU/GPU ayrımına benzer:
+  setScene(): sahne cihaza yüklenir. CPU paylaşılan işaretçiyi tutar; bir GPU cihazı
+              düz tamponlara paketleyip kopyalar. Yalnız sahne değişince çağrılır,
+              kamera hareketi yeni yükleme gerektirmez.
+  render():   her piksele bir örnek aralığı eklenir, sonuç çağıranın filmlerine biriktirilir.
+
+Cihazlar enumerateDevices() ile listelenir: CPU her zaman, NVIDIA GPU'lar CUDA sürücüsü
+varsa (sürücü dinamik yüklenir, derlemede bağımlılık yok). Arka ucu bu derlemede olmayan
+cihazlar "kullanılamaz" olarak, nedeniyle birlikte listelenir: kullanıcı makinesinde
+neyin mümkün olduğunu görür (ör. GTX 1080: RT çekirdeği yok → OptiX/DXR yolu kapalı).
+
+### `src/engine/render_session.cpp`
+
+render_session.cpp — Mod politikası: parti boyu, durma koşulları, çıktıların çözülmesi.
+
+### `src/engine/render_session.h`
+
+render_session.h — Render modu ve birikim oturumu: "nasıl" çalışıldığı.
+
+Aynı yol izleyici (PathTracer) her modda çalışır; modlar yalnız politikadır: kaç örnek,
+ne kadar süre, hangi çıktılar, ne zaman durulur. RTXPT'nin "Reference" ve "Realtime"
+modlarının aynı çekirdeği paylaşması gibi. Bugünkü modlar:
+
+  Interactive  viewport: piksel başına 1 örneklik pass'ler (her pass ekrana gelir, kamera
+               hareketinde ucuz yeniden başlatma), hedef örnek sayısına ya da sınırsız.
+  Final        son render, turntable, CLI: hedef örnek / süre sınırı / uyarlamalı yakınsama.
+               Örnekler partiler hâlinde verilir (karo önce: ~%7 hızlı); parti boyu ölçülen
+               hıza göre ~batchSeconds sürecek şekilde büyür, süre sınırı aşılmaz.
+
+Gerçek zamanlı bir mod (RTXPT benzeri: kare başına 1 örnek + zamansal yeniden kullanım +
+gerçek zamanlı gürültü giderici) GPU cihazıyla birlikte buraya eklenecek; oturumu
+kullanan kod (viewport, son render, CLI) değişmeyecek.
+
+Oturum bir RenderDevice üzerinde çalışır; cihazın sahnesi önceden setScene() ile verilmiş
+olmalıdır. Bir oturum tek iş parçacığından kullanılır.
+
 ### `src/engine/render_settings.h`
 
 render_settings.h — Render kalite ve çıktı ayarları: çözünürlük, örnek sayısı, sekme
@@ -519,11 +612,15 @@ renderer.cpp — Piksel örnekleme, karo dağıtımı, iptal ve gürültü gider
 renderer.h — Karo tabanlı, çok iş parçacıklı render sürücüsü.
 
 Renderer kameradan her piksel için ışın üretir, integrator'e (path tracer)
-verir ve sonucu Film'e biriktirir. İki çalışma biçimi var:
-  * render():            karo karo, her karonun TÜM örnekleri (CLI, turntable)
-  * renderSamplePass():  tüm görüntüye piksel başına 1 örnek (ilerlemeli viewport
-                         ve son render). Her pass görüntüyü biraz daha temizler.
-Pass'ler `cancel` bayrağıyla karo düzeyinde durdurulabilir.
+verir ve sonucu Film'e biriktirir. Temel işlem renderSamples(): her piksele
+[first, first + count) aralığındaki örnekler, karo karo (karo önce, sonra örnek:
+sahnenin o bölgesi önbellekte kalır; 1 örneklik pass'lere göre ~%7 hızlı). Örnekleyici
+(piksel, örnek indeksi)'ne göre deterministik olduğundan 8 örneklik bir parti, sekiz
+tek örneklik pass ile aynı görüntüyü verir. Üstündeki yardımcılar:
+  * render():            tüm örnekler tek partide (testler, basit kullanım)
+  * renderSamplePass():  piksel başına 1 örnek (viewport'un ilerlemeli pass'i)
+Uygulama ve CLI bunları doğrudan değil, RenderDevice + RenderSession üzerinden kullanır.
+Partiler `cancel` bayrağıyla satır düzeyinde durdurulabilir.
 
 ### `src/engine/scene.cpp`
 
@@ -560,6 +657,21 @@ ve dışarıda (Embree) bulunan isabet için yüzey verisinin doldurulması.
 
 mesh.h — Üçgen ağı (TriangleMesh): köşe konumları, normaller, UV'ler ve indeks tamponu.
 BVH ve Embree tek tek üçgenlere (index) erişir; yığında ayrı Triangle nesnesi tutulmaz.
+
+### `src/geometry/ray_spawn.h`
+
+ray_spawn.h — Yüzeyden çıkan ışınların sağlam (ölçekten bağımsız) başlatılması.
+
+Kesişim noktası kayan noktayla hesaplandığı için yüzeyin ya biraz önünde ya biraz
+arkasındadır. Arkasındaysa aynı yüzeyden çıkan ışın kendine çarpar ("gölge sivilcesi",
+acne). Klasik çare sabit bir ofsettir (1e-4), ama sabit değer ölçeğe bağlıdır: milimetreyle
+gelen bir araba modelinde (koordinatlar ~4500) 1e-4 bir float adımından (ULP ≈ 5e-4) küçüktür
+→ sivilce; metreyle gelen bir yüzükte (0.02) ise ince ayrıntıyı atlar → ışık sızması.
+
+PBRT-v4 yöntemi (§6.8.6): şekil, noktayla birlikte bileşen başına mutlak hata sınırını
+(pError) hesaplar. Işın, geometrik normal boyunca d = |n|·pError kadar itilir (hata kutusunun
+normal yönündeki izdüşümü: nokta kesinlikle yüzeyin doğru tarafında kalır) ve sonuç bir ULP
+daha dışa yuvarlanır. Ofset noktanın büyüklüğüyle orantılıdır; ışın tMin = 0 ile atılır.
 
 ### `src/geometry/shape.h`
 
@@ -607,6 +719,38 @@ Rus ruleti, NaN/Inf koruması ve isteğe bağlı kontak AO da burada.
 Yol izleyici integratörün arayüzü. maxDepth = en fazla saçılma (sekme) sayısı
 (PBRT kuralı): 1 → yalnızca doğrudan ışık, 2 → bir sekme dolaylı ışık, ...
 
+### `src/io/alembic_loader.cpp`
+
+alembic_loader.cpp — Alembic arşivi → ImportedModel. Yalnız PHOTON_HAS_ALEMBIC ile derlenir;
+yoksa model_import.cpp "desteklenmiyor" der.
+
+### `src/io/alembic_loader.h`
+
+alembic_loader.h — Alembic (.abc, Ogawa) yükleyicisi: Maya, Houdini, Blender, Cinema 4D ve
+Marvelous Designer'ın "pişmiş geometri" (baked cache) biçimi. Animasyonlu bir arşivden seçilen
+zamandaki şekil okunur (varsayılan: ilk kare).
+
+Xform hiyerarşisi ve adlar korunur; PolyMesh ve SubD (kontrol kafesi) üçgenlenir; yüz kümeleri
+(face set — genelde DCC'deki malzeme atamaları) ayrı parçalara bölünür ki her birine
+kütüphaneden ayrı malzeme bırakılabilsin. Alembic'te malzeme ve birim bilgisi yoktur: birim,
+arşivi yazan uygulamadan tahmin edilir (Maya/C4D/3ds Max → santimetre) ve uyarı olarak bildirilir.
+
+### `src/io/fbx_loader.cpp`
+
+fbx_loader.cpp — FBX → ImportedModel (ufbx). Düğüm gezinmesi, malzeme dilimli üçgenleme,
+örnek paylaşımı, PBR malzeme eşlemesi ve doku yolu çözümü.
+
+### `src/io/fbx_loader.h`
+
+fbx_loader.h — Autodesk FBX (ikili ve ASCII, 2009–2020+) yükleyicisi; ufbx (MIT) üzerine.
+
+Maya, 3ds Max, Blender, Cinema 4D, SolidWorks Visualize ve oyun motorlarının ortak değişim
+biçimi. Dosyanın kendi eksen ve birim tanımı okunur; sahne metreye ve Y-yukarıya çevrilir.
+Düğüm hiyerarşisi, adlar ve örnekleme (aynı mesh'i paylaşan düğümler) korunur; çok malzemeli
+mesh'ler malzeme başına parçalara bölünür. Malzemeler (Phong/Lambert, Arnold Standard Surface,
+3ds Max Physical, Stingray PBS) ufbx'in ortak PBR eşlemesinden Principled'a çevrilir; dokular
+dosya yanında aranır, gömülüyse doku önbelleğine çıkarılır.
+
 ### `src/io/gltf_loader.cpp`
 
 gltf_loader.cpp — cgltf ile glTF 2.0 okuma ve motor türlerine dönüştürme.
@@ -620,6 +764,20 @@ pbrMetallicRoughness → DisneyMaterial, baseColor dokusu → albedo görüntüs
 gltf_loader.h — glTF 2.0 (.gltf / .glb) sahne yükleyicisinin arayüzü.
 Düğüm ağacı dünya uzayına düzleştirilir; her üçgen primitive ayrı bir TriangleMesh olur,
 PBR metallic-roughness malzemesi DisneyMaterial'e çevrilir.
+
+### `src/io/imported_model.cpp`
+
+imported_model.cpp — Köşe birleştirme, sarma yönü düzeltme ve gömülü doku önbelleği.
+
+### `src/io/imported_model.h`
+
+imported_model.h — Dış biçimlerden (FBX, Alembic, ...) içe aktarılan sahnenin ortak, motordan
+bağımsız gösterimi ve yükleyicilerin paylaştığı yardımcılar.
+
+Hiyerarşi korunur: her düğümün adı ve ebeveynine göre yerel dönüşümü vardır, mesh'ler düğümün
+YEREL uzayındadır (dünya uzayına gömülmez). Aynı mesh'i kullanan düğümler (örnekleme/instancing)
+aynı TriangleMesh'i paylaşır. meshes[i]'nin sırası dosyadaki kararlı gezinme sırasıdır; proje
+dosyası parçaları bu sırayla (sourceIndex) eşler.
 
 ### `src/io/obj_loader.cpp`
 
@@ -636,11 +794,11 @@ Her OBJ şekli malzeme kimliğine göre ayrı TriangleMesh'lere bölünür; MTL'
 
 ### `src/lights/area_light.cpp`
 
-area_light.cpp — Dikdörtgen ve mesh alan ışıklarının örneklenmesi ve pdf'i.
+area_light.cpp — Dikdörtgen ve üçgen alan ışıklarının örneklenmesi, pdf'i ve sınırları.
 
 ### `src/lights/area_light.h`
 
-area_light.h — Alan ışıkları: dikdörtgen (AreaLight) ve yayıcı üçgen mesh (MeshLight).
+area_light.h — Alan ışıkları: dikdörtgen (AreaLight) ve yayıcı üçgen (TriangleLight).
 Delta ışıkların aksine yüzeyleri vardır: ışınlar onlara çarpabilir, yumuşak gölge verirler.
 Yüzeyde düzgün (uniform) alan örneklemesi yapılır, pdf katı açıya çevrilir. pdfLi aynı pdf'i
 verir ki BSDF örneklemesi ışığa çarptığında MIS ağırlığı hesaplanabilsin.
@@ -688,6 +846,44 @@ Path tracer her yüzey noktasında bir ışık seçip sampleLi ile ona doğru bi
 (next-event estimation, NEE). Tahminci: f · Li · |cos θ| / pdf. Bu yüzden pdf'in KATI AÇI
 (solid angle, sr⁻¹) cinsinden olması şart; alan ışıkları kendi alan pdf'lerini çevirip verir.
 
+### `src/lights/light_bounds.cpp`
+
+light_bounds.cpp — Işık sınırlarının önem tahmini ve birleşimi (PBRT-v4 LightBounds,
+DirectionCone::Union). Açılar "kısıtlı çıkarma" ile hesaplanır: θ' = max(0, θw − θo − θb),
+yani noktaya giden yönün, koninin ve sınır kutusunun gördüğü açının en iyimser farkı.
+
+### `src/lights/light_bounds.h`
+
+light_bounds.h — Sınırlı bir ışığın (ya da ışık grubunun) uzaysal ve yönsel özeti:
+kutu, toplam güç ve yayım yönlerinin konisi (Conty & Kulla 2018, PBRT-v4 §12.6.3).
+
+Işık BVH'si her düğümde bunu tutar; bir yüzey noktası için importance() "bu gruptaki ışıklar
+buraya en fazla ne kadar ışık gönderebilir"in ucuz bir tahminidir: güç / uzaklık², noktanın
+yayım konisine ne kadar dışında kaldığına ve alıcının normaline göre kısılmış. Seçim olasılığı
+buna orantılı olunca yakındaki, bize bakan, güçlü ışık grupları daha sık örneklenir.
+
+### `src/lights/light_sampler.cpp`
+
+light_sampler.cpp — Kapsamlı ışık seçimi ve ışık BVH'si (kurulum: kovalı maliyet, PBRT-v4
+BVHLightSampler::EvaluateCost; seçim: önem oranlı iniş; pmf: bit izi).
+
+### `src/lights/light_sampler.h`
+
+light_sampler.h — Işık seçimi: bir yüzey noktasında hangi ışığa gölge ışını atılacağı.
+
+İki mod:
+ * Kapsamlı (≤ 33 aday): her ışığın o noktaya tahmini katkısı (Light::importance) hesaplanır,
+   olasılık %85 orantılı + %15 düzgün tabandır. Az ışıkta en isabetli seçim (vitrin sahnesinde
+   düzgün seçime göre relMSE yarıya inmişti).
+ * Işık BVH'si (çok ışık): Conty & Kulla 2018 / PBRT-v4 BVHLightSampler. Sınırlı ışıklar
+   (alan, üçgen, nokta, spot) güç + yön konisi özetli bir ağaçta toplanır; seçim kökten yaprağa
+   iner, her düğümde iki çocuktan biri LightBounds::importance oranında seçilir. Maliyet
+   O(log N): binlerce yayıcı üçgenli LED şerit, neon tabela ya da ekran da temiz örneklenir.
+   Sonsuz ışıklar (ortam, güneş) ağacın dışında, ağacın kendisiyle birlikte en üstte seçilir.
+
+MIS için aynı dağılımın pmf'i lazım: BSDF ışını bir ışığa çarpınca önceki köşenin bağlamıyla
+pmf(i) hesaplanır. BVH'de ışığın kökten yaprağa giden yolu (bit izi) saklanır; pmf O(derinlik).
+
 ### `src/lights/point_light.cpp`
 
 point_light.cpp — Nokta ışığın örneklenmesi ve toplam gücü.
@@ -733,8 +929,12 @@ main.cpp — photon_render: arayüzsüz (komut satırı) renderer ve ölçüm ar
   photon_render --cornell     [...]
 Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json,
   --noise 0.02 (uyarlamalı örnekleme: göreli hata hedefi), --min-spp N,
-  --clamp 10 (dolaylı parlama sınırı), --time SN (süre sınırı; ilerlemeli render)
+  --clamp 10 (dolaylı parlama sınırı), --time SN (süre sınırı; ilerlemeli render),
+  --filter box|triangle|gaussian|blackman-harris, --filter-width PİKSEL,
+  --passes (çok katmanlı EXR: ışık geçişleri, derinlik, konum, ID'ler, albedo, normal),
+  --device auto|cpu|cuda:0 (render cihazı), --list-devices (makinedeki cihazlar)
 stats.json: süre, örnek sayısı, Mray/s (milyon birincil ışın / saniye).
+Render, uygulamanın son render'ıyla aynı yoldan geçer: RenderDevice + RenderSession (Final).
 
 ### `src/materials/dielectric.cpp`
 
@@ -750,9 +950,12 @@ kırılma; pürüzlü hali GGX mikro-yüzey BSDF'si (PBRT-v4 DielectricBxDF, Wal
 
 ### `src/materials/disney.cpp`
 
-Basitleştirilmiş Disney Principled BRDF (Burley 2012/2015): Burley difüz, GGX
-speküler (anizotrop olabilir), sheen, ince-yüzey difüz geçirgenlik ve enerjiyi
-koruyan bir clearcoat katmanı. Örnekleme Heitz 2018 görünür normalleri (VNDF) ile.
+Principled BSDF (Disney 2012/2015 parametreleri, OpenPBR tarzı enerji korunumlu katmanlar):
+EON difüz (Portsmouth 2025), GGX speküler (anizotrop olabilir), Charlie sheen, ince-yüzey
+difüz geçirgenlik ve clearcoat. Örnekleme Heitz 2018 görünür normalleri (VNDF) ile.
+Katmanlar albedo ölçeklemeyle birleşir (Kulla–Conty 2017): üstteki lob ne kadar yansıtırsa
+alttaki o kadar az ışık alır; beyaz plastik fırın testinde ≈ 1 yansıtır (Burley difüzü yatay
+açıda %50'ye varan enerji yaratıyordu).
 Üretim eklemeleri: metal kenar tonu (F82), çoklu saçılma enerji telafisi (Turquin
 2019), ince film girişimi, metalik boya pulları ve rastgele yürüyüş SSS lobu.
 
@@ -760,6 +963,20 @@ koruyan bir clearcoat katmanı. Örnekleme Heitz 2018 görünür normalleri (VND
 
 Disney Principled BRDF malzemesinin arayüzü: parametreler (metallic, roughness, specular,
 clearcoat, sheen, anizotropi, difüz geçirgenlik) ve doku haritaları. Matematik disney.cpp'de.
+
+### `src/materials/eon.h`
+
+eon.h — Enerji korunumlu Oren–Nayar difüz BRDF'si (EON; Portsmouth, Kutz, Hill 2025,
+JCGT 14(1), OpenPBR 1.1 ve MaterialX'in "base_diffuse_roughness" modeli).
+
+Pürüzlü difüz yüzeyler (kil, beton, kadife, ay yüzeyi) Lambert'ten daha "düz" görünür:
+ışığa bakan kenarlar kararmaz, ters tarafta geri saçılma olur. Klasik Oren–Nayar bunu tek
+saçılma için verir ama mikro-yüzeyler arası çoklu saçılmayı atar: beyaz yüzey enerji kaybeder.
+EON iki parçadır:
+  f_ss: Fujii'nin iyileştirilmiş Oren–Nayar'ı (FON), analitik albedosu E_FON(μ) bilinir;
+  f_ms: kaybolan (1 − E_FON) payını geri getiren, karşılıklı (reciprocal) bir telafi lobu.
+Sonuç: ρ = 1'de her açıda ve pürüzlülükte albedo tam 1. r = 0'da Lambert'e eşittir.
+Tüm vektörler yerel çerçevede (+z = normal), wi.z > 0 ve wo.z > 0 varsayılır.
 
 ### `src/materials/fresnel.h`
 
@@ -787,7 +1004,10 @@ Yön kuralı PBRT ile aynı: wo ve wi yüzeyden DIŞARI bakar, birim uzunluktad�
 
 ### `src/materials/microfacet.cpp`
 
-microfacet.cpp — GGX yönlü albedo tablosu E(μ, α): çoklu saçılma enerji telafisi için.
+microfacet.cpp — Ön hesaplı enerji tabloları: GGX yönlü albedosu E(μ, α) (çoklu saçılma
+telafisi), Schlick Fresnel'li ayrıştırması E_a / E_b ve ortalamaları (katman enerji
+korunumu), Charlie sheen albedosu E_sh(μ, r). Hepsi ilk kullanımda bir kez, deterministik
+tabakalı integrasyonla kurulur (birkaç on ms).
 
 ### `src/materials/microfacet.h`
 
@@ -883,12 +1103,13 @@ sürüklenince createMaterial() ile gerçek bir Material nesnesine dönüşür.
 
 ### `src/scene/model_import.cpp`
 
-model_import.cpp — OBJ (tinyobjloader) ve glTF (cgltf) yükleyicilerini sahne
-ağacına bağlar.
+model_import.cpp — OBJ (tinyobjloader), glTF (cgltf), FBX (ufbx) ve Alembic yükleyicilerini
+sahne ağacına bağlar.
 
 ### `src/scene/model_import.h`
 
-model_import.h — OBJ/glTF dosyasını sahne ağacına bir grup düğümü olarak yükleme.
+model_import.h — Model dosyasını (OBJ, glTF, FBX, Alembic) sahne ağacına bir grup düğümü
+olarak yükleme.
 
 ### `src/scene/primitives.cpp`
 

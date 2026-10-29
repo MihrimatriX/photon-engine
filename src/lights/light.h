@@ -10,6 +10,7 @@
 #include "core/color/spectrum.h"
 #include "core/math/vec.h"
 #include "geometry/surface_interaction.h"
+#include "lights/light_bounds.h"
 
 namespace photon {
 
@@ -54,6 +55,10 @@ public:
     /// Bir BSDF ışını bu ışığın geometrisine @p hit noktasında çarptığında, @p ref'ten
     /// sampleLi'nin aynı noktayı üretme pdf'i (katı açı). MIS ağırlığı için.
     virtual float pdfLiHit(const Vec3f& /*ref*/, const SurfaceInteraction& /*hit*/) const { return 0.0f; }
+
+    /// Işık BVH'si için uzaysal/yönsel sınırlar. Sonsuz uzaktaki ışıklar (ortam, güneş/yönlü)
+    /// sınırsızdır ve false döner; onlar BVH'nin dışında ayrıca seçilir.
+    virtual bool bounds(LightBounds& /*out*/) const { return false; }
 };
 
 /// Alıcı tarafı kosinüsü: ışık normalin arkasındaysa bile küçük bir pay bırakılır

@@ -4,6 +4,8 @@ add_library(photon_lights STATIC
     point_light.cpp
     directional_light.cpp
     area_light.cpp
+    light_bounds.cpp
+    light_sampler.cpp
     environment_light.cpp
     spot_light.cpp
     ies.cpp

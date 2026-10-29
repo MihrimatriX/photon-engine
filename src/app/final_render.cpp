@@ -4,9 +4,11 @@
 // (izole) bir sahneyle çalışır: kullanıcı render sürerken düzenleme yapsa bile
 // çıktı etkilenmez. Viewport bu sırada duraklatılır ki tüm çekirdekler render'a
 // gitsin. Örnek sayısı ya da süre sınırına ulaşınca OIDN (yüksek kalite) ile
-// gürültü giderilir ve seçilen biçimde kaydedilir.
+// gürültü giderilir ve seçilen biçimde kaydedilir. Render, CLI ile aynı yoldan geçer:
+// seçilen RenderDevice üzerinde Final modlu bir RenderSession.
 #include "app/application.h"
 #include "engine/denoiser.h"
+#include "engine/render_session.h"
 #include "core/image/imager.h"
 #include "core/image/image_io.h"
 #include "core/math/constants.h"
@@ -17,6 +19,7 @@
 #include <cmath>
 #include <ctime>
 #include <filesystem>
+#include <stdexcept>
 
 #ifdef _WIN32
 #include <cstdlib>
@@ -79,8 +82,9 @@ void Application::startFinalRender() {
     out.width = std::clamp(out.width, 16, 16384);
     out.height = std::clamp(out.height, 16, 16384);
     out.spp = std::max(1, out.spp);
+    // Boş yol her render'da yeni tarih-saatli ad üretir; ayara geri yazılmaz (eskiden yazılıyordu
+    // ve ikinci render ilkinin üstüne kaydediyordu).
     if (out.path.empty()) out.path = defaultRenderPath(out.format);
-    m_s.output.path = out.path;
 
     auto scene = buildScene(true);
     const CameraParams cam = cameraParams();
@@ -115,62 +119,71 @@ void Application::startFinalRender() {
         using Clock = std::chrono::steady_clock;
         const auto t0 = Clock::now();
         try {
-            auto camera = makeCamera(cam, static_cast<float>(rs.width) / static_cast<float>(rs.height));
-            Renderer renderer;
-            Film film(rs.width, rs.height);
-            AovFilms aovs;
-            aovs.resize(rs.width, rs.height);
+            std::string deviceError;
+            std::unique_ptr<RenderDevice> device = createDevice(out.device, &deviceError);
+            if (!device) throw std::runtime_error(deviceError);
+            device->setScene(scene);
+            RenderSession session(*device);
+            SessionConfig sc;
+            sc.mode = RenderMode::Final;
+            sc.targetSpp = out.spp;
+            sc.timeLimit = out.maxSeconds;
+            sc.aovs = true; // alfa (şeffaf PNG) ve gürültü giderme kılavuzları
+            sc.passes = out.format == 2 && out.passes;
+            session.begin(makeCamera(cam, static_cast<float>(rs.width) / static_cast<float>(rs.height)), rs, sc);
             auto lastPreview = t0;
-            int spp = 0;
-            for (; spp < out.spp; ++spp) {
-                if (j.cancel) break;
-                renderer.renderSamplePass(*scene, *camera, rs, film, spp, &j.cancel, &aovs);
-                if (j.cancel) break;
-                j.spp = spp + 1;
-                const double elapsed = std::chrono::duration<double>(Clock::now() - t0).count();
-                // Önizleme yarım saniyede bir; büyük görüntüde her pass'te çözmek pahalı.
-                if (std::chrono::duration<double>(Clock::now() - lastPreview).count() > 0.5 || spp == 0) {
-                    auto prev = std::make_shared<Image>(film.resolve());
+            bool first = true;
+            while (!j.cancel && session.advance(&j.cancel)) {
+                j.spp = session.samples();
+                // Önizleme yarım saniyede bir; büyük görüntüde her partide çözmek pahalı.
+                if (first || std::chrono::duration<double>(Clock::now() - lastPreview).count() > 0.5) {
+                    auto prev = std::make_shared<Image>(session.resolve());
                     std::lock_guard<std::mutex> lk(j.mutex);
                     j.preview = prev;
                     j.previewNew = true;
-                    j.seconds = elapsed;
+                    j.seconds = session.seconds();
                     lastPreview = Clock::now();
-                }
-                if (out.maxSeconds > 0.0f && elapsed >= out.maxSeconds) {
-                    ++spp;
-                    break;
+                    first = false;
                 }
             }
+            const int spp = session.samples();
             const bool userCancelled = j.cancel.load() && spp == 0;
             if (userCancelled) {
                 std::lock_guard<std::mutex> lk(j.mutex);
                 j.status = "İptal edildi";
             } else {
-                Image img = film.resolve();
-                Image alpha = aovs.alpha.resolve();
+                Image img;
+                const Image alpha = session.resolveAlpha();
                 if (out.denoise) {
                     {
                         std::lock_guard<std::mutex> lk(j.mutex);
                         j.status = "Gürültü gideriliyor (OIDN)…";
                     }
-                    Image albedo = aovs.albedo.resolve();
-                    Image normal = aovs.normal.resolve();
                     Denoiser denoiser;
-                    denoiser.run(img, &albedo, &normal, Denoiser::Quality::High);
+                    img = session.resolveDenoised(denoiser, Denoiser::Quality::High);
+                } else {
+                    img = session.resolve();
                 }
                 // Görüntüleyici yalnız ekran çıktılarına (PNG/JPEG); EXR sahne-doğrusal ham kalır.
                 Image shown = img;
                 applyImager(shown, imager, ev);
-                const bool ok = saveByFormat(out.format == 2 ? img : shown, &alpha, out.path, out.format, tmo, ev, transparent);
+                bool ok;
+                if (session.passes()) {
+                    // Çok katmanlı EXR: beauty (gürültüsü giderilmiş) + ham ışık/veri geçişleri.
+                    std::vector<Image> storage;
+                    ok = saveMultiLayerEXR(out.path, img, &alpha, makeExrLayers(session.passes(), session.aovs(), storage));
+                } else {
+                    ok = saveByFormat(out.format == 2 ? img : shown, &alpha, out.path, out.format, tmo, ev, transparent);
+                }
                 auto finalImg = std::make_shared<Image>(std::move(shown));
                 std::lock_guard<std::mutex> lk(j.mutex);
                 j.preview = finalImg;
                 j.previewNew = true;
                 j.seconds = std::chrono::duration<double>(Clock::now() - t0).count();
                 j.succeeded = ok;
-                j.status = ok ? (j.cancel ? "Durduruldu ve kaydedildi (" : "Tamamlandı (") + std::to_string(spp) +
-                                    " örnek, " + ui::formatDuration(j.seconds) + ")"
+                const std::string how = j.cancel ? "Durduruldu ve kaydedildi (" : session.converged() ? "Yakınsadı (" : "Tamamlandı (";
+                j.status = ok ? how + std::to_string(spp) + " örnek, " + ui::formatDuration(j.seconds) + ", " +
+                                    device->info().name + ")"
                               : "Dosya yazılamadı: " + out.path;
             }
         } catch (const std::exception& e) {
@@ -200,7 +213,8 @@ void Application::startTurntable() {
     rs.width = std::clamp(m_s.output.width, 16, 8192);
     rs.height = std::clamp(m_s.output.height, 16, 8192);
     rs.samplesPerPixel = std::max(1, m_s.output.turntableSpp);
-    rs.denoiseEnabled = m_s.output.denoise;
+    const bool denoise = m_s.output.denoise;
+    const std::string deviceId = m_s.output.device;
     const int frames = std::max(4, m_s.output.turntableFrames);
     const ToneMapOperator tmo = m_s.settings.tmo;
     const float ev = m_s.settings.exposure;
@@ -220,19 +234,30 @@ void Application::startTurntable() {
         job.succeeded = false;
     }
     job.active = true;
-    job.thread = std::thread([this, scene, orbit, rs, frames, tmo, ev, imager, base, dir]() {
+    job.thread = std::thread([this, scene, orbit, rs, frames, tmo, ev, imager, base, dir, denoise, deviceId]() {
         FinalRenderJob& j = m_s.finalJob;
         const auto t0 = std::chrono::steady_clock::now();
         try {
-            Renderer renderer;
+            std::string deviceError;
+            std::unique_ptr<RenderDevice> device = createDevice(deviceId, &deviceError);
+            if (!device) throw std::runtime_error(deviceError);
+            device->setScene(scene); // sahne bir kez yüklenir, kareler yalnız kamerayı değiştirir
+            RenderSession session(*device);
+            SessionConfig sc;
+            sc.mode = RenderMode::Final;
+            sc.targetSpp = rs.samplesPerPixel;
+            sc.aovs = denoise;
+            Denoiser denoiser;
             for (int i = 0; i < frames && !j.cancel; ++i) {
                 OrbitCamera c = orbit;
                 c.phi = orbit.phi + TWO_PI * static_cast<float>(i) / static_cast<float>(frames);
                 CameraParams p = base;
                 p.eye = c.position();
-                auto camera = makeCamera(p, static_cast<float>(rs.width) / static_cast<float>(rs.height));
-                Image img = renderer.render(*scene, *camera, rs, &j.cancel);
+                session.begin(makeCamera(p, static_cast<float>(rs.width) / static_cast<float>(rs.height)), rs, sc);
+                while (session.advance(&j.cancel)) {
+                }
                 if (j.cancel) break;
+                Image img = denoise ? session.resolveDenoised(denoiser, Denoiser::Quality::High) : session.resolve();
                 applyImager(img, imager, ev);
                 char name[32];
                 std::snprintf(name, sizeof(name), "frame_%04d.png", i);

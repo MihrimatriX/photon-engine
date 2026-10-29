@@ -78,6 +78,8 @@ void Application::drawViewport() {
     }
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const ImVec2 size = ImGui::GetContentRegionAvail();
+    m_vpOrigin = origin;
+    m_vpSize = size;
     const int pw = std::max(1, static_cast<int>(size.x));
     const int ph = std::max(1, static_cast<int>(size.y));
     m_s.viewportPxW = pw;
@@ -247,7 +249,10 @@ void Application::drawViewport() {
                 if (s.id == static_cast<const char*>(p->Data)) applyStudio(s);
         }
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kPayloadModel)) {
-            importModel(static_cast<const char*>(p->Data));
+            // Kütüphane modeli imlecin altındaki yüzeye (zemin ya da başka bir nesnenin üstü) konur.
+            Vec3f hit;
+            if (pickAt(u, v, &hit)) importModel(static_cast<const char*>(p->Data), true, &hit);
+            else importModel(static_cast<const char*>(p->Data));
         }
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kPayloadPrimitive)) {
             // Şekil imlecin altındaki yüzeye (zemin ya da başka bir nesnenin üstü) konur.
@@ -695,7 +700,8 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
     } else {
         if (st.targetSpp > 0) std::snprintf(line1, sizeof(line1), "%d / %d örnek", st.spp, st.targetSpp);
         else std::snprintf(line1, sizeof(line1), "%d örnek", st.spp);
-        std::snprintf(line2, sizeof(line2), "%s%s%s", ui::formatDuration(st.seconds).c_str(),
+        std::snprintf(line2, sizeof(line2), "%s%s%s%s%s", st.deviceKind.c_str(), st.deviceKind.empty() ? "" : "  •  ",
+                      ui::formatDuration(st.seconds).c_str(),
                       st.interactive ? "  •  hareket" : (st.denoised ? "  •  OIDN" : ""),
                       m_s.viewMode == ViewMode::Clay ? "  •  kil" : "");
     }
@@ -762,7 +768,7 @@ void Application::drawWelcome(const ImVec2& origin, const ImVec2& size) {
     const ImVec2 ts = ImGui::CalcTextSize(title);
     dl->AddText(ImVec2(p.x + (w - ts.x) * 0.5f, dz0.y + 72), ui::col(pal.text), title);
     ImGui::PopFont();
-    const char* sub = "OBJ  •  glTF  •  GLB      HDR / EXR ortamlar";
+    const char* sub = "FBX  •  OBJ  •  glTF  •  Alembic      HDR / EXR ortamlar";
     const ImVec2 ss = ImGui::CalcTextSize(sub);
     dl->AddText(ImVec2(p.x + (w - ss.x) * 0.5f, dz0.y + 100), ui::col(pal.textDim), sub);
 
