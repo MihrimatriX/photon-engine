@@ -7,6 +7,7 @@ add_executable(photon_app WIN32
     thumbnails.cpp
     scene_ops.cpp
     final_render.cpp
+    animation.cpp
     ui_common.cpp
     ui_layout.cpp
     ui_library.cpp

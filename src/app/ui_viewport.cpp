@@ -277,6 +277,7 @@ void Application::drawViewport() {
     }
 
     drawViewportOverlay(origin, size);
+    drawTimeline(origin, size);
     if (m_s.graph.empty()) drawWelcome(origin, size);
     ImGui::End();
 }
