@@ -447,7 +447,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                             continue;
                         }
                         const LightSample ls = li < explicitLights ? lights[static_cast<size_t>(li)]->sampleLi(isect, sampler.get2D())
-                                                                   : env->sampleLi(isect, sampler.get2D());
+                                                                   : env->sampleLiFull(sampler.get2D());
                         const float cosT = ls.wi.dot(isect.normal);
                         if (!ls.isValid() || cosT <= 0.0f) continue;
                         const float c = ls.Li.luminance() * cosT / (pmf * ls.pdf);
