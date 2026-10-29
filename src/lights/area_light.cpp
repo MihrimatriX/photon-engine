@@ -174,7 +174,7 @@ float AreaLight::pdfLi(const Vec3f& ref, const Vec3f& pLight) const {
     float du = d.dot(m_u);
     float dv = d.dot(m_v);
     float det = uu * vv - uv * uv;
-    if (std::abs(det) <= 1e-12f) return 0.0f;
+    if (!(std::abs(det) > 1e-12f * uu * vv)) return 0.0f; // göreli: mm ve km ölçekli ışıklar
 
     float s = (vv * du - uv * dv) / det;
     float t = (uu * dv - uv * du) / det;

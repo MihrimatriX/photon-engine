@@ -12,6 +12,7 @@
 #include "engine/scene.h"
 #include "core/math/frame.h"
 #include "core/math/utils.h"
+#include "geometry/ray_spawn.h"
 #include "core/sampling/sampling.h"
 #include "core/sampling/phase.h"
 #include "core/color/spectral.h"
@@ -21,19 +22,6 @@
 namespace photon {
 
 namespace {
-
-Vec3f offsetRayOrigin(const Vec3f& p, const Vec3f& n, const Vec3f& dir) {
-    return p + n * (dir.dot(n) > 0.0f ? 1e-4f : -1e-4f);
-}
-
-/// Yüzeyden çıkan ışının başlangıcı: ofset GEOMETRİK normal boyunca, ışının gittiği tarafa.
-/// Gölgelendirme normali (yumuşatılmış, normal haritalı) yüzeyin gerçek yönünü bilmez; ona
-/// göre itmek, kırılan/yansıyan ışını yüzeyin yanlış tarafından başlatıp aynı yüzeye
-/// yeniden çarptırabilir (yumuşak normalli camda enerji sızıntısı). [F5.9'un ilk adımı]
-Vec3f spawnOrigin(const SurfaceInteraction& isect, const Vec3f& dir) {
-    const Vec3f& n = isect.ng.lengthSquared() > 0.0f ? isect.ng : isect.normal;
-    return offsetRayOrigin(isect.point, n, dir);
-}
 
 float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sampler,
                float strength, int samples) {
@@ -45,7 +33,7 @@ float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sam
     for (int i = 0; i < samples; ++i) {
         Vec3f local = cosineSampleHemisphere(sampler.get2D());
         Vec3f dir = frame.toWorld(local).normalized();
-        Ray aoRay(spawnOrigin(isect, dir), dir, 1e-4f, maxDist);
+        Ray aoRay(spawnOrigin(isect, dir), dir, 0.0f, maxDist);
         if (scene.intersectAny(aoRay)) occ += 1.0f;
     }
     float visibility = 1.0f - (occ / static_cast<float>(samples));
@@ -145,28 +133,18 @@ bool russianRoulette(Color3f& throughput, Sampler& sampler) {
     return true;
 }
 
-/// NEE gölge ışını. Başlangıç alıcının yüzeyinden ofsetlenir; ışık örneği alıcıya göre
-/// ölçüldüğü için wi boyunca gidilirse ışığın düzlemi örnekten ÖNCE kesilir ve alan ışığının
-/// kendi dörtgeni kendi örneğini örter (yakın ışıkta tam karanlık). Bu yüzden yüzeyli
-/// ışıklarda ışın ofsetli başlangıçtan örnek noktasına yönelir ve biraz önce durur.
-/// false → ışın kurulamadı (örnek alıcıya fazla yakın).
-bool makeShadowRay(const SurfaceInteraction& isect, const LightSample& ls, bool pointOnSurface, Ray& out) {
-    const Vec3f origin = spawnOrigin(isect, ls.wi);
-    Vec3f dir = ls.wi;
-    float end = ls.distance < INFINITY_F ? ls.distance - 1e-4f : 1e30f;
-    if (pointOnSurface) {
-        const Vec3f pLight = isect.point + ls.wi * ls.distance;
-        const Vec3f delta = pLight - origin;
-        const float dist = delta.length();
-        if (dist > 1e-4f) {
-            dir = delta / dist;
-            // ponytail: stop short of the sample; a contact occluder inside the slop is missed until shadow rays skip light prims
-            end = dist - std::max(1e-4f, dist * 1e-4f);
-        }
+/// NEE gölge ışını. Başlangıç alıcının yüzeyinden sağlam biçimde ofsetlenir (ray_spawn.h).
+/// Işık örneği alıcıya göre ölçüldüğü için wi boyunca gidilirse ışığın düzlemi örnekten ÖNCE
+/// kesilebilir ve alan ışığının kendi dörtgeni kendi örneğini örter (yakın ışıkta tam karanlık).
+/// Bu yüzden sonlu uzaklıktaki ışıklarda ışın ofsetli başlangıçtan örnek noktasına yönelir ve
+/// göreli bir payla önce durur. false → ışın kurulamadı (örnek alıcıya fazla yakın).
+bool makeShadowRay(const SurfaceInteraction& isect, const LightSample& ls, bool /*pointOnSurface*/, Ray& out) {
+    if (!(ls.distance < INFINITY_F) || ls.distance >= 1e29f) {
+        out = Ray(shadowOrigin(isect, ls.wi), ls.wi, 0.0f, 1e30f);
+        return true;
     }
-    if (end <= 1e-4f) return false;
-    out = Ray(origin, dir, 1e-4f, end);
-    return true;
+    // ponytail: stop short of the sample; a contact occluder inside the slack is missed until shadow rays skip light prims
+    return spawnRayTo(isect, isect.point + ls.wi * ls.distance, out);
 }
 
 /// Gölge ışınının geçirgenliği: ince duvarlı camlar (doğrultu değiştirmeyen yüzeyler)
@@ -179,15 +157,16 @@ Color3f shadowTransmittance(const Scene& scene, const Ray& shadow) {
     const Vec3f dir = shadow.direction;
     float remaining = shadow.tMax;
     for (int i = 0; i < 16; ++i) {
-        Ray r(origin, dir, shadow.tMin, remaining);
+        Ray r(origin, dir, 0.0f, remaining);
         SurfaceInteraction hit;
         if (!scene.intersect(r, hit)) return T;
         if (!hit.material || !hit.material->transmitsShadows()) return Color3f::black();
         T *= hit.material->shadowTransmittance(hit, dir);
         if (T.isBlack()) return T;
-        origin = hit.point;
+        // Zarın öbür yüzüne sağlam ofsetle geç (terminatör noktası değil: doğrultu korunur).
+        origin = offsetRayOrigin(hit.point, hit.pError, hit.ng.lengthSquared() > 0.0f ? hit.ng : hit.normal, dir);
         remaining -= hit.t;
-        if (remaining <= shadow.tMin) return T;
+        if (remaining <= 0.0f) return T;
     }
     return Color3f::black();
 }
@@ -400,7 +379,8 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             hit = scene.intersect(currentRay, isect);
             // Kameraya görünmez ışık dörtgenleri: kamera ışını içinden geçip devam eder.
             for (int skip = 0; hit && cameraRay && skip < 8 && scene.cameraInvisible(isect); ++skip) {
-                currentRay = Ray(isect.point, currentRay.direction);
+                currentRay = Ray(offsetRayOrigin(isect.point, isect.pError, isect.ng, currentRay.direction),
+                                 currentRay.direction, 0.0f, 1e30f);
                 isect = SurfaceInteraction{};
                 hit = scene.intersect(currentRay, isect);
             }
@@ -624,7 +604,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             // bulunduğu için iki strateji böylece tutarlı tartılır.
             throughput *= bs.f * (std::abs(bs.wi.dot(isect.normal)) / bs.pdf);
             if (!throughput.isFinite()) break;
-            currentRay = Ray(spawnOrigin(isect, bs.wi), bs.wi);
+            currentRay = spawnRay(isect, bs.wi);
             if (++passThroughs > 64) break; // sonsuz cam yığınına karşı sigorta (sekme sayılmaz)
             continue;
         }
@@ -651,8 +631,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             }
         }
 
-        Vec3f nextRayOrigin = spawnOrigin(isect, wi);
-        currentRay = Ray(nextRayOrigin, wi);
+        currentRay = spawnRay(isect, wi);
         ++depth;
 
         // Rus ruleti (PBRT-v4): hayatta kalma olasılığı = throughput'un EN BÜYÜK bileşeni.

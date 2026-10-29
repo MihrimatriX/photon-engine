@@ -3,6 +3,8 @@
 
 #include "geometry/sphere.h"
 #include "core/math/utils.h"
+#include "core/math/float_bits.h"
+#include <algorithm>
 #include <cmath>
 
 namespace photon {
@@ -42,10 +44,18 @@ bool Sphere::intersect(Ray& ray, SurfaceInteraction& isect) const {
 
     // Populate intersection details
     isect.t = tHit;
-    isect.point = ray.at(tHit);
-    
+    // İsabet noktası küre yüzeyine yeniden izdüşürülür (PBRT-v4): o + t·d'nin hatası ışın
+    // boyuyla büyür; izdüşüm sonrası hata yalnız noktanın büyüklüğüne bağlıdır.
+    Vec3f local = ray.at(tHit) - m_center;
+    const float len = local.length();
+    if (len > 0.0f) local = local * (m_radius / len);
+    isect.point = m_center + local;
+    const float iso = floatGamma(32) * std::max(m_radius + m_center.cwiseAbs().maxComponent(), 1e-20f);
+    isect.pError = (local.cwiseAbs() + m_center.cwiseAbs()) * floatGamma(16) + Vec3f(iso);
+    isect.hasSmoothPoint = false;
+
     // Normal at intersection (pointing outwards)
-    Vec3f outwardNormal = (isect.point - m_center) / m_radius;
+    Vec3f outwardNormal = local / m_radius;
     isect.ng = outwardNormal;
     isect.setFaceNormal(ray, outwardNormal);
 
