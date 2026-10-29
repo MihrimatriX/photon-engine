@@ -56,6 +56,8 @@ public:
 
     /// Embree varken bile kendi BVH'mizi kullan (testler ve karşılaştırma için).
     static void setPreferOwnBvh(bool own);
+    /// Kesişim Embree ile mi yapılıyor (yoksa yerleşik BVH)?
+    bool usesEmbree() const { return m_embree != nullptr; }
 
     /// Tüm içeriği temizle.
     void reset();

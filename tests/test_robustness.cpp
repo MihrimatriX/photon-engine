@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 #include "camera/perspective_camera.h"
+#include "engine/embree_accel.h"
 #include "engine/renderer.h"
 #include "engine/scene.h"
 #include "geometry/mesh.h"
@@ -107,23 +108,38 @@ float relMse(const Image& a, const Image& ref) {
 
 } // namespace
 
-TEST(Robustness, ImageIsScaleInvariant) {
-    Scene::setPreferOwnBvh(true);
-    const Image ref = renderAt(1.0f, Vec3f(0.0f));
-    const float refMean = meanLum(ref);
-    ASSERT_GT(refMean, 0.01f);
-    struct Variant {
-        float scale;
-        Vec3f offset;
-    };
-    for (const Variant v : {Variant{0.01f, Vec3f(0.0f)}, Variant{100.0f, Vec3f(0.0f)}, Variant{10000.0f, Vec3f(0.0f)},
-                            Variant{1.0f, Vec3f(3000.0f, 0.0f, -2000.0f)}}) {
-        const Image img = renderAt(v.scale, v.offset);
-        const float m = meanLum(img);
-        EXPECT_NEAR(m / refMean, 1.0f, 0.02f) << "scale " << v.scale << " offset " << v.offset.x;
-        EXPECT_LT(relMse(img, ref), 0.01f) << "scale " << v.scale << " offset " << v.offset.x;
+/// Her iki kesişim arka ucu: yerleşik BVH ve (derlemede varsa) Embree. Işın başlangıç ofseti
+/// kesişim noktasının hata payına dayanır; ikisi de aynı fillHit'ten geçse de Embree'nin t ve
+/// barycentric hesabı farklıdır, bu yüzden ayrı ayrı denenir.
+template <typename F>
+void forEachBackend(F&& body) {
+    for (const bool own : {true, false}) {
+        if (!own && !EmbreeAccel::available()) continue;
+        SCOPED_TRACE(own ? "yerleşik BVH" : "Embree");
+        Scene::setPreferOwnBvh(own);
+        body(own);
     }
     Scene::setPreferOwnBvh(false);
+}
+
+TEST(Robustness, ImageIsScaleInvariant) {
+    forEachBackend([](bool own) {
+        const Image ref = renderAt(1.0f, Vec3f(0.0f));
+        const float refMean = meanLum(ref);
+        ASSERT_GT(refMean, 0.01f);
+        struct Variant {
+            float scale;
+            Vec3f offset;
+        };
+        for (const Variant v : {Variant{0.01f, Vec3f(0.0f)}, Variant{100.0f, Vec3f(0.0f)},
+                                Variant{10000.0f, Vec3f(0.0f)}, Variant{1.0f, Vec3f(3000.0f, 0.0f, -2000.0f)}}) {
+            const Image img = renderAt(v.scale, v.offset);
+            const float m = meanLum(img);
+            EXPECT_NEAR(m / refMean, 1.0f, 0.02f) << "scale " << v.scale << " offset " << v.offset.x;
+            EXPECT_LT(relMse(img, ref), 0.01f) << "scale " << v.scale << " offset " << v.offset.x;
+        }
+        (void)own;
+    });
 }
 
 // Gölge terminatörü (Hanika 2021): kaba (10×6) yumuşak normalli dışbükey küre. Yumuşak normal
@@ -131,26 +147,27 @@ TEST(Robustness, ImageIsScaleInvariant) {
 // kendini gölgeleyemez). Düzeltmesiz, terminatör yakınında gölge ışınları kaba üçgenin kendisine
 // ya da komşusuna çarpar: aydınlık/gölge sınırı basamaklı kararır.
 TEST(Robustness, ShadowTerminatorFollowsSmoothNormals) {
-    Scene::setPreferOwnBvh(true);
     static const DisneyMaterial white(Color3f(0.8f), 0.0f, 0.6f, 0.5f);
-    Scene scene;
-    scene.addShape(lowPolySphere(Vec3f(0.0f), 1.0f, 10, 6, &white));
-    scene.buildAccelerator();
-    const Vec3f lightPos(-4.0f, -0.3f, 0.0f);
-    int lit = 0, blocked = 0;
-    for (int y = 0; y < 200; ++y)
-        for (int x = 0; x < 200; ++x) {
-            Ray ray(Vec3f(-1.0f + 0.01f * x, -1.0f + 0.01f * y, 4.0f), Vec3f(0, 0, -1));
-            SurfaceInteraction si;
-            if (!scene.intersect(ray, si)) continue;
-            const Vec3f toL = (lightPos - si.point).normalized();
-            if (si.normal.dot(toL) <= 0.0f) continue; // yumuşak normale göre gölgede
-            ++lit;
-            Ray shadow;
-            if (!spawnRayTo(si, lightPos, shadow) || scene.intersectAny(shadow)) ++blocked;
-        }
-    ASSERT_GT(lit, 1000);
-    std::printf("terminator: %d of %d lit points self-shadowed\n", blocked, lit);
-    EXPECT_LT(blocked, lit / 200);
-    Scene::setPreferOwnBvh(false);
+    forEachBackend([](bool own) {
+        Scene scene;
+        scene.addShape(lowPolySphere(Vec3f(0.0f), 1.0f, 10, 6, &white));
+        scene.buildAccelerator();
+        EXPECT_EQ(scene.usesEmbree(), !own);
+        const Vec3f lightPos(-4.0f, -0.3f, 0.0f);
+        int lit = 0, blocked = 0;
+        for (int y = 0; y < 200; ++y)
+            for (int x = 0; x < 200; ++x) {
+                Ray ray(Vec3f(-1.0f + 0.01f * x, -1.0f + 0.01f * y, 4.0f), Vec3f(0, 0, -1));
+                SurfaceInteraction si;
+                if (!scene.intersect(ray, si)) continue;
+                const Vec3f toL = (lightPos - si.point).normalized();
+                if (si.normal.dot(toL) <= 0.0f) continue; // yumuşak normale göre gölgede
+                ++lit;
+                Ray shadow;
+                if (!spawnRayTo(si, lightPos, shadow) || scene.intersectAny(shadow)) ++blocked;
+            }
+        ASSERT_GT(lit, 1000);
+        std::printf("terminator (%s): %d of %d lit points self-shadowed\n", own ? "BVH" : "Embree", blocked, lit);
+        EXPECT_LT(blocked, lit / 200);
+    });
 }

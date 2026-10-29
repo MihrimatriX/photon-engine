@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 #include "camera/perspective_camera.h"
+#include "engine/embree_accel.h"
 #include "engine/renderer.h"
 #include "engine/scene.h"
 #include "geometry/mesh.h"
@@ -168,4 +169,49 @@ TEST(LightSampler, ManyEmittersRenderCleanerThanUniform) {
     std::printf("LED strip @8spp relMSE: light BVH %.4f, uniform %.4f\n", errBvh, errUni);
     EXPECT_LT(errBvh, 0.5 * errUni);
     Scene::setPreferOwnBvh(false);
+}
+
+// Yayıcı üçgenlerin MIS ağırlıkları isabet edilen üçgenin indeksiyle (primIndex) bulunur.
+// Embree yolu bu indeksi kendi primID'sinden verir: iki kesişim arka ucu aynı ortalamayı
+// vermeli (bir taraf yanlış ışığın pdf'ini kullansaydı yayıcıların yakını kararır ya da parlardı).
+TEST(LightSampler, EmitterMisMatchesAcrossBackends) {
+    if (!EmbreeAccel::available()) GTEST_SKIP() << "Embree yok";
+    static const Lambertian floorMat(Color3f(0.7f));
+    static const Lambertian led(Color3f(0.0f), Color3f(5.0f));
+    auto render = [](bool own) {
+        Scene::setPreferOwnBvh(own);
+        Scene scene;
+        const Vec3f up(0, 1, 0);
+        std::vector<Vec3f> fp = {{-3, 0, -3}, {3, 0, -3}, {3, 0, 3}, {-3, 0, 3}};
+        scene.addShape(std::make_shared<TriangleMesh>(fp, std::vector<Vec3f>{up, up, up, up}, std::vector<Vec2f>{},
+                                                      std::vector<uint32_t>{0, 2, 1, 0, 3, 2}, &floorMat));
+        // Farklı boyda 40 yayıcı üçgen: yanlış indeks farklı alan → farklı pdf demek.
+        std::vector<Vec3f> p;
+        std::vector<uint32_t> idx;
+        for (int i = 0; i < 40; ++i) {
+            const float a = 0.157f * static_cast<float>(i), r = 1.0f + 0.04f * static_cast<float>(i);
+            const float s = 0.03f + 0.01f * static_cast<float>(i % 7);
+            const Vec3f c(r * std::cos(a), 0.4f, r * std::sin(a));
+            const uint32_t b = static_cast<uint32_t>(p.size());
+            p.insert(p.end(), {c + Vec3f(-s, 0, -s), c + Vec3f(s, 0, -s), c + Vec3f(0, 0, s)});
+            idx.insert(idx.end(), {b, b + 1, b + 2});
+        }
+        scene.addShape(std::make_shared<TriangleMesh>(p, std::vector<Vec3f>{}, std::vector<Vec2f>{}, idx, &led));
+        scene.buildAccelerator();
+        EXPECT_EQ(scene.usesEmbree(), !own);
+        PerspectiveCamera cam(Vec3f(0, 4, 4), Vec3f(0, 0, 0), Vec3f(0, 1, 0), 50.0f, 1.0f);
+        RenderSettings rs;
+        rs.width = rs.height = 48;
+        rs.samplesPerPixel = 256;
+        rs.maxBounces = 2;
+        Renderer r;
+        const Image img = r.render(scene, cam, rs);
+        double s = 0.0;
+        for (int y = 0; y < img.height(); ++y)
+            for (int x = 0; x < img.width(); ++x) s += img.getPixel(x, y).luminance();
+        return s / (img.width() * img.height());
+    };
+    const double own = render(true), embree = render(false);
+    Scene::setPreferOwnBvh(false);
+    EXPECT_NEAR(embree / own, 1.0, 0.02);
 }
