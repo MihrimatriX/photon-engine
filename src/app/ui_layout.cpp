@@ -5,6 +5,7 @@
 #include "ui/icons.h"
 #include "ui/widgets.h"
 #include "engine/denoiser.h"
+#include "scene/package.h"
 
 #include <imgui_internal.h>
 #include <GLFW/glfw3.h>
@@ -13,6 +14,15 @@
 #include <thread>
 
 namespace photon {
+
+namespace {
+
+/// Proje dosyası mı (.photon ya da .photonpack)? Son dosyalar listesinde model ile ayırmak için.
+bool isProjectPath(const std::string& p) {
+    return (p.size() > 7 && p.compare(p.size() - 7, 7, ".photon") == 0) || isPackageFile(p);
+}
+
+} // namespace
 
 // Varsayılan yerleşim: solda kütüphane, ortada viewport, sağda sahne ağacı (üst)
 // ve özellikler (alt). Kullanıcı panelleri sürükleyip değiştirebilir; düzen
@@ -71,13 +81,16 @@ void Application::drawMenuBar() {
         if (ImGui::MenuItem(ICON_FOLDER_OPEN "  Proje aç…", "Ctrl+Shift+O")) openProjectDialog();
         if (ImGui::MenuItem(ICON_SAVE "  Kaydet", "Ctrl+S")) saveProject();
         if (ImGui::MenuItem("      Farklı kaydet…", "Ctrl+Shift+S")) saveProjectAs();
+        if (ImGui::MenuItem(ICON_BOXES "  Paket olarak kaydet…")) savePackageAs();
+        ui::Tooltip("Tek dosya (.photonpack): dokular, HDRI, IES, geometri ve kamera animasyonları içinde. "
+                    "Başka bilgisayara taşımak ve paylaşmak için");
         ImGui::Separator();
         if (ImGui::MenuItem(ICON_BOX "  Model içe aktar…", "Ctrl+O")) openModelDialog();
         if (ImGui::MenuItem(ICON_GLOBE "  HDRI ortam aç…")) openHdrDialog();
         if (ImGui::BeginMenu(ICON_FOLDER_OPEN "  Son kullanılanlar", !m_s.recentFiles.empty())) {
             std::string pick;
             for (const auto& r : m_s.recentFiles) {
-                const bool project = r.size() > 7 && r.compare(r.size() - 7, 7, ".photon") == 0;
+                const bool project = isProjectPath(r);
                 if (ImGui::MenuItem((std::string(project ? ICON_FOLDER_OPEN "  " : ICON_BOX "  ") + ui::fileName(r)).c_str()))
                     pick = r;
                 ui::Tooltip(r.c_str());
@@ -89,7 +102,7 @@ void Application::drawMenuBar() {
             }
             ImGui::EndMenu();
             if (!pick.empty()) {
-                if (pick.size() > 7 && pick.compare(pick.size() - 7, 7, ".photon") == 0) openProject(pick);
+                if (isProjectPath(pick)) openProject(pick);
                 else requestImport({pick});
             }
         }
@@ -157,6 +170,8 @@ void Application::drawMenuBar() {
         }
         ImGui::Separator();
         ImGui::MenuItem("Tel kafes bindir", nullptr, &m_s.wireOverlay, m_rasterOk && !isRasterMode(m_s.viewMode));
+        ImGui::Separator();
+        ImGui::MenuItem(ICON_FILM "  Zaman çizelgesi (kamera animasyonu)", "Alt+T", &m_s.showTimeline);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Kamera")) {

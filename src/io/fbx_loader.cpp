@@ -315,8 +315,9 @@ void readCameras(const ufbx_scene* scene, const AABB& box, ImportedModel& model)
 }
 
 /// FBX ışık şiddetleri uygulamalar arasında standart değildir (Maya azalmasız "1", Max fotometrik,
-/// Blender watt). Göreli oranlar korunur; mutlak düzey, şiddeti 1 olan bir ışığın modelin
-/// merkezinde ~2 ışınım (irradiance) vereceği şekilde ölçeklenir. Kullanıcı Işıklar sekmesinden ayarlar.
+/// Blender watt). Göreli oranlar korunur; mutlak düzey, tüm ışıkların modelin merkezinde verdiği
+/// toplam ışınım (irradiance) ~3 olacak şekilde ölçeklenir (stüdyo ön ayarlarına yakın, pozlama 0'da
+/// doğru aydınlık). Kullanıcı Işıklar sekmesinden ayarlar.
 void readLights(const ufbx_scene* scene, const AABB& box, ImportedModel& model) {
     const bool hasBox = box.pMin.x <= box.pMax.x;
     const Vec3f center = hasBox ? box.centroid() : Vec3f(0.0f);
@@ -335,7 +336,7 @@ void readLights(const ufbx_scene* scene, const AABB& box, ImportedModel& model) 
         const float u = std::max(0.0f, static_cast<float>(fl->intensity));
         const float d = std::max(0.05f * diag, (center - l.position).length());
         l.aimDistance = d;
-        constexpr float kTargetIrradiance = 2.0f;
+        constexpr float kTargetIrradiance = 1.0f; // önce birim başına 1; sonda toplam normalleştirilir
         switch (fl->type) {
             case UFBX_LIGHT_DIRECTIONAL:
                 l.type = ImportedLight::Type::Directional;
@@ -365,6 +366,19 @@ void readLights(const ufbx_scene* scene, const AABB& box, ImportedModel& model) 
         }
         model.lights.push_back(std::move(l));
     }
+    // Toplam ışınımı merkezde ~3'e getir (oranlar aynı kalır).
+    double total = 0.0;
+    for (const ImportedLight& l : model.lights) {
+        const float d2 = std::max(1e-6f, l.aimDistance * l.aimDistance);
+        switch (l.type) {
+            case ImportedLight::Type::Directional: total += l.intensity; break;
+            case ImportedLight::Type::Area: total += l.intensity * l.width * l.height / d2; break;
+            default: total += l.intensity / d2; break;
+        }
+    }
+    constexpr double kSceneIrradiance = 3.0;
+    if (total > 0.0)
+        for (ImportedLight& l : model.lights) l.intensity *= static_cast<float>(kSceneIrradiance / total);
     if (!model.lights.empty())
         model.warnings.push_back(std::to_string(model.lights.size()) +
                                  " ışık alındı; FBX şiddetleri uygulamalar arasında farklı olduğundan düzey "

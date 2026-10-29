@@ -74,6 +74,8 @@ TEST(DccImport, FbxLightsKeepTypeColorDirectionAndRatios) {
     const float eSpot = spot->intensity / (spot->position.lengthSquared());
     EXPECT_NEAR(eSpot / eLamp, 2.0f, 1e-3f);
     EXPECT_NEAR(sun->intensity, eLamp, 1e-3f); // aynı FBX şiddeti → aynı ışınım
+    // Mutlak düzey: modelin merkezindeki toplam ışınım ~3 (stüdyo ön ayarlarına yakın).
+    EXPECT_NEAR(eLamp + eSpot + sun->intensity, 3.0f, 1e-3f);
 }
 
 TEST(DccImport, ExtrasFollowTheGroupTransform) {

@@ -145,7 +145,8 @@ public:
     void importWithOptions(const std::string& path, const ModelImportOptions& options, bool undoable,
                            const Vec3f* placeAt);
     void attachImported(const std::string& path, std::unique_ptr<SceneNode> node, bool undoable,
-                        const std::vector<std::string>& warnings = {}, const Vec3f* placeAt = nullptr);
+                        const std::vector<std::string>& warnings = {}, const Vec3f* placeAt = nullptr,
+                        ImportExtras* extras = nullptr);
     ModelImportOptions importOptionsFor(const std::string& path) const;
     void drawImportDialog();
     void loadPrefs();
@@ -163,8 +164,10 @@ public:
     void placeSelectionOnGround();
     void applyCameraPreset(const char* id);
     CameraParams cameraParams() const;
+    CameraParams cameraParamsFor(const OrbitCamera& c) const;
     uint64_t pickAt(float u, float v, Vec3f* hitPoint = nullptr);
     void saveProjectAs();
+    void savePackageAs();
     void saveProject();
     void openProjectDialog();
     bool openProject(const std::string& path);
@@ -183,6 +186,13 @@ public:
     // ── final_render.cpp ──
     void startFinalRender();
     void startTurntable();
+    // Kamera animasyonu (animation.cpp)
+    void drawTimeline(const ImVec2& origin, const ImVec2& size);
+    void tickAnimation(float dt);
+    void applyTrackTime(float t);
+    void startAnimationRender();
+    bool m_animSmokeStarted = false; ///< --ui animrender denemesi başladı mı
+    void buildTrackFromSavedCameras();
     void cancelFinalRender();
     void joinFinalRender();
 

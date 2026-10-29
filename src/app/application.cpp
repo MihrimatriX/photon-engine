@@ -105,6 +105,8 @@ void Application::loadPrefs() {
             p.zUp = ip->value("zUp", p.zUp);
             p.alembicFps = std::clamp(ip->value("alembicFps", p.alembicFps), 1.0f, 1000.0f);
             p.dontAsk = ip->value("dontAsk", p.dontAsk);
+            p.importLights = ip->value("lights", p.importLights);
+            p.importCameras = ip->value("cameras", p.importCameras);
         }
         for (const auto& r : j.value("recent", nlohmann::json::array()))
             if (r.is_string()) m_s.recentFiles.push_back(r.get<std::string>());
@@ -117,7 +119,8 @@ void Application::loadPrefs() {
 void Application::savePrefs() {
     const AppState::ImportPrefs& p = m_s.importPrefs;
     nlohmann::json j;
-    j["import"] = {{"unit", p.unit}, {"zUp", p.zUp}, {"alembicFps", p.alembicFps}, {"dontAsk", p.dontAsk}};
+    j["import"] = {{"unit", p.unit}, {"zUp", p.zUp}, {"alembicFps", p.alembicFps}, {"dontAsk", p.dontAsk},
+                   {"lights", p.importLights}, {"cameras", p.importCameras}};
     j["recent"] = m_s.recentFiles;
     j["renderDevice"] = m_s.output.device; // makineye özgü: projeye değil tercihlere
     const fs::path file = pathFromUtf8(m_s.userDir) / "prefs.json";
@@ -337,7 +340,7 @@ void Application::processDrops() {
                 m_s.thumbs.requestEnvironment("env:" + a.id, a.path, a.zenith, a.horizon);
             }
             applyEnvironment(a);
-        } else if (hasExt(fp, {".photon"})) {
+        } else if (hasExt(fp, {".photon", ".photonpack"})) {
             openProject(p);
         } else if (hasExt(fp, {".png", ".jpg", ".jpeg", ".tga", ".bmp"})) {
             if (std::find(m_s.textures.begin(), m_s.textures.end(), p) == m_s.textures.end()) m_s.textures.push_back(p);
@@ -379,7 +382,13 @@ void Application::handleShortcuts() {
     if (ctrl && pressed(ImGuiKey_G)) { shift ? ungroupSelection() : groupSelection(); }
     if (ctrl) return;
     if (pressed(ImGuiKey_H)) { io.KeyAlt ? showAllNodes() : toggleSelectionVisibility(); }
+    if (io.KeyAlt && pressed(ImGuiKey_T)) m_s.showTimeline = !m_s.showTimeline;
     if (io.KeyAlt) return; // Alt+F4 vb. tek tuş kısayollarını tetiklemesin
+    if (m_s.showTimeline && pressed(ImGuiKey_Space) && m_s.activeTrack >= 0) {
+        m_s.animPlaying = !m_s.animPlaying;
+        const CameraTrack& t = m_s.cameraTracks[static_cast<size_t>(m_s.activeTrack)];
+        if (m_s.animPlaying && m_s.animTime >= t.duration()) m_s.animTime = 0.0f;
+    }
     if (pressed(ImGuiKey_I)) isolateSelection();
     if (pressed(ImGuiKey_Z)) {
         // Z: görüntü modları arasında döngü (GPU yoksa yalnız Render ↔ Kil).
@@ -450,6 +459,7 @@ void Application::frame(float dt) {
         if (m_s.statusTimer <= 0.0f) m_s.statusText.clear();
     }
     if (m_s.camera.turntable) m_s.camera.tick(dt);
+    tickAnimation(dt);
 
     m_s.thumbs.uploadReady();
     processDrops();
@@ -592,8 +602,18 @@ int Application::run() {
             const float elapsed = std::chrono::duration<float>(now - started).count();
             const ViewportStats st = m_s.viewport.stats();
             const bool gpuView = isRasterMode(m_s.viewMode);
+            // Animasyon render denemesi (--ui animrender): içe aktarma bitip iz oluşunca küçük
+            // çözünürlükte başlar; ekran görüntüsü iş bitince alınır.
+            if (m_opts.uiState == "animrender" && !m_animSmokeStarted && m_jobs.empty() && m_s.activeTrack >= 0) {
+                m_s.output.width = 160;
+                m_s.output.height = 90;
+                m_s.output.turntableSpp = 4;
+                startAnimationRender();
+                m_animSmokeStarted = true;
+            }
+            const bool waitAnim = m_opts.uiState == "animrender" && !m_animSmokeStarted;
             const bool ready = frames > 30 && !st.interactive && (gpuView || st.converged || st.spp >= m_opts.screenshotSpp) &&
-                               m_jobs.empty() && !m_s.thumbs.busy() && !m_s.finalJob.active.load();
+                               m_jobs.empty() && !m_s.thumbs.busy() && !m_s.finalJob.active.load() && !waitAnim;
             if (ready || elapsed > m_opts.screenshotTimeout) {
                 takeScreenshot(m_opts.screenshotPath);
                 glfwSwapBuffers(m_window);

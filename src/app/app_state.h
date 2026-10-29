@@ -12,6 +12,7 @@
 #include "scene/scene_graph.h"
 #include "scene/material_library.h"
 #include "scene/document.h"
+#include "scene/camera_animation.h"
 #include "scene/model_import.h"
 #include "scene/undo_stack.h"
 #include "ui/orbit_camera.h"
@@ -106,6 +107,14 @@ struct AppState {
     };
     std::vector<SavedCamera> savedCameras;
 
+    // ── Kamera animasyonu (zaman çizelgesi) ──
+    std::vector<CameraTrack> cameraTracks; ///< projeyle ve paketle kaydedilir
+    int activeTrack = -1;                  ///< zaman çizelgesindeki iz (-1 = yok)
+    float animTime = 0.0f;                 ///< saniye
+    bool animPlaying = false;
+    bool animLoop = true;
+    bool showTimeline = false;
+
     // ── Seçim ──
     // Çoklu seçim: selNodes tüm seçili düğümler; selUid bunlardan "birincil" olanı
     // (son tıklanan). Özellikler paneli ve malzeme düzenleme birincili gösterir;
@@ -153,6 +162,8 @@ struct AppState {
         int alembicFrame = 0;    ///< 0 = ilk örnek
         float alembicFps = 24.0f;
         bool dontAsk = false;    ///< pencereyi gösterme, bu ayarlarla aktar
+        bool importLights = true;  ///< FBX: dosyadaki ışıkları sahneye ekle
+        bool importCameras = true; ///< FBX: kameraları kayıtlı kamera / animasyon olarak ekle
     } importPrefs;
     std::vector<std::string> importQueue;  ///< pencerede onay bekleyen dosyalar
     bool importHasPoint = false;           ///< viewport'a bırakıldı: model bu noktaya konur
