@@ -174,6 +174,10 @@ enable_language(C)
 add_library(photon_ufbx STATIC "${PHOTON_UFBX_DIR}/ufbx.c")
 target_include_directories(photon_ufbx SYSTEM PUBLIC "${PHOTON_UFBX_DIR}")
 set_target_properties(photon_ufbx PROPERTIES C_STANDARD 99 POSITION_INDEPENDENT_CODE ON)
+# UFBX_UBSAN: DEFLATE açıcıdaki 64 bitten büyük kaydırmalar "& 63" ile maskelenir. Olmadan ufbx
+# x64'te donanımın maskelemesine güvenir (C'de tanımsız davranış); UBSan derlemesinde açma bozuluyordu
+# ("Bad DEFLATE data"). Maliyeti iç döngüde bir AND.
+target_compile_definitions(photon_ufbx PRIVATE UFBX_UBSAN)
 
 # Alembic (.abc, BSD-3) + Imath (BSD-3): Maya/Houdini/Blender/C4D önbellek (cache) biçimi.
 # Önce kurulu paket (vcpkg "alembic", sistem), yoksa sabit sürümlerden derlenir (Ogawa arka
