@@ -14,12 +14,24 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
   - Ctrl+P → çözünürlük ve süre/örnek seçin → "Render". Bitince dosyaya kaydedilir
     (varsayılan: Resimler\PhotonEngine).
 
-2) KENDİ MODELİNİZİ AÇMAK
--------------------------
-  - Dosya > Model içe aktar (Ctrl+O), ya da .obj / .gltf / .glb dosyasını pencereye sürükleyin.
-  - Komut satırından:   photon_app.exe C:\modeller\sise.obj
+2) KENDİ MODELİNİZİ AÇMAK (FBX, Alembic, OBJ, glTF)
+---------------------------------------------------
+  - Dosya > Model içe aktar (Ctrl+O), ya da .fbx / .abc / .obj / .gltf / .glb dosyasını
+    pencereye sürükleyin. Birden çok dosya aynı anda bırakılabilir.
+  - İçe aktarma penceresi: Birim (Otomatik / mm / cm / m / inç), Yukarı eksen (Y / Z) ve
+    Alembic için kare numarası. "Bir daha sorma" açıksa pencere atlanır; geri açmak için
+    Dosya > İçe aktarma ayarları.
+      FBX    : birim ve eksen dosyadan okunur; hiyerarşi, adlar, malzemeler, dokular gelir.
+      Alembic: hiyerarşi ve yüz kümeleri (DCC'deki malzeme atamaları) ayrı parça olur.
+               Malzeme bilgisi yoktur; birim yazan uygulamadan tahmin edilir (Maya/C4D: cm).
+      OBJ    : birim bilgisi yok; model çok büyük/küçük geldiyse birimi seçin.
+  - Viewport'taki bir yüzeyin üzerine bırakılan model o noktaya oturur.
+  - Dosya > Son dosyalar: son açılan modeller ve projeler.
+  - Komut satırından:   photon_app.exe C:\modeller\sise.fbx
   - Model zemine oturtulur; boş sahneye gelirse stüdyo ışıkları kurulup kadrajlanır.
     Shift+A ile istediğiniz zaman yeniden kadrajlayın.
+  - Maya / 3ds Max / Blender / Cinema 4D'den aktarırken: FBX (2014+ ikili) ya da animasyonlu
+    önbellek için Alembic önerilir; dokuları "gömülü" (embed media) aktarmak yol sorununu önler.
 
 3) PROJE KAYDETMEK / AÇMAK
 --------------------------
@@ -40,6 +52,9 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
      --noise 0.02                uyarlamalı örnekleme: temizlenen pikseller erken durur
      --clamp 10                  dolaylı ışıktaki parlak noktaları (firefly) kes
      --time 120                  süre sınırı (saniye); dolunca o ana kadarki görüntü kaydedilir
+     --filter blackman-harris    piksel filtresi: box, triangle, gaussian, blackman-harris
+     --filter-width 1.5          filtre yarıçapı (piksel)
+     --passes                    çıktı .exr ise render geçişleri tek dosyada (aşağıya bakın)
 
   Örnekler (PowerShell, paket klasöründe):
      .\photon_render.exe ornekler\vitrin.photon --out vitrin.png --res 1920x1080 --spp 128
@@ -101,7 +116,21 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
   Görüntü sekmesi: bloom, yıldız parlaması, beyaz dengesi, kontrast, doygunluk, vinyet,
    renk sapması; uyarlamalı örnekleme (gürültü eşiği) ve parlama sınırı.
 
-8) KISAYOLLAR (uygulamada F1)
+8) RENDER GEÇİŞLERİ (COMPOSITING) VE PİKSEL FİLTRESİ
+----------------------------------------------------
+  Render penceresi (Ctrl+P) > Biçim EXR > "Render geçişleri": tek bir çok katmanlı EXR yazılır.
+  Nuke, Blender Compositor, Fusion, After Effects (ProEXR/EXR-IO) katmanları adlarıyla görür:
+     DiffDir / DiffInd    difüz ışık, doğrudan / dolaylı
+     GlossDir / GlossInd  parlak yansıma, doğrudan / dolaylı
+     TransDir / TransInd  geçirgen (cam, SSS), doğrudan / dolaylı
+     Emit, Env            görünen ışık kaynakları, arka plan
+     Depth.Z, Position, Normal, DiffCol (albedo), ObjectID, MaterialID, A (alfa)
+  Işık katmanlarının toplamı ana görüntüye (RGB) eşittir: yansımaları ya da difüzü ayrı
+  ayarlayıp toplayarak görüntüyü yeniden kurabilirsiniz. ID katmanları maske içindir.
+  Render penceresi > Kalite > Piksel filtresi: Blackman-Harris / Gauss kenarları ve ince desenleri
+  (moiré) yumuşatır; Kutu en keskin olanıdır (eski projeler Kutu ile açılır).
+
+9) KISAYOLLAR (uygulamada F1)
 -----------------------------
   Sol fare: döndür   Orta/sağ fare: kaydır   Tekerlek: yakınlaş   Çift tık: döndürme merkezi
   F: seçime odaklan   Shift+A: tümünü kadrajla   1/2/3/4: ön/yan/üst/dörtte üç

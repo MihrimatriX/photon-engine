@@ -127,8 +127,8 @@ Nasıl okunur:
   `[build-7]`
 - [x] **F2.4** CLI argümanları `--scene --spp --res --out --seed --threads --denoise`. Çıktı PNG + EXR + `stats.json` (süre, spp, Mrays/s, bellek tepe değeri). Varsayılan derlemede açık. `[engine-15]`
 - [x] **F2.5** `photon_app --smoke`: gizli pencere, örnek sahne, 16 spp, PNG yazar, 0 koduyla çıkar.
-- [ ] **F2.6** `test_furnace`: her malzeme × pürüzlülük. Bugünkü clearcoat ve pürüzlü cam hatalarını yakalamalı. `[materials-14]` `[lighting-16]` `[build-10]` **[SEN]** tahminci Σ f·|cos|/pdf.
-- [ ] **F2.7** `test_chi2`: `sample()` ile `pdf()` 2D histogramda tutarlı.
+- [x] **F2.6** (2026-10-29: `test_bsdf_verification` FurnaceNeverGainsEnergy + kayıpsız malzemeler ≈ 1) `test_furnace`: her malzeme × pürüzlülük. Bugünkü clearcoat ve pürüzlü cam hatalarını yakalamalı. `[materials-14]` `[lighting-16]` `[build-10]` **[SEN]** tahminci Σ f·|cos|/pdf.
+- [x] **F2.7** (2026-10-29: Bonferroni düzeltmeli, `Chi2SamplingMatchesPdf`) `test_chi2`: `sample()` ile `pdf()` 2D histogramda tutarlı.
 - [ ] **F2.8** 64×64 golden görüntüler ve relMSE eşiği.
 - [ ] **F2.9** Determinizm: 1, 4 ve 8 thread ile bit bit aynı görüntü; tohumlar karo boyutuna bağlı olmaz. `[core-12]` `[engine-16]`
 - [ ] **F2.10** BVH testi: rastgele sahnede kaba kuvvetle karşılaştırma, `intersectAny`, ölçek durumları. `[geometry-15]`
@@ -250,13 +250,13 @@ Nasıl okunur:
   `[lighting-8]` `[lighting-9]` **[SEN]** pmf'li güç sezgisel ağırlığı ve alias tablosu kurulumu.
 - [x] **F5.5** (2026-10-24: `Scene::emitterIndex` hitObject → ışık; `Light::pdfLiHit` O(1); dynamic_cast döngüsü kalktı. primId/dpdu eklenmedi.) `SurfaceInteraction`'a `primId`, `lightId`, barycentric ve `dpdu`/`dpdv`. Emitter pdf'i O(1) olur, `dynamic_cast` döngüsü kalkar. `[lighting-7]` `[geometry-8]`
 - [x] **F5.6** (2026-10-24: dikdörtgen yapıldı; küresel üçgen ve tek yönlü emitter açık) Softbox için küresel dikdörtgen örnekleme (Ureña 2013), mesh ışıkları için küresel üçgen (Arvo); tek yönlü emitter seçeneği.
-- [ ] **F5.7** Ortam ışığı: pdf ile eval tutarlı, MIS telafisi (Karlík 2019), yatay ayna kontrolü. `[lighting-14]`
+- [x] **F5.7** (2026-10-29: telafi katı açı ortalamasıyla, MIS'siz kullanım `sampleLiFull`; güneşli gökte relMSE 6.8× düşük) Ortam ışığı: pdf ile eval tutarlı, MIS telafisi (Karlík 2019), yatay ayna kontrolü. `[lighting-14]`
 - [x] **F5.8** Rus ruleti en büyük bileşene göre, ayarlanabilir minimum derinlikle. `[lighting-11]`
-- [ ] **F5.9** Wächter–Binder ışın ofseti geometrik normal boyunca, tMin = 0. İsabet noktası barycentric'ten; ön/arka yüz geometrik normalden. `[core-8]` `[geometry-4]` `[geometry-5]` `[lighting-6]`
-- [ ] **F5.10** Gölge terminatörü düzeltmesi (Hanika 2021).
+- [x] **F5.9** (2026-10-29: PBRT-v4 pError + izotropik γ(32) terimi, `geometry/ray_spawn.h`) Wächter–Binder ışın ofseti geometrik normal boyunca, tMin = 0. İsabet noktası barycentric'ten; ön/arka yüz geometrik normalden. `[core-8]` `[geometry-4]` `[geometry-5]` `[lighting-6]`
+- [x] **F5.10** (2026-10-29: yalnız gölge ışınlarında, Cycles kesme harmanı) Gölge terminatörü düzeltmesi (Hanika 2021).
 - [x] **F5.11** (2026-10-24: piksel başına göreli standart hata `Film::relativeError`, 3×3 komşuluk; iki yarım tampon yerine parlaklık² toplamı) Adaptif örnekleme: karo başına göreli hata, iki yarım tamponla. `[engine-14]`
 - [ ] **F5.12** Albedoya göre lob seçimi (Faz 7'deki VNDF ile birlikte).
-- [ ] **F5.13** Ölçek testi: aynı sahne 0.01× ve 100× ölçekte aynı görüntüyü verir.
+- [x] **F5.13** (2026-10-29: `Robustness.ImageIsScaleInvariant`) Ölçek testi: aynı sahne 0.01× ve 100× ölçekte aynı görüntüyü verir.
 - [x] **F5.14** İsteğe bağlı firefly kelepçesi, varsayılan kapalı.
 - **Öğrenme:** PBRT bölüm 8, 12, 13–14; Veach tezi bölüm 9; TU Wien dersleri.
 - **Kanıt:** eşit sürede varyans düşer (Sobol, yakın softbox, çok ışıklı stüdyo); fırın ve chi-kare testleri yeşil.
@@ -282,7 +282,7 @@ Nasıl okunur:
 - [ ] **F7.1** VNDF örnekleme (Heitz 2018) ve yükseklik-korelasyonlu Smith G2. `[materials-15]` **[SEN]** VNDF (~10 satır).
 - [x] **F7.2** (2026-10-24: Turquin 2019 biçimi, 32×32 E(μ, α) tablosu; `Metal.WhiteRoughMetalConservesEnergy`) Kulla–Conty çoklu saçılma telafisi. **[SEN]** telafi terimi.
 - [x] **F7.3** F82-tint iletken Fresnel ve metal presetleri (altın, gümüş, bakır, alüminyum, krom).
-- [ ] **F7.4** Enerji koruyan kaplama (taban zayıflatma) ve LTC sheen.
+- [x] **F7.4** (2026-10-29: Kulla–Conty albedo ölçekleme; LTC yerine Charlie sheen + albedo tablosu; EON difüz) Enerji koruyan kaplama (taban zayıflatma) ve LTC sheen.
 - [x] **F7.5** Beer–Lambert soğurma ve ortam takibi; cam rengi yansımaları boyamaz. `[materials-13]`
 - [ ] **F7.6** Doku depolama 8-bit + LUT, makul boyut sınırı; mipmap ve ışın konisi (RTG bölüm 20). `[color-13]`
 - [ ] **F7.7** MikkTSpace ya da glTF `TANGENT`, handedness ile. `[geometry-10]`
@@ -335,13 +335,13 @@ Nasıl okunur:
 - [x] Spektral mod ve dispersiyon (2026-10-24: yol başına tek λ, dispersiyonlu ilk yüzeyde; hero wavelength yok).
 - [ ] MNEE ve referans için BDPT.
 - [ ] Fiziksel kamera (f-stop, enstantane, ISO) ve bokeh şekli. (2026-10-24: çokgen bokeh ve görüntüleyici yapıldı; enstantane/ISO açık)
-- [ ] AOV'ler, ışık grupları, shadow catcher, çok katmanlı EXR, Cryptomatte. (2026-10-24: shadow catcher yapıldı)
+- [ ] AOV'ler, ışık grupları, shadow catcher, çok katmanlı EXR, Cryptomatte. (2026-10-24: shadow catcher; 2026-10-29: lob × doğrudan/dolaylı ışık geçişleri, veri geçişleri, çok katmanlı EXR yapıldı; ışık grupları ve Cryptomatte açık)
 - [ ] Turntable (DoF ve denoise ile), anahtar kare, hareket bulanıklığı.
 - [ ] Güneş/gökyüzü, spot ve IES ışıklar, ışık bağlama, görünürlük bayrakları. (2026-10-24: gök + güneş, spot + IES, kamera görünürlüğü yapıldı; ışık bağlama ve yansıma görünürlüğü açık)
 
 ## Ürünleşme eki (karar bekliyor)
 
-EULA ve gizlilik metni, lisans anahtarı, kod imzalama, kurulum paketi, Linux derlemesi/CI/paketleme, ağ render, STEP/IGES/USD/FBX içe aktarma, Python ve eklenti API'si, KeyShot/Cycles karşılaştırması, patent incelemesi, telemetri. Şimdiden geçerli tek kural: GPL bağımlılık yok.
+EULA ve gizlilik metni, lisans anahtarı, kod imzalama, kurulum paketi, Linux derlemesi/CI/paketleme, ağ render, STEP/IGES/USD içe aktarma (FBX ve Alembic 2026-10-29'da yapıldı), Python ve eklenti API'si, KeyShot/Cycles karşılaştırması, patent incelemesi, telemetri. Şimdiden geçerli tek kural: GPL bağımlılık yok.
 
 ## Öğrenme kilometre taşları
 

@@ -34,10 +34,10 @@ Sıra: önce doğruluk ve kararlılık, sonra ölçüm, sonra hız.
 
 ## Şu anki durum
 
-Güncel durum `memory-bank/00-baglam.md` → "Kaldığımız yer" bölümünde tutulur; burada tekrarlanmaz.
+Güncel durum `memory-bank/00-baglam.md` → "Kaldığımız yer" bölümünde tutulur; burada tekrarlanmaz. Rakiplere göre öncelikli eksikler: [`EKSIK_ANALIZI.md`](EKSIK_ANALIZI.md).
 
 ## Ürünleşme eki (karar bekliyor)
 
-EULA ve gizlilik metni, lisans anahtarı, kod imzalama, kurulum paketi, Linux CI ve paketleme, ağ render, STEP/IGES/USD/FBX içe aktarma, Python ve eklenti API'si, KeyShot/Cycles karşılaştırması, patent incelemesi, telemetri.
+EULA ve gizlilik metni, lisans anahtarı, kod imzalama, kurulum paketi, Linux CI ve paketleme, ağ render, STEP/IGES/USD içe aktarma (FBX ve Alembic yapıldı), Python ve eklenti API'si, KeyShot/Cycles karşılaştırması, patent incelemesi, telemetri.
 
 Şimdiden geçerli tek kural: GPL bağımlılık yok; LGPL yalnız dinamik bağlanır; her bağımlılık [`THIRD_PARTY.md`](THIRD_PARTY.md)'ye yazılır.
