@@ -28,6 +28,8 @@ public:
     Color3f eval(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const override;
 
     float pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const override;
+    /// Pürüzlü cam: yansıma parlak, kırılma geçirgen.
+    LobeSplit evalSplit(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const override;
 
     float ior() const { return m_ior; }
     const Color3f& tint() const { return m_tint; }

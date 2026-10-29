@@ -55,6 +55,7 @@ struct OutputSettings {
     int format = 0;                ///< 0 PNG, 1 JPEG, 2 EXR
     std::string path;
     bool denoise = true;
+    bool passes = false;           ///< EXR: render geçişleri tek dosyada (çok katmanlı)
     int turntableFrames = 36;
     int turntableSpp = 32;
 };

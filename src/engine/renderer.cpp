@@ -55,6 +55,12 @@ struct PixelSample {
     Color3f albedo;
     Color3f normal;
     float alpha = 1.0f;
+    // Render geçişleri (yalnız istendiğinde dolar)
+    LightPasses light;
+    float depth = 0.0f;
+    Vec3f position;
+    Color3f objectId;
+    Color3f materialId;
 };
 
 // Tek bir alt-piksel örneği. AOV istendiğinde ya da arka plan modu ortam değilse
@@ -62,7 +68,7 @@ struct PixelSample {
 // kamera ışınına arka plan rengi/şeffaflık uygulanır, çarpanda albedo ve normal alınır.
 PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& integrator,
                        const PixelFilterSampler& filter, Sampler& sampler, int x, int y, int sampleIndex,
-                       int width, int height, bool wantAovs) {
+                       int width, int height, bool wantAovs, bool wantPasses = false) {
     sampler.startPixel(x, y);
     sampler.startSample(sampleIndex);
 
@@ -76,12 +82,18 @@ PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& int
 
     PixelSample out;
     const Background& bg = scene.background();
-    if (!wantAovs && bg.mode == Background::Mode::Environment) {
+    if (!wantAovs && !wantPasses && bg.mode == Background::Mode::Environment) {
         out.L = integrator.Li(ray, scene, sampler);
         return out;
     }
     PathTracer::PrimaryHit primary;
-    out.L = integrator.Li(ray, scene, sampler, &primary);
+    out.L = integrator.Li(ray, scene, sampler, &primary, wantPasses ? &out.light : nullptr);
+    if (wantPasses && primary.hit) {
+        out.depth = (primary.isect.point - ray.origin).length();
+        out.position = primary.isect.point;
+        out.objectId = idColor(scene.nodeUidOf(primary.isect));
+        out.materialId = idColor(reinterpret_cast<uintptr_t>(primary.isect.material));
+    }
     if (primary.catcherAlpha >= 0.0f) {
         // Gölge yakalayıcı: kapsama = gölgenin opaklığı; albedo = görünen arka plan.
         out.albedo = clamp01(primary.catcherBackground);
@@ -111,6 +123,15 @@ PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& int
     return out;
 }
 
+void addPasses(RenderPassFilms* passes, int x, int y, const PixelSample& s) {
+    if (!passes) return;
+    for (int k = 0; k < static_cast<int>(LightPass::Count); ++k) passes->light[k].addSample(x, y, s.light.c[k]);
+    passes->depth.addSample(x, y, Color3f(s.depth));
+    passes->position.addSampleSigned(x, y, Color3f(s.position.x, s.position.y, s.position.z));
+    passes->objectId.addSample(x, y, s.objectId);
+    passes->materialId.addSample(x, y, s.materialId);
+}
+
 void addAovs(AovFilms* aovs, int x, int y, const PixelSample& s) {
     if (!aovs) return;
     aovs->albedo.addSample(x, y, s.albedo);
@@ -132,17 +153,65 @@ void denoiseWithAovs(Image& out, const AovFilms* aovs) {
 
 // Owen karıştırmalı Sobol (Burley 2020): her piksel ve boyut kendi karıştırmasını
 // alır, ilerlemeli render'da her ön-ek (1, 2, 4... örnek) iyi tabakalanır.
+Color3f idColor(uint64_t id) {
+    if (id == 0) return Color3f::black();
+    // splitmix64 → [0,1) ton; altın oran adımı komşu kimlikleri belirgin ayırır.
+    uint64_t z = id + 0x9e3779b97f4a7c15ull;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+    z ^= z >> 31;
+    const float h = std::fmod(static_cast<float>(z >> 40) * 0x1p-24f + 0.618034f, 1.0f) * 6.0f;
+    const int i = static_cast<int>(h) % 6;
+    const float f = h - std::floor(h);
+    const float v = 1.0f, s = 0.75f, p0 = v * (1.0f - s), q = v * (1.0f - s * f), t = v * (1.0f - s * (1.0f - f));
+    switch (i) {
+        case 0: return Color3f(v, t, p0);
+        case 1: return Color3f(q, v, p0);
+        case 2: return Color3f(p0, v, t);
+        case 3: return Color3f(p0, q, v);
+        case 4: return Color3f(t, p0, v);
+        default: return Color3f(v, p0, q);
+    }
+}
+
+std::vector<ExrLayer> makeExrLayers(const RenderPassFilms* passes, const AovFilms* aovs, std::vector<Image>& storage) {
+    std::vector<ExrLayer> layers;
+    storage.clear();
+    storage.reserve(static_cast<size_t>(LightPass::Count) + 8); // işaretçiler geçerli kalsın
+    auto add = [&](const std::string& name, const Film& f, const char* suffixes, bool full) {
+        if (f.width() <= 0) return;
+        storage.push_back(f.resolve());
+        layers.push_back(ExrLayer{name, &storage.back(), suffixes, full});
+    };
+    if (passes) {
+        for (int k = 0; k < static_cast<int>(LightPass::Count); ++k)
+            add(lightPassName(static_cast<LightPass>(k)), passes->light[k], "RGB", false);
+        add("Depth", passes->depth, "Z", true);
+        add("Position", passes->position, "XYZ", true);
+        add("ObjectID", passes->objectId, "RGB", false);
+        add("MaterialID", passes->materialId, "RGB", false);
+    }
+    if (aovs) {
+        add("DiffCol", aovs->albedo, "RGB", false);
+        add("Normal", aovs->normal, "XYZ", false);
+    }
+    return layers;
+}
+
 std::unique_ptr<Sampler> createRenderSampler(int samplesPerPixel, uint64_t seed) {
     (void)samplesPerPixel;
     return createSobolSampler(seed);
 }
 
 Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSettings& settings,
-                       const std::atomic<bool>* cancel) {
+                       const std::atomic<bool>* cancel, RenderPassFilms* passes, AovFilms* aovsOut) {
     Film film(settings.width, settings.height);
-    AovFilms aovs;
-    const bool wantAovs = settings.denoiseEnabled;
+    AovFilms localAovs;
+    AovFilms& aovs = aovsOut ? *aovsOut : localAovs;
+    const bool wantAovs = settings.denoiseEnabled || aovsOut != nullptr;
+    const bool wantPasses = passes != nullptr;
     if (wantAovs) aovs.resize(settings.width, settings.height);
+    if (passes) passes->resize(settings.width, settings.height);
 
     auto startTime = std::chrono::high_resolution_clock::now();
 
@@ -165,9 +234,11 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
             for (int y = yBegin; y < yEnd; ++y) {
                 for (int x = xBegin; x < xEnd; ++x) {
                     for (int s = 0; s < spp; ++s) {
-                        PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h, wantAovs);
+                        PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h, wantAovs,
+                                                    wantPasses);
                         film.addSample(x, y, ps.L);
                         if (wantAovs) addAovs(&aovs, x, y, ps);
+                        if (wantPasses) addPasses(passes, x, y, ps);
                     }
                 }
             }
@@ -185,9 +256,11 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
             for (int y = yBegin; y < yEnd; ++y) {
                 for (int x = xBegin; x < xEnd; ++x) {
                     for (int s = 0; s < spp; ++s) {
-                        PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h, wantAovs);
+                        PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h, wantAovs,
+                                                    wantPasses);
                         film.addSample(x, y, ps.L);
                         if (wantAovs) addAovs(&aovs, x, y, ps);
+                        if (wantPasses) addPasses(passes, x, y, ps);
                         ++local;
                         if (s + 1 >= minSpp && ((s + 1) & 7) == 0 && film.relativeError(x, y) < threshold) break;
                     }
@@ -214,7 +287,7 @@ Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSet
 
 Image Renderer::renderProgressive(const Scene& scene, const Camera& camera, const RenderSettings& settings,
                                   const std::function<bool(const Film&, int)>& onPass,
-                                  AovFilms* aovsOut) {
+                                  AovFilms* aovsOut, RenderPassFilms* passes) {
     Film film(settings.width, settings.height);
     AovFilms localAovs;
     AovFilms* aovs = aovsOut ? aovsOut : (settings.denoiseEnabled ? &localAovs : nullptr);
@@ -222,7 +295,7 @@ Image Renderer::renderProgressive(const Scene& scene, const Camera& camera, cons
 
     bool cancelled = false;
     for (int s = 0; s < settings.samplesPerPixel; ++s) {
-        renderSamplePass(scene, camera, settings, film, s, nullptr, aovs);
+        renderSamplePass(scene, camera, settings, film, s, nullptr, aovs, passes);
         if (onPass && !onPass(film, s + 1)) {
             cancelled = true;
             break;
@@ -236,7 +309,7 @@ Image Renderer::renderProgressive(const Scene& scene, const Camera& camera, cons
 
 bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const RenderSettings& settings,
                                 Film& accum, int passIndex, const std::atomic<bool>* cancel,
-                                AovFilms* aovs) {
+                                AovFilms* aovs, RenderPassFilms* passes) {
     if (accum.width() != settings.width || accum.height() != settings.height) {
         accum.resize(settings.width, settings.height);
     }
@@ -245,6 +318,7 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
     const int h = accum.height();
     if (w <= 0 || h <= 0) return true;
     if (aovs && (aovs->albedo.width() != w || aovs->albedo.height() != h)) aovs->resize(w, h);
+    if (passes && (passes->depth.width() != w || passes->depth.height() != h)) passes->resize(w, h);
 
     std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
     PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
@@ -282,6 +356,7 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
     }
 
     const bool wantAovs = aovs != nullptr;
+    const bool wantPasses = passes != nullptr;
     return parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
         // Sobol karıştırması pass'ler boyunca SABİT kalmalı; yoksa ardışık örnekler
         // aynı dizinin devamı olmaz ve tabakalanma kaybolur. Piksel ayrışması içeride.
@@ -294,9 +369,11 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
             for (int x = xBegin; x < xEnd; ++x) {
                 if (adaptive && skipMask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)])
                     continue;
-                PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, passIndex, w, h, wantAovs);
+                PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, passIndex, w, h,
+                                            wantAovs, wantPasses);
                 accum.addSample(x, y, ps.L);
                 if (wantAovs) addAovs(aovs, x, y, ps);
+                if (wantPasses) addPasses(passes, x, y, ps);
             }
         }
     }, settings.tileSize, pool, cancel);

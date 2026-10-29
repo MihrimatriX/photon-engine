@@ -6,7 +6,8 @@
 // Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json,
 //   --noise 0.02 (uyarlamalı örnekleme: göreli hata hedefi), --min-spp N,
 //   --clamp 10 (dolaylı parlama sınırı), --time SN (süre sınırı; ilerlemeli render),
-//   --filter box|triangle|gaussian|blackman-harris, --filter-width PİKSEL
+//   --filter box|triangle|gaussian|blackman-harris, --filter-width PİKSEL,
+//   --passes (çok katmanlı EXR: ışık geçişleri, derinlik, konum, ID'ler, albedo, normal)
 // stats.json: süre, örnek sayısı, Mray/s (milyon birincil ışın / saniye).
 #include "scene/project_io.h"
 #include "scene/model_import.h"
@@ -51,6 +52,7 @@ struct Options {
     int minSpp = 16;
     float clamp = -1.0f;  ///< < 0 → projedeki değer
     float timeLimit = 0.0f;
+    bool passes = false;       ///< çok katmanlı EXR (yalnız .exr çıktı)
     std::string filter;        ///< boş → projedeki değer
     float filterWidth = 0.0f;  ///< ≤ 0 → projedeki / filtrenin varsayılanı
 };
@@ -59,7 +61,8 @@ void usage() {
     std::cout << "photon_render <sahne.photon | model.obj | --cornell> [--out dosya.png|.jpg|.exr] [--spp N]\n"
                  "              [--res GxY] [--threads N] [--bounces N] [--no-denoise] [--stats stats.json]\n"
                  "              [--noise 0.02] [--min-spp N] [--clamp X] [--time saniye]\n"
-                 "              [--filter box|triangle|gaussian|blackman-harris] [--filter-width piksel]\n";
+                 "              [--filter box|triangle|gaussian|blackman-harris] [--filter-width piksel]\n"
+                 "              [--passes]  (çıktı .exr: render geçişleri tek dosyada)\n";
 }
 
 // Proje dosyasındaki orbit kamera alanlarından (hedef, yarıçap, θ, φ) kamera.
@@ -104,6 +107,7 @@ int main(int argc, char** argv) {
         else if (a == "--clamp") o.clamp = static_cast<float>(std::atof(next().c_str()));
         else if (a == "--time") o.timeLimit = static_cast<float>(std::atof(next().c_str()));
         else if (a == "--filter") o.filter = next();
+        else if (a == "--passes") o.passes = true;
         else if (a == "--filter-width") o.filterWidth = static_cast<float>(std::atof(next().c_str()));
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (!a.empty() && a[0] != '-') o.input = a;
@@ -197,28 +201,39 @@ int main(int argc, char** argv) {
     const ImagerSettings imager = imagerFromJson(data.render.value("imager", nlohmann::json::object()));
     auto camera = cameraFromJson(data.camera, static_cast<float>(o.width) / static_cast<float>(o.height));
 
+    std::string ext = pathToUtf8(pathFromUtf8(o.out).extension());
+    if (o.passes && ext != ".exr") {
+        std::cerr << "--passes yalnız .exr çıktıyla kullanılabilir (çok katmanlı EXR)" << std::endl;
+        return 2;
+    }
     Renderer renderer;
     const auto tRender = std::chrono::steady_clock::now();
     int sppDone = o.spp;
     Image img;
+    std::unique_ptr<RenderPassFilms> passes = o.passes ? std::make_unique<RenderPassFilms>() : nullptr;
+    AovFilms aovs;
     if (o.timeLimit > 0.0f) {
         // Süre sınırı: piksel başına birer örneklik pass'ler; süre dolunca son pass'te durur.
         img = renderer.renderProgressive(*scene, *camera, rs, [&](const Film&, int done) {
             sppDone = done;
             return std::chrono::duration<float>(std::chrono::steady_clock::now() - tRender).count() < o.timeLimit;
-        });
+        }, o.passes ? &aovs : nullptr, passes.get());
         // ponytail: süre dolup erken biten render'da gürültü giderme yapılmaz (renderProgressive
         // yalnız tamamlanınca denoise eder); AOV'leri tutup burada denoise etmek sonraki adım.
     } else {
-        img = renderer.render(*scene, *camera, rs);
+        img = renderer.render(*scene, *camera, rs, nullptr, passes.get(), o.passes ? &aovs : nullptr);
     }
     const auto tDone = std::chrono::steady_clock::now();
 
-    std::string ext = pathToUtf8(pathFromUtf8(o.out).extension());
     // Görüntüleyici (bloom, glare, beyaz dengesi...) ekran çıktılarına uygulanır; EXR ham kalır.
     if (ext != ".exr") applyImager(img, imager, rs.exposure);
     bool ok;
-    if (ext == ".exr") ok = saveImageEXR(img, o.out);
+    if (ext == ".exr" && o.passes) {
+        std::vector<Image> storage;
+        const std::vector<ExrLayer> layers = makeExrLayers(passes.get(), &aovs, storage);
+        const Image alpha = aovs.alpha.resolve();
+        ok = saveMultiLayerEXR(o.out, img, &alpha, layers);
+    } else if (ext == ".exr") ok = saveImageEXR(img, o.out);
     else if (ext == ".jpg" || ext == ".jpeg") ok = saveImageJPG(img, o.out, rs.tmo, rs.exposure);
     else ok = saveImagePNG(img, o.out, rs.tmo, rs.exposure);
 

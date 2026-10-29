@@ -170,7 +170,8 @@ Color3f evalSheen(const Color3f& color, const DisneyMaterial::ShadingParams& p, 
 ///    Eskiden kaplama lobu tabanın üstüne zayıflatmadan EKLENİYORDU (enerji yaratıyordu).
 ///  - Sheen: altındakiler min(1 − s·Ê(μo), 1 − s·Ê(μi)) ile.
 ///  - Yalıtkan speküler: difüz Kulla–Conty çarpanıyla (DielectricLayer).
-Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingParams& p) {
+Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingParams& p,
+                  LobeSplit* split = nullptr) {
     Frame frame = shadingFrame(p.normal, p.tangent);
     Vec3f woLocal = frame.toLocal(wo);
     Vec3f wiLocal = frame.toLocal(wi);
@@ -189,7 +190,9 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
         const DielectricLayer dl(p);
         const Color3f sc = sheenColor(p);
         const float sh = sheenScale(p, std::max({sc.r, sc.g, sc.b}), cosThetaO, muI);
-        return p.baseColor * (trans * INV_PI * coatO * dl.factor(cosThetaO, muI) * sh);
+        const Color3f ft = p.baseColor * (trans * INV_PI * coatO * dl.factor(cosThetaO, muI) * sh);
+        if (split) split->transmission = ft;
+        return ft;
     }
 
     Vec3f hLocal = (woLocal + wiLocal).normalized();
@@ -197,6 +200,7 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
     const float cosThetaD = woLocal.dot(hLocal);
 
     Color3f base;
+    Color3f baseDiffuse; // base'in difüz payı (geçişler için)
     if (p.inFlake) {
         // Pulun üstünde taban görünmez: ışık pul levhasından yansır.
         base = evalFlake(wo, wi, p);
@@ -219,14 +223,22 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
         Color3f fSpecular = (F * D * G) / (4.0f * cosThetaO * cosThetaI) * multiScatterFactor(p, cosThetaO, ax, ay);
 
         base = fDiffuse + fSpecular;
+        baseDiffuse = fDiffuse;
         const Color3f sc = sheenColor(p);
         if (!sc.isBlack()) {
             // ponytail: sheen rides the diffuse (cosine) sample; a dedicated lobe if satin noise matters
-            base = base * sheenScale(p, std::max({sc.r, sc.g, sc.b}), cosThetaO, cosThetaI) +
-                   evalSheen(sc, p, cosThetaO, cosThetaI, hLocal.z);
+            const float s = sheenScale(p, std::max({sc.r, sc.g, sc.b}), cosThetaO, cosThetaI);
+            base = base * s + evalSheen(sc, p, cosThetaO, cosThetaI, hLocal.z);
+            baseDiffuse = baseDiffuse * s;
         }
     }
-    if (p.clearCoat <= 0.0f) return base;
+    if (p.clearCoat <= 0.0f) {
+        if (split) {
+            split->diffuse = baseDiffuse;
+            split->glossy = base - baseDiffuse;
+        }
+        return base;
+    }
 
     float alphaC = p.clearCoatRoughness * p.clearCoatRoughness;
     float Dc = ggxD(hLocal, alphaC, alphaC);
@@ -234,7 +246,12 @@ Color3f evalLobes(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::Shadin
     float Fc = schlick(COAT_F0, cosThetaD);
     const float msC = 1.0f + COAT_F0 * (1.0f / ggxDirectionalAlbedo(cosThetaO, alphaC) - 1.0f);
     Color3f fCoat(p.clearCoat * Fc * Dc * Gc / (4.0f * cosThetaO * cosThetaI) * msC);
-    return base * (coatO * coatTransmit(p, cosThetaI)) + fCoat;
+    const float coatAtt = coatO * coatTransmit(p, cosThetaI);
+    if (split) {
+        split->diffuse = baseDiffuse * coatAtt;
+        split->glossy = (base - baseDiffuse) * coatAtt + fCoat;
+    }
+    return base * coatAtt + fCoat;
 }
 
 void lobeWeights(const DisneyMaterial::ShadingParams& p, float& pCoat, float& pSpec,
@@ -529,6 +546,12 @@ bool DisneyMaterial::sample(const Vec3f& wo, const SurfaceInteraction& si, const
 
 Color3f DisneyMaterial::eval(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {
     return evalLobes(wo, wi, resolve(si));
+}
+
+LobeSplit DisneyMaterial::evalSplit(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {
+    LobeSplit split;
+    evalLobes(wo, wi, resolve(si), &split);
+    return split;
 }
 
 float DisneyMaterial::pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {

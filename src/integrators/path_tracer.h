@@ -11,6 +11,23 @@
 
 namespace photon {
 
+/// Işık geçişleri (render passes, compositing): her örneğin katkısı yolun ilk yüzeyindeki lob
+/// grubuna (difüz / parlak / geçirgen) ve doğrudan (ışığa ilk yüzeyden ulaşan) ya da dolaylı
+/// olmasına göre ayrılır; kameranın doğrudan gördüğü yayıcılar Emission, ortam/arka plan
+/// Background'a gider. Geçişlerin toplamı beauty'dir (yuvarlama hariç). İlk yüzeydeki lob payı
+/// f_k / f oranıyla verilir: her örnek tüm lob geçişlerine katkı verir, tahmin yansızdır.
+enum class LightPass : int {
+    DiffuseDirect, DiffuseIndirect, GlossyDirect, GlossyIndirect,
+    TransmissionDirect, TransmissionIndirect, Emission, Background, Count
+};
+
+struct LightPasses {
+    Color3f c[static_cast<int>(LightPass::Count)];
+};
+
+/// Geçişin çok katmanlı EXR'deki adı (Cycles/Blender adlandırması).
+const char* lightPassName(LightPass pass);
+
 /// @brief Path tracer supporting global illumination, direct lighting, and Russian roulette.
 /// @p maxDepth counts scattering events; emission found by the last scattered ray is still added.
 class PathTracer : public Integrator {
@@ -42,7 +59,8 @@ public:
     /// @p ray bir KAMERA ışınıysa ve @p primary verilmişse ilk kesişim oraya yazılır,
     /// sahnenin arka plan modu (düz renk / şeffaf) ıskalayan kamera ışınına uygulanır.
     /// Böylece AOV için ayrı bir birincil ışın atmaya gerek kalmaz.
-    Color3f Li(const Ray& ray, const Scene& scene, Sampler& sampler, PrimaryHit* primary) const;
+    Color3f Li(const Ray& ray, const Scene& scene, Sampler& sampler, PrimaryHit* primary,
+               LightPasses* passes = nullptr) const;
 
     /// Yüzey altı rastgele yürüyüşü (Chiang 2016 / Cycles): @p entry noktasından @p dir
     /// yönünde cismin içine girilir; homojen ortamda serbest uçuş + Henyey–Greenstein

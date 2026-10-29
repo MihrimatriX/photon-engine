@@ -79,8 +79,9 @@ void Application::startFinalRender() {
     out.width = std::clamp(out.width, 16, 16384);
     out.height = std::clamp(out.height, 16, 16384);
     out.spp = std::max(1, out.spp);
+    // Boş yol her render'da yeni tarih-saatli ad üretir; ayara geri yazılmaz (eskiden yazılıyordu
+    // ve ikinci render ilkinin üstüne kaydediyordu).
     if (out.path.empty()) out.path = defaultRenderPath(out.format);
-    m_s.output.path = out.path;
 
     auto scene = buildScene(true);
     const CameraParams cam = cameraParams();
@@ -120,11 +121,14 @@ void Application::startFinalRender() {
             Film film(rs.width, rs.height);
             AovFilms aovs;
             aovs.resize(rs.width, rs.height);
+            const bool withPasses = out.format == 2 && out.passes;
+            std::unique_ptr<RenderPassFilms> passes = withPasses ? std::make_unique<RenderPassFilms>() : nullptr;
+            if (passes) passes->resize(rs.width, rs.height);
             auto lastPreview = t0;
             int spp = 0;
             for (; spp < out.spp; ++spp) {
                 if (j.cancel) break;
-                renderer.renderSamplePass(*scene, *camera, rs, film, spp, &j.cancel, &aovs);
+                renderer.renderSamplePass(*scene, *camera, rs, film, spp, &j.cancel, &aovs, passes.get());
                 if (j.cancel) break;
                 j.spp = spp + 1;
                 const double elapsed = std::chrono::duration<double>(Clock::now() - t0).count();
@@ -162,7 +166,14 @@ void Application::startFinalRender() {
                 // Görüntüleyici yalnız ekran çıktılarına (PNG/JPEG); EXR sahne-doğrusal ham kalır.
                 Image shown = img;
                 applyImager(shown, imager, ev);
-                const bool ok = saveByFormat(out.format == 2 ? img : shown, &alpha, out.path, out.format, tmo, ev, transparent);
+                bool ok;
+                if (passes) {
+                    // Çok katmanlı EXR: beauty (gürültüsü giderilmiş) + ham ışık/veri geçişleri.
+                    std::vector<Image> storage;
+                    ok = saveMultiLayerEXR(out.path, img, &alpha, makeExrLayers(passes.get(), &aovs, storage));
+                } else {
+                    ok = saveByFormat(out.format == 2 ? img : shown, &alpha, out.path, out.format, tmo, ev, transparent);
+                }
                 auto finalImg = std::make_shared<Image>(std::move(shown));
                 std::lock_guard<std::mutex> lk(j.mutex);
                 j.preview = finalImg;

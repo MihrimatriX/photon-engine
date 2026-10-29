@@ -887,7 +887,7 @@ void Application::saveProject() {
                 {"adaptive", m_s.settings.adaptiveSampling}, {"noiseThreshold", m_s.settings.noiseThreshold},
                 {"pixelFilter", pixelFilterName(m_s.settings.filter.type)}, {"filterWidth", m_s.settings.filter.width},
                 {"output", {{"width", m_s.output.width}, {"height", m_s.output.height},
-                            {"spp", m_s.output.spp}, {"format", m_s.output.format}}}};
+                            {"spp", m_s.output.spp}, {"format", m_s.output.format}, {"passes", m_s.output.passes}}}};
     {
         json cams = json::array();
         for (const auto& sc : m_s.savedCameras) cams.push_back({{"name", sc.name}, {"camera", cameraJson(sc.cam)}});
@@ -956,6 +956,7 @@ bool Application::openProject(const std::string& path) {
         m_s.output.height = o->value("height", m_s.output.height);
         m_s.output.spp = o->value("spp", m_s.output.spp);
         m_s.output.format = o->value("format", m_s.output.format);
+        m_s.output.passes = o->value("passes", m_s.output.passes);
     }
     m_s.savedCameras.clear();
     for (const auto& cj : d.render.value("cameras", json::array())) {

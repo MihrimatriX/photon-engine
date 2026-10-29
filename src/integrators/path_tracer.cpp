@@ -208,6 +208,21 @@ Vec3f roundedEdgeNormal(const Scene& scene, const SurfaceInteraction& isect, flo
 
 } // namespace
 
+const char* lightPassName(LightPass pass) {
+    switch (pass) {
+        case LightPass::DiffuseDirect: return "DiffDir";
+        case LightPass::DiffuseIndirect: return "DiffInd";
+        case LightPass::GlossyDirect: return "GlossDir";
+        case LightPass::GlossyIndirect: return "GlossInd";
+        case LightPass::TransmissionDirect: return "TransDir";
+        case LightPass::TransmissionIndirect: return "TransInd";
+        case LightPass::Emission: return "Emit";
+        case LightPass::Background: return "Env";
+        case LightPass::Count: break;
+    }
+    return "Pass";
+}
+
 Vec3f PathTracer::roundedEdgeNormalForTest(const Scene& scene, const SurfaceInteraction& isect, float radius,
                                            Sampler& sampler) {
     return roundedEdgeNormal(scene, isect, radius, sampler);
@@ -269,7 +284,8 @@ bool PathTracer::randomWalkSubsurface(const Scene& scene, const SurfaceInteracti
 ///
 /// Dispersiyon: yol dalga boyuna bağlı bir cama ilk çarptığında tek bir λ seçilir;
 /// throughput λ'nın RGB ağırlığıyla çarpılır ve yolun geri kalanı bu λ ile izlenir.
-Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, PrimaryHit* primary) const {
+Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, PrimaryHit* primary,
+                       LightPasses* passes) const {
     Color3f L = Color3f::black();
     Color3f throughput = Color3f::white();
     Ray currentRay = ray;
@@ -300,23 +316,39 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
 
     // Tek bir NaN/Inf katkı ilerleyen (progressive) pikseli kalıcı olarak bozar;
     // böyle bir katkıyı atlarız (bulgu lighting-10). Sonlu değerler aynen eklenir.
-    auto accumulate = [&L](const Color3f& c) {
-        if (c.isFinite()) L += c;
+    auto accumulate = [&L](const Color3f& c) -> Color3f {
+        if (!c.isFinite()) return Color3f::black();
+        L += c;
+        return c;
     };
     // Delta olmayan (difüz/parlak/yüzey altı) saçılma sayısı: kırpma "doğrudan"ı (ilk böyle
     // köşeden görülen ışık) korur; cam ve ayna zinciri doğrudanlığı bozmaz.
     int diffuseBounces = 0;
     int passThroughs = 0;
     // Dolaylı katkı: ışığa ikinci ya da sonraki köşeden ulaşan yol (isteğe bağlı kırpma).
-    auto accumulateIndirect = [&](const Color3f& c) {
+    auto accumulateIndirect = [&](const Color3f& c) -> Color3f {
         if (m_clampIndirect > 0.0f) {
             const float m = std::max({c.r, c.g, c.b});
-            if (m > m_clampIndirect) {
-                accumulate(c * (m_clampIndirect / m));
-                return;
-            }
+            if (m > m_clampIndirect) return accumulate(c * (m_clampIndirect / m));
         }
-        accumulate(c);
+        return accumulate(c);
+    };
+
+    // ── Render geçişleri ──
+    // İlk yüzeyde örneklenen yönün lob payları (difüz, parlak, geçirgen; kanal başına, toplam 1).
+    Color3f firstLobe[3] = {Color3f(1.0f), Color3f(0.0f), Color3f(0.0f)};
+    auto passAt = [](int lobe, bool direct) {
+        return static_cast<int>(lobe == 0 ? (direct ? LightPass::DiffuseDirect : LightPass::DiffuseIndirect)
+                                : lobe == 1 ? (direct ? LightPass::GlossyDirect : LightPass::GlossyIndirect)
+                                            : (direct ? LightPass::TransmissionDirect : LightPass::TransmissionIndirect));
+    };
+    auto credit = [&](LightPass p, const Color3f& added) {
+        if (passes) passes->c[static_cast<int>(p)] += added;
+    };
+    // İlk yüzeyden sonra bulunan ışık: ilk yüzeyin lob paylarıyla; ilk sekmede doğrudan.
+    auto creditPath = [&](const Color3f& added, bool direct) {
+        if (!passes) return;
+        for (int k = 0; k < 3; ++k) passes->c[passAt(k, direct)] += added * firstLobe[k];
     };
 
     for (;;) {
@@ -373,7 +405,8 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                 // throughput'ta olduğu için arka plan onunla çarpılır. Şeffafta renk katkısı 0;
                 // kapsama, camın geçirmediği orandır (yalnız düz geçiş varsa ≠ 1).
                 if (depth == 0 && primary && scene.background().mode != Background::Mode::Environment) {
-                    if (scene.background().mode == Background::Mode::Color) accumulate(throughput * scene.background().color);
+                    if (scene.background().mode == Background::Mode::Color)
+                        credit(LightPass::Background, accumulate(throughput * scene.background().color));
                     else if (passThroughs > 0) primary->coverage = std::max(0.0f, 1.0f - throughput.luminance());
                     break;
                 }
@@ -385,8 +418,10 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                         float lightPdf = picker.pmf(explicitLights) * env->pdfLi(currentRay.direction, lastNormal);
                         weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                     }
-                    if (diffuseBounces >= 2) accumulateIndirect(throughput * Le * weight);
-                    else accumulate(throughput * Le * weight);
+                    const Color3f added = diffuseBounces >= 2 ? accumulateIndirect(throughput * Le * weight)
+                                                              : accumulate(throughput * Le * weight);
+                    if (depth == 0) credit(LightPass::Background, added);
+                    else creditPath(added, depth == 1);
                 }
                 break;
             }
@@ -429,7 +464,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                     primary->catcherAlpha = 1.0f - ratio;
                     primary->catcherBackground = bg;
                 }
-                accumulate(throughput * bg * ratio);
+                credit(LightPass::Background, accumulate(throughput * bg * ratio));
                 break;
             }
 
@@ -447,8 +482,10 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                             weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                         }
                     }
-                    if (diffuseBounces >= 2) accumulateIndirect(throughput * emitted * weight);
-                    else accumulate(throughput * emitted * weight);
+                    const Color3f added = diffuseBounces >= 2 ? accumulateIndirect(throughput * emitted * weight)
+                                                              : accumulate(throughput * emitted * weight);
+                    if (depth == 0) credit(LightPass::Emission, added);
+                    else creditPath(added, depth == 1);
                 }
             }
         }
@@ -525,8 +562,22 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                         // Tahminci: f·Li·|cos| / (n_l · pdf_l), MIS ağırlığıyla.
                         const Color3f c = throughput * f * ls.Li * vis
                                           * (cosTheta * weight / (lightPdf * static_cast<float>(shadowSamples)));
-                        if (diffuseBounces >= 1) accumulateIndirect(c);
-                        else accumulate(c);
+                        const Color3f added = diffuseBounces >= 1 ? accumulateIndirect(c) : accumulate(c);
+                        if (passes && !added.isBlack()) {
+                            if (depth == 0) {
+                                // İlk yüzey: bu ışık örneğinin değeri lob gruplarına bölünür.
+                                const LobeSplit sp = isect.material->evalSplit(wo, ls.wi, isect);
+                                const Color3f* parts[3] = {&sp.diffuse, &sp.glossy, &sp.transmission};
+                                const Color3f sum = sp.diffuse + sp.glossy + sp.transmission;
+                                for (int k = 0; k < 3; ++k) {
+                                    Color3f frac;
+                                    for (int ch = 0; ch < 3; ++ch) frac[ch] = sum[ch] > 0.0f ? (*parts[k])[ch] / sum[ch] : (k == 0 ? 1.0f : 0.0f);
+                                    passes->c[passAt(k, true)] += added * frac;
+                                }
+                            } else {
+                                creditPath(added, false);
+                            }
+                        }
                     }
                 }
             }
@@ -571,6 +622,24 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
         }
 
         const Vec3f wi = bs.wi;
+        if (passes && depth == 0) {
+            // İlk yüzeyin lob payları: bu yönden gelecek tüm ışık bunlarla geçişlere dağılır.
+            if (bs.delta) {
+                const bool refracted = wo.dot(isect.ng) * wi.dot(isect.ng) < 0.0f;
+                firstLobe[0] = Color3f(0.0f);
+                firstLobe[1] = refracted ? Color3f(0.0f) : Color3f(1.0f);
+                firstLobe[2] = refracted ? Color3f(1.0f) : Color3f(0.0f);
+            } else {
+                const LobeSplit sp = isect.material->evalSplit(wo, wi, isect);
+                const Color3f sum = sp.diffuse + sp.glossy + sp.transmission;
+                for (int ch = 0; ch < 3; ++ch) {
+                    const bool ok = sum[ch] > 0.0f;
+                    firstLobe[0][ch] = ok ? sp.diffuse[ch] / sum[ch] : 1.0f;
+                    firstLobe[1][ch] = ok ? sp.glossy[ch] / sum[ch] : 0.0f;
+                    firstLobe[2][ch] = ok ? sp.transmission[ch] / sum[ch] : 0.0f;
+                }
+            }
+        }
         float cosTheta = std::abs(wi.dot(isect.normal));
         throughput *= bs.f * (cosTheta / bs.pdf);
         if (!throughput.isFinite()) break;

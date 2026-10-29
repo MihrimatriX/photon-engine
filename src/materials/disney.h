@@ -35,6 +35,8 @@ public:
     float pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const override;
 
     Color3f evalPdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si, float& pdfOut) const override;
+    /// Difüz (EON, yüzey altı yok) / parlak (speküler, sheen, kaplama, pul) / geçirgen (ince yaprak).
+    LobeSplit evalSplit(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const override;
 
     /// Lob seçimi @p uc ile, yön @p u ile. Yüzey altı lobu seçilirse subsurface = true döner.
     bool sampleFull(const Vec3f& wo, const SurfaceInteraction& si, float uc, const Vec2f& u,
