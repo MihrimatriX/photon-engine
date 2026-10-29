@@ -1,6 +1,7 @@
 // main.cpp — photon_render: arayüzsüz (komut satırı) renderer ve ölçüm aracı.
 //
 //   photon_render sahne.photon  [--out render.png] [--spp 256] [--res 1920x1080]
+//   photon_render sahne.photonpack [...]          (kendi kendine yeten paket)
 //   photon_render model.obj     [...]               (stüdyo ışığı + otomatik kadraj)
 //   photon_render --cornell     [...]
 // Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json,
@@ -12,6 +13,7 @@
 // stats.json: süre, örnek sayısı, Mray/s (milyon birincil ışın / saniye).
 // Render, uygulamanın son render'ıyla aynı yoldan geçer: RenderDevice + RenderSession (Final).
 #include "scene/project_io.h"
+#include "scene/package.h"
 #include "scene/model_import.h"
 #include "scene/cornell_box.h"
 #include "scene/document.h"
@@ -187,7 +189,7 @@ int main(int argc, char** argv) {
         const Vec3f c = b.centroid();
         const float r = (b.pMax - b.pMin).length() * 0.5f / std::sin(17.5f * DEG_TO_RAD) * 1.1f;
         data.camera = {{"target", {c.x, c.y, c.z}}, {"radius", r}, {"theta", 1.15}, {"phi", phi}, {"fov", 35}};
-    } else if (!loadProject(o.input, graph, data, &err)) {
+    } else if (isPackageFile(o.input) ? !loadPackage(o.input, graph, data, &err) : !loadProject(o.input, graph, data, &err)) {
         std::cerr << err << std::endl;
         return 1;
     }

@@ -20,6 +20,7 @@ target_sources(photon_core PRIVATE
     threading/thread_pool.cpp
     memory/arena_allocator.cpp
     platform/path.cpp
+    io/zip.cpp
 )
 
 # Public include directory — parent src/ folder so includes look like:
