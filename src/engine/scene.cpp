@@ -16,15 +16,20 @@ void Scene::addShape(std::shared_ptr<Shape> shape) {
     if (!mesh || !mesh->material()) return;
     if (mesh->material()->transmitsShadows()) m_shadowTransmitters = true;
 
-    // Emisyonlu mesh (ör. LED panel malzemesi) → ışık örneklemesine de girer.
+    // Emisyonlu mesh (ör. LED panel malzemesi) → her üçgeni bir ışık; ışık BVH'si yakın ve bize
+    // bakan üçgenleri seçer. Alan ışığı dörtgenleri mesh değil Triangle olduğu için iki kez
+    // kaydedilmez. Sıfır alanlı üçgenler de yer tutar ki sıra = base + primIndex kalsın.
     SurfaceInteraction si;
     Color3f emission = mesh->material()->emitted(si);
     if (emission.isBlack()) return;
-    // Alan ışığı dörtgenleri mesh değil Triangle olduğu için iki kez kaydedilmez.
-    auto light = std::make_shared<MeshLight>(mesh.get(), emission);
-    m_emitterOfShape[mesh.get()] = static_cast<int>(m_lightPtrs.size());
-    m_lights.push_back(light);
-    m_lightPtrs.push_back(light.get());
+    m_meshEmitterBase[mesh.get()] = static_cast<int>(m_lightPtrs.size());
+    for (size_t i = 0; i < mesh->numTriangles(); ++i) {
+        Vec3f p0, p1, p2;
+        mesh->triangleVertices(i, p0, p1, p2);
+        auto light = std::make_shared<TriangleLight>(p0, p1, p2, emission);
+        m_lights.push_back(light);
+        m_lightPtrs.push_back(light.get());
+    }
 }
 
 void Scene::addLight(std::shared_ptr<Light> light) {
@@ -62,6 +67,7 @@ void Scene::addLight(std::shared_ptr<Light> light) {
 
 void Scene::setEnvironment(std::shared_ptr<EnvironmentLight> envLight) {
     m_environment = std::move(envLight);
+    if (m_built) m_lightSampler.build(m_lightPtrs, m_environment.get());
 }
 
 void Scene::retainMaterial(std::shared_ptr<const Material> material) {
@@ -79,6 +85,8 @@ void Scene::setPreferOwnBvh(bool own) {
 }
 
 void Scene::buildAccelerator() {
+    m_lightSampler.build(m_lightPtrs, m_environment.get());
+    m_built = true;
     m_embree.reset();
     if (!gPreferOwnBvh && EmbreeAccel::available()) {
         m_embree = std::make_unique<EmbreeAccel>();
@@ -100,6 +108,9 @@ void Scene::reset() {
     m_materials.clear();
     m_shapeOwner.clear();
     m_emitterOfShape.clear();
+    m_meshEmitterBase.clear();
+    m_lightSampler = LightSampler{};
+    m_built = false;
     m_cameraInvisible.clear();
     m_shadowCatcher = nullptr;
     m_shadowTransmitters = false;

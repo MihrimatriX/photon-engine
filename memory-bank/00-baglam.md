@@ -100,8 +100,19 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - Testler 56 → 133 (fırın testleri: saçan ortam, dispersiyonlu cam, ince duvar, beyaz pürüzlü metal; küresel dikdörtgen kareleme; güneş konumu; gölge yakalayıcı; görüntüleyici; uyarlamalı hata).
   - Kod incelemesi düzeltmeleri: keskin/ince duvarlı camın ağırlığı |cos θi|'ye bölünüyor (integratörün kosinüsü iki kez sayılıyordu); düz renk arka planda geçiş (pass-through) ıskası arka planı biriktiriyor; ışın başlangıç ofseti **geometrik** normal boyunca (yumuşak normalli + saçan camda fırın 0.88 → 1.0); Abbe ≥ 10, spektral IOR ≥ 1.0001; `visibleToCamera` eksik proje dosyalarında görünür.
   - Ölçüm: `bench/BASELINE.md` "Linux" bölümü; `scripts/compare_exr.py`; sahneler `scripts/gen_material_scenes.py`.
+- **2026-10-29 (oturum 8, bulut, "dünyanın en iyi render uygulaması" + 3B uygulama entegrasyonu, dal `ccr-f83d8156-rqn1yj`):**
+  - Eksik analizi: `docs/EKSIK_ANALIZI.md` (öncelikli liste, alternatifler, bu oturumun ölçümleri).
+  - **Malzeme:** enerji korunan Principled katmanlama (Kulla–Conty; beyaz plastik fırında 1.58 → 1.00), EON difüz (`diffuseRoughness`), Charlie sheen (`sheenRoughness`), ORM kanal düzeltmesi; `test_bsdf_verification` (chi-kare + fırın).
+  - **Görüntü:** piksel filtresi (filtre önem örneklemesi; eski projeler kutu).
+  - **Sağlamlık:** pError'lı ışın başlangıcı, tMin = 0, gölge terminatörü (yalnız gölge ışınlarında); ölçek testi.
+  - **Işık:** ışık BVH'si + üçgen başına yayıcı (LED şeritte 2.9×); HDRI MIS telafisi (güneşli gökte 6.8×).
+  - **Geçişler:** lob × doğrudan/dolaylı + emisyon/ortam + veri geçişleri, çok katmanlı EXR (CLI `--passes`, Render penceresi).
+  - **Entegrasyon:** FBX (ufbx v0.23.1) ve Alembic 1.8.12 (+ Imath 3.2.3, CMake ≥ 3.29) içe aktarma; hiyerarşi/ad/instancing, birim/eksen, malzeme eşleme, gömülü doku önbelleği; içe aktarma penceresi, imlecin altına bırakma, son dosyalar.
+  - Testler 133 → 157.
+  - **Cihaz/mod katmanı (F9.7, RTXPT incelemesinden sonra):** `RenderDevice` (CPU; GPU'lar CUDA sürücüsü dinamik yüklenerek listelenir, arka uç yok), `RenderSession` (Interactive / Final: parti boyu, hedef/süre/yakınsama, AOV/geçiş, denoise). Viewport, son render, turntable ve CLI tek yoldan; CLI `--device`, `--list-devices`; Render penceresinde Cihaz; `--ui finalrender` duman testi. RTXPT doğrudan alınmadı: NVIDIA RTX SDKs lisansı, Windows/D3D12, sürücü 595.71+ (GTX 1080'de çalışmaz). Testler → 165.
 - **Sıradaki adımlar:**
-  - Windows/MSVC'de bu oturumun değişiklikleri derlenmedi (yalnız GCC 13). `/W4` uyarıları ve `std::complex` kullanımı kontrol edilmeli; OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli.
+  - `docs/EKSIK_ANALIZI.md` öncelik 1: GPU (CUDA), path guiding (Open PGL), alfa kesikleri, doku belleği + mipmap, BLAS/TLAS, otomatik kayıt.
+  - Windows/MSVC'de oturum 7 ve 8'in değişiklikleri derlenmedi (yalnız GCC 13). `/W4` uyarıları ve `std::complex` kullanımı kontrol edilmeli; OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli.
   - Kostikler: cam arkası ve delta ışık + parlak yüzey yolları hâlâ gürültülü (parlama sınırı geçici çözüm). Path guiding (Open PGL) ya da MNEE.
   - Render geçişleri (AOV'ler, ışık grupları, çok katmanlı EXR, Cryptomatte); ışık bağlama; yansımada görünürlük bayrağı.
   - GPU (Faz 9).

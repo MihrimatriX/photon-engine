@@ -11,6 +11,7 @@
 #include "engine/embree_accel.h"
 #include "lights/light.h"
 #include "lights/environment_light.h"
+#include "lights/light_sampler.h"
 #include "materials/material.h"
 #include <vector>
 #include <memory>
@@ -33,8 +34,8 @@ public:
     Scene(const Scene&) = delete;
     Scene& operator=(const Scene&) = delete;
 
-    /// Geometrik şekil ekle. Emisyonlu malzemeli mesh'ler otomatik olarak
-    /// MeshLight olarak da kaydedilir (doğrudan ışık örneklemesi için).
+    /// Geometrik şekil ekle. Emisyonlu malzemeli mesh'lerin her üçgeni ayrıca bir TriangleLight
+    /// olarak kaydedilir (doğrudan ışık örneklemesi ve ışık BVH'si için).
     void addShape(std::shared_ptr<Shape> shape);
 
     /// Işık kaynağı ekle. Alan ışıkları BVH'ye görünür bir dörtgen olarak da girer.
@@ -55,6 +56,8 @@ public:
 
     /// Embree varken bile kendi BVH'mizi kullan (testler ve karşılaştırma için).
     static void setPreferOwnBvh(bool own);
+    /// Kesişim Embree ile mi yapılıyor (yoksa yerleşik BVH)?
+    bool usesEmbree() const { return m_embree != nullptr; }
 
     /// Tüm içeriği temizle.
     void reset();
@@ -70,9 +73,14 @@ public:
     /// Kesişim bir ışığın geometrisindeyse (alan ışığı dörtgeni, yayıcı mesh) o ışığın
     /// lights() içindeki sırası; değilse −1. O(1) karma araması.
     int emitterIndex(const SurfaceInteraction& isect) const {
-        auto it = m_emitterOfShape.find(isect.hitObject);
-        return it == m_emitterOfShape.end() ? -1 : it->second;
+        if (auto it = m_emitterOfShape.find(isect.hitObject); it != m_emitterOfShape.end()) return it->second;
+        if (auto it = m_meshEmitterBase.find(isect.hitObject); it != m_meshEmitterBase.end() && isect.primIndex >= 0)
+            return it->second + isect.primIndex;
+        return -1;
     }
+
+    /// Işık seçimi (az ışıkta kapsamlı, çok ışıkta ışık BVH'si). buildAccelerator() kurar.
+    const LightSampler& lightSampler() const { return m_lightSampler; }
 
     /// Sahnede gölge ışınlarını geçiren (ince duvarlı cam) bir malzeme var mı? Varsa
     /// integratör gölge testini geçirgenlik toplayan yavaş yoldan yapar.
@@ -118,6 +126,9 @@ private:
     std::vector<const Light*> m_lightPtrs;
     std::unordered_map<const void*, uint64_t> m_shapeOwner;
     std::unordered_map<const void*, int> m_emitterOfShape;
+    std::unordered_map<const void*, int> m_meshEmitterBase; ///< yayıcı mesh → ilk üçgen ışığının sırası
+    LightSampler m_lightSampler;
+    bool m_built = false;
     std::unordered_set<const void*> m_cameraInvisible;
     const void* m_shadowCatcher = nullptr;
     bool m_shadowTransmitters = false;

@@ -5,12 +5,15 @@
 //     "camera": {...}, "render": {...},            // uygulamanın kendi alanları
 //     "environment": { "hdr", "rotation", "intensity", "background", "ground", ... },
 //     "lights": [ { "type", "color", "intensity", "position", ... } ],
+//     "animation": { "cameraTracks": [ { "name", "fps", "smooth", "keys": [...] } ] },
 //     "materials": [ { "type": "disney"|"glass"|"lambert"|"mirror", ... } ],
 //     "nodes": [ { "name", "type", "visible", "xf": [16], "material": i,
 //                  "source": "model.obj", "sourceIndex": k, "geometry": {...},
 //                  "children": [...] } ] }
 // Aynı malzemeyi paylaşan düğümler "materials" tablosunda tek kayda işaret eder.
 #include "scene/project_io.h"
+#include "scene/camera_animation.h"
+#include "scene/mesh_binary.h"
 #include "scene/model_import.h"
 #include "scene/material_library.h"
 #include "materials/disney.h"
@@ -60,6 +63,18 @@ std::string relPath(const std::string& p, const fs::path& base) {
     return std::string(s.begin(), s.end());
 }
 
+/// Yazarken bir dosya yolunun nasıl kaydedileceği: proje klasörüne göreli (normal) ya da paket
+/// içi ad (paketlemede dosya pakete alınır).
+struct PathMap {
+    fs::path base;
+    const ProjectWriteHooks* hooks = nullptr;
+    std::string operator()(const std::string& p) const {
+        if (p.empty()) return p;
+        if (hooks && hooks->mapAsset) return hooks->mapAsset(p);
+        return relPath(p, base);
+    }
+};
+
 std::string resolvePath(const std::string& p, const fs::path& base) {
     if (p.empty()) return p;
     fs::path fp = pathFromUtf8(p);
@@ -86,7 +101,7 @@ Transform readTransform(const json& j) {
 
 // ── Malzemeler ───────────────────────────────────────────────────────────
 
-json materialJson(const Material& mat, const fs::path& base) {
+json materialJson(const Material& mat, const PathMap& paths) {
     json j;
     SurfaceInteraction si;
     if (const auto* d = dynamic_cast<const DisneyMaterial*>(&mat)) {
@@ -102,10 +117,10 @@ json materialJson(const Material& mat, const fs::path& base) {
         j["diffuseTransmission"] = d->diffuseTransmission();
         j["emission"] = col3(d->emitted(si));
         json maps = json::object();
-        if (!d->albedoMap().empty()) maps["albedo"] = relPath(d->albedoMap(), base);
-        if (!d->normalMap().empty()) maps["normal"] = relPath(d->normalMap(), base);
-        if (!d->roughnessMap().empty()) maps["roughness"] = relPath(d->roughnessMap(), base);
-        if (!d->metalnessMap().empty()) maps["metalness"] = relPath(d->metalnessMap(), base);
+        if (!d->albedoMap().empty()) maps["albedo"] = paths(d->albedoMap());
+        if (!d->normalMap().empty()) maps["normal"] = paths(d->normalMap());
+        if (!d->roughnessMap().empty()) maps["roughness"] = paths(d->roughnessMap());
+        if (!d->metalnessMap().empty()) maps["metalness"] = paths(d->metalnessMap());
         if (!maps.empty()) j["maps"] = maps;
         j["mapping"] = d->textureMapping() == DisneyMaterial::TextureMapping::Box ? "box" : "uv";
         j["texScale"] = d->textureScale();
@@ -174,7 +189,7 @@ std::shared_ptr<Material> materialFromJson(const json& j, const fs::path& base) 
 // ── Düğümler ─────────────────────────────────────────────────────────────
 
 struct SaveCtx {
-    fs::path base;
+    PathMap paths;
     std::unordered_map<const Material*, int> materialIndex;
     json materials = json::array();
 
@@ -183,7 +198,7 @@ struct SaveCtx {
         auto it = materialIndex.find(m.get());
         if (it != materialIndex.end()) return it->second;
         const int id = static_cast<int>(materials.size());
-        materials.push_back(materialJson(*m, base));
+        materials.push_back(materialJson(*m, paths));
         materialIndex[m.get()] = id;
         return id;
     }
@@ -201,11 +216,15 @@ json nodeJson(const SceneNode& n, SaveCtx& ctx, bool insideSource) {
         case SceneNodeType::Light: j["type"] = "light"; break;
     }
     if (n.material) j["material"] = ctx.materialId(n.material);
-    if (!n.sourcePath.empty()) j["source"] = relPath(n.sourcePath, ctx.base);
-    if (n.sourceIndex >= 0) j["sourceIndex"] = n.sourceIndex;
+    // Paketleme: her mesh ikili saklanır, kaynak dosya bağı yazılmaz (paket kendi kendine yeter).
+    const bool packaging = ctx.paths.hooks && ctx.paths.hooks->storeMesh;
+    if (!packaging && !n.sourcePath.empty()) j["source"] = relPath(n.sourcePath, ctx.paths.base);
+    if (!packaging && n.sourceIndex >= 0) j["sourceIndex"] = n.sourceIndex;
     if (n.type == SceneNodeType::Sphere) j["radius"] = n.sphereRadius;
-    // Kaynak dosyadan gelmeyen mesh'lerin geometrisi projeye gömülür (ör. Cornell kutusu).
-    if (n.type == SceneNodeType::Mesh && n.mesh && !(insideSource && n.sourceIndex >= 0)) {
+    if (packaging && n.type == SceneNodeType::Mesh && n.mesh) {
+        j["geometry"] = {{"bin", ctx.paths.hooks->storeMesh(*n.mesh)}};
+    } else if (n.type == SceneNodeType::Mesh && n.mesh && !(insideSource && n.sourceIndex >= 0)) {
+        // Kaynak dosyadan gelmeyen mesh'lerin geometrisi projeye gömülür (ör. Cornell kutusu).
         json g;
         json p = json::array(), nn = json::array(), uv = json::array(), idx = json::array();
         for (const auto& v : n.mesh->positions()) { p.push_back(v.x); p.push_back(v.y); p.push_back(v.z); }
@@ -218,7 +237,7 @@ json nodeJson(const SceneNode& n, SaveCtx& ctx, bool insideSource) {
         g["i"] = std::move(idx);
         j["geometry"] = std::move(g);
     }
-    const bool source = insideSource || !n.sourcePath.empty();
+    const bool source = !packaging && (insideSource || !n.sourcePath.empty());
     json children = json::array();
     for (const auto& c : n.children) children.push_back(nodeJson(*c, ctx, source));
     if (!children.empty()) j["children"] = std::move(children);
@@ -239,7 +258,14 @@ void applyCommon(SceneNode& n, const json& j, LoadCtx& ctx) {
     if (mi >= 0 && mi < static_cast<int>(ctx.materials.size())) n.material = ctx.materials[static_cast<size_t>(mi)];
 }
 
-std::shared_ptr<TriangleMesh> meshFromJson(const json& g, const Material* mat) {
+std::shared_ptr<TriangleMesh> meshFromJson(const json& g, const Material* mat, LoadCtx& ctx) {
+    if (auto bin = g.find("bin"); bin != g.end() && bin->is_string()) {
+        // Paket: ikili mesh dosyası (proje klasörüne göreli).
+        std::string err;
+        auto mesh = readMeshBinaryFile(resolvePath(bin->get<std::string>(), ctx.base), mat, &err);
+        if (!mesh) ctx.warnings.push_back(err + ": " + bin->get<std::string>());
+        return mesh;
+    }
     std::vector<Vec3f> p, n;
     std::vector<Vec2f> uv;
     std::vector<uint32_t> idx;
@@ -263,9 +289,55 @@ std::shared_ptr<TriangleMesh> meshFromJson(const json& g, const Material* mat) {
 
 std::unique_ptr<SceneNode> nodeFromJson(const json& j, LoadCtx& ctx);
 
-// İçe aktarılmış model grubu: dosya yeniden okunur, kaydedilmiş çocukların
-// ayarları sourceIndex eşleşmesiyle uygulanır; kayıtta olmayan çocuklar
-// (kullanıcının sildiği parçalar) atılır.
+// İçe aktarılmış model grubu: dosya yeniden okunur ve kayıttaki ağaç yeniden kurulur. Dosyadan
+// gelen mesh düğümleri (sourceIndex) taze içe aktarmadan alınır, ayarları (ad, dönüşüm, malzeme)
+// kayıttan uygulanır; ara gruplar (FBX/Alembic hiyerarşisi ya da kullanıcının kurduğu gruplar)
+// kayıttan oluşturulur. Kayıtta olmayan parçalar (kullanıcının sildikleri) atılır. Eski projeler
+// (düz liste) de aynı yoldan açılır.
+void collectSourceMeshes(std::unique_ptr<SceneNode>& node, std::unordered_map<int, std::unique_ptr<SceneNode>>& pool) {
+    std::vector<std::unique_ptr<SceneNode>> kids = std::move(node->children);
+    node->children.clear();
+    for (auto& c : kids) {
+        if (c->sourceIndex >= 0 && c->type == SceneNodeType::Mesh) {
+            const int k = c->sourceIndex;
+            collectSourceMeshes(c, pool); // (mesh yaprağıdır; yine de altını boşalt)
+            c->parent = nullptr;
+            pool[k] = std::move(c);
+        } else {
+            collectSourceMeshes(c, pool);
+        }
+    }
+}
+
+void rebuildSourceChildren(const json& children, SceneNode& parent,
+                           std::unordered_map<int, std::unique_ptr<SceneNode>>& pool, LoadCtx& ctx) {
+    for (const auto& cj : children) {
+        const int k = cj.value("sourceIndex", -1);
+        if (k >= 0) {
+            auto it = pool.find(k);
+            if (it == pool.end() || !it->second) {
+                // Kaynak dosya değişti: parça artık yok. Gömülü geometrisi varsa (kopya) onu kullan.
+                if (auto extra = nodeFromJson(cj, ctx)) parent.addChild(std::move(extra));
+                continue;
+            }
+            std::unique_ptr<SceneNode> node = std::move(it->second);
+            pool.erase(it);
+            applyCommon(*node, cj, ctx);
+            SceneNode* added = parent.addChild(std::move(node));
+            rebuildSourceChildren(cj.value("children", json::array()), *added, pool, ctx);
+            continue;
+        }
+        if (!cj.contains("source") && cj.value("type", std::string("group")) == "group") {
+            auto g = std::make_unique<SceneNode>("Grup", SceneNodeType::Group);
+            applyCommon(*g, cj, ctx);
+            SceneNode* added = parent.addChild(std::move(g));
+            rebuildSourceChildren(cj.value("children", json::array()), *added, pool, ctx);
+            continue;
+        }
+        if (auto extra = nodeFromJson(cj, ctx)) parent.addChild(std::move(extra));
+    }
+}
+
 std::unique_ptr<SceneNode> sourceGroupFromJson(const json& j, LoadCtx& ctx) {
     const std::string src = resolvePath(j.value("source", std::string()), ctx.base);
     std::string err;
@@ -275,19 +347,9 @@ std::unique_ptr<SceneNode> sourceGroupFromJson(const json& j, LoadCtx& ctx) {
         return nullptr;
     }
     applyCommon(*group, j, ctx);
-    std::vector<std::unique_ptr<SceneNode>> imported = std::move(group->children);
-    group->children.clear();
-    for (const auto& cj : j.value("children", json::array())) {
-        const int k = cj.value("sourceIndex", -1);
-        auto it = std::find_if(imported.begin(), imported.end(),
-                               [k](const std::unique_ptr<SceneNode>& c) { return c && c->sourceIndex == k; });
-        if (k < 0 || it == imported.end()) {
-            if (auto extra = nodeFromJson(cj, ctx)) group->addChild(std::move(extra));
-            continue;
-        }
-        applyCommon(**it, cj, ctx);
-        group->addChild(std::move(*it));
-    }
+    std::unordered_map<int, std::unique_ptr<SceneNode>> pool;
+    collectSourceMeshes(group, pool);
+    rebuildSourceChildren(j.value("children", json::array()), *group, pool, ctx);
     return group;
 }
 
@@ -298,7 +360,7 @@ std::unique_ptr<SceneNode> nodeFromJson(const json& j, LoadCtx& ctx) {
     if (type == "mesh") {
         n = std::make_unique<SceneNode>("Mesh", SceneNodeType::Mesh);
         applyCommon(*n, j, ctx);
-        if (j.contains("geometry")) n->mesh = meshFromJson(j["geometry"], n->material.get());
+        if (j.contains("geometry")) n->mesh = meshFromJson(j["geometry"], n->material.get(), ctx);
         if (!n->mesh) return nullptr;
     } else if (type == "sphere") {
         n = std::make_unique<SceneNode>("Küre", SceneNodeType::Sphere);
@@ -326,7 +388,7 @@ const char* lightTypeName(LightDesc::Type t) {
     return "area";
 }
 
-json lightJson(const LightDesc& d, const fs::path& base) {
+json lightJson(const LightDesc& d, const PathMap& paths) {
     json j;
     j["type"] = lightTypeName(d.type);
     j["name"] = d.name;
@@ -343,7 +405,7 @@ json lightJson(const LightDesc& d, const fs::path& base) {
     if (d.type == LightDesc::Type::Spot) {
         j["coneAngle"] = d.coneAngleDeg;
         j["coneBlend"] = d.coneBlend;
-        if (!d.iesPath.empty()) j["ies"] = relPath(d.iesPath, base);
+        if (!d.iesPath.empty()) j["ies"] = paths(d.iesPath);
     }
     return j;
 }
@@ -373,9 +435,9 @@ LightDesc lightFromJson(const json& j, const fs::path& base) {
     return d;
 }
 
-json environmentJson(const EnvironmentDesc& e, const fs::path& base) {
+json environmentJson(const EnvironmentDesc& e, const PathMap& paths) {
     json j;
-    j["hdr"] = relPath(e.hdrPath, base);
+    j["hdr"] = paths(e.hdrPath);
     j["zenith"] = col3(e.zenith);
     j["horizon"] = col3(e.horizon);
     j["rotation"] = e.rotationDeg;
@@ -439,25 +501,36 @@ EnvironmentDesc environmentFromJson(const json& j, const fs::path& base) {
 
 } // namespace
 
-bool saveProject(const std::string& path, const SceneGraph& graph, const ProjectData& data, std::string* error) {
-    const fs::path file = pathFromUtf8(path);
+std::string projectJsonText(const SceneGraph& graph, const ProjectData& data, const std::string& baseDir,
+                            const ProjectWriteHooks* hooks) {
     SaveCtx ctx;
-    std::error_code ec;
-    ctx.base = fs::absolute(file, ec).parent_path();
-
+    ctx.paths.base = pathFromUtf8(baseDir);
+    ctx.paths.hooks = hooks;
     json root;
     root["format"] = "photon-project";
     root["version"] = 2;
     root["camera"] = data.camera;
     root["render"] = data.render;
-    root["environment"] = environmentJson(data.environment, ctx.base);
+    root["environment"] = environmentJson(data.environment, ctx.paths);
     json lights = json::array();
-    for (const auto& l : data.lights) lights.push_back(lightJson(l, ctx.base));
+    for (const auto& l : data.lights) lights.push_back(lightJson(l, ctx.paths));
     root["lights"] = std::move(lights);
+    if (!data.cameraTracks.empty()) {
+        json tracks = json::array();
+        for (const CameraTrack& t : data.cameraTracks) tracks.push_back(cameraTrackToJson(t));
+        root["animation"] = {{"cameraTracks", std::move(tracks)}};
+    }
     json nodes = json::array();
     for (const auto& c : graph.root()->children) nodes.push_back(nodeJson(*c, ctx, false));
     root["materials"] = std::move(ctx.materials);
     root["nodes"] = std::move(nodes);
+    return root.dump(1);
+}
+
+bool saveProject(const std::string& path, const SceneGraph& graph, const ProjectData& data, std::string* error) {
+    const fs::path file = pathFromUtf8(path);
+    std::error_code ec;
+    const std::string text = projectJsonText(graph, data, pathToUtf8(fs::absolute(file, ec).parent_path()));
 
     // Atomik yazım: geçici dosya → yeniden adlandır. Yazma yarıda kesilirse eski proje sağlam kalır.
     fs::path tmp = file;
@@ -468,7 +541,7 @@ bool saveProject(const std::string& path, const SceneGraph& graph, const Project
             if (error) *error = "Dosya yazılamadı: " + path;
             return false;
         }
-        out << root.dump(1);
+        out << text;
         if (!out) {
             if (error) *error = "Yazma hatası: " + path;
             return false;
@@ -510,6 +583,10 @@ bool loadProjectJson(const std::string& text, const std::string& baseDir, SceneG
         data.render = root.value("render", json::object());
         if (root.contains("environment")) data.environment = environmentFromJson(root["environment"], ctx.base);
         for (const auto& l : root.value("lights", json::array())) data.lights.push_back(lightFromJson(l, ctx.base));
+        data.cameraTracks.clear();
+        if (auto an = root.find("animation"); an != root.end() && an->is_object())
+            for (const auto& t : an->value("cameraTracks", json::array()))
+                if (CameraTrack tr = cameraTrackFromJson(t); !tr.empty()) data.cameraTracks.push_back(std::move(tr));
     } catch (const std::exception& e) {
         if (error) *error = std::string("Proje okunamadı: ") + e.what();
         return false;

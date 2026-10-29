@@ -11,9 +11,14 @@
 //      eşlenir ve RGBA8 olarak yayınlanır; UI yalnız kısa bir kilitle alır.
 // Malzeme gibi yerinde değiştirilen nesneler için lockScene()/edit(): mevcut
 // pass iptal edilir ve thread boşa çıkana kadar (en fazla bir satır) beklenir.
+//
+// Render, seçilen RenderDevice üzerinde Etkileşimli modlu bir RenderSession ile yapılır
+// (son render ve CLI ile aynı çekirdek ve aynı cihaz katmanı). Sahne cihaza yalnız
+// değiştiğinde yüklenir (sürüm sayacı): kamera hareketi bir GPU cihazında yeniden yükleme
+// gerektirmez.
 #pragma once
 
-#include "engine/renderer.h"
+#include "engine/render_session.h"
 #include "engine/denoiser.h"
 #include "engine/render_settings.h"
 #include "core/image/imager.h"
@@ -66,6 +71,9 @@ struct ViewportStats {
     bool denoised = false;
     bool interactive = false;
     bool converged = false;
+    std::string device;     ///< Render eden cihazın adı
+    std::string deviceKind; ///< "CPU", "CUDA"... (rozet için kısa ad)
+    std::string deviceNote; ///< İstenen cihaz açılamadıysa nedeni (CPU'ya düşüldü)
 };
 
 /// UI'a verilen hazır kare.
@@ -99,6 +107,8 @@ public:
     void setTargetSpp(int spp);  ///< 0 = sınırsız; artırmak birikimi sıfırlamaz
     void setPaused(bool paused);
     void setTransparentPreview(bool transparent);
+    /// Render cihazı ("auto", "cpu", "cuda:0"). Açılamazsa CPU'ya düşülür; stats().deviceNote nedenini söyler.
+    void setDevice(const std::string& id);
     void restart(bool interactive = false);
 
     /// Mevcut pass'i iptal eder ve sahne kilidini döndürür. Kilit tutulurken
@@ -146,6 +156,7 @@ private:
     bool m_quit = false;
     bool m_retonemap = false;
     bool m_transparent = false;
+    std::string m_deviceId = "auto";
     ToneMapOperator m_tmo = ToneMapOperator::PBRNeutral;
     float m_exposure = 0.0f;
     ImagerSettings m_imager;
@@ -155,13 +166,19 @@ private:
     std::atomic<bool> m_cancel{false};
     std::atomic<bool> m_passInteractive{false};
     std::mutex m_sceneMutex;
+    std::atomic<uint64_t> m_sceneVersion{1}; ///< setScene ve yerinde düzenlemede artar
 
     // ── yalnız render thread'i ──
-    Renderer m_renderer;
+    std::unique_ptr<RenderDevice> m_device;
+    std::string m_activeDeviceId;     ///< m_device hangi istekle açıldı
+    std::unique_ptr<RenderSession> m_session;
+    uint64_t m_uploadedVersion = 0;   ///< cihazdaki sahnenin sürümü
+    const Scene* m_uploadedScene = nullptr;
+    bool m_needBegin = true;          ///< yeni birikim (boyut/kamera/ayar değişti)
+    int m_beginW = 0, m_beginH = 0;
     Denoiser m_denoiser;
-    Film m_film;
-    AovFilms m_aovs;
     int m_spp = 0;
+    bool m_converged = false;
     bool m_interactive = false;
     int m_ladder = 4;                 ///< Etkileşimli modda çözünürlük böleni
     Clock::time_point m_startTime{};

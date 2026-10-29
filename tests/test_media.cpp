@@ -183,10 +183,11 @@ TEST(Subsurface, RandomWalkReproducesTargetAlbedo) {
     scene.addShape(makeBox(Vec3f(-50, -100, -50), Vec3f(50, 0, 50), &skin));
     scene.buildAccelerator();
 
+    // Giriş noktası gerçek bir kesişimden: nokta hata sınırıyla (pError) gelir, yürüyüş ilk
+    // ışınını yüzeyin altından sağlam ofsetle başlatır.
     SurfaceInteraction entry;
-    entry.point = Vec3f(0, 0, 0);
-    entry.normal = entry.ng = Vec3f(0, 1, 0);
-    entry.material = &skin;
+    Ray down(Vec3f(0, 1, 0), Vec3f(0, -1, 0));
+    ASSERT_TRUE(scene.intersect(down, entry));
     SubsurfaceCoeffs coeffs;
     ASSERT_TRUE(skin.subsurfaceCoeffs(entry, coeffs));
 

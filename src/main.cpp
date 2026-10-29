@@ -1,17 +1,23 @@
 // main.cpp — photon_render: arayüzsüz (komut satırı) renderer ve ölçüm aracı.
 //
 //   photon_render sahne.photon  [--out render.png] [--spp 256] [--res 1920x1080]
+//   photon_render sahne.photonpack [...]          (kendi kendine yeten paket)
 //   photon_render model.obj     [...]               (stüdyo ışığı + otomatik kadraj)
 //   photon_render --cornell     [...]
 // Ek seçenekler: --threads N, --no-denoise, --bounces N, --stats stats.json,
 //   --noise 0.02 (uyarlamalı örnekleme: göreli hata hedefi), --min-spp N,
-//   --clamp 10 (dolaylı parlama sınırı), --time SN (süre sınırı; ilerlemeli render)
+//   --clamp 10 (dolaylı parlama sınırı), --time SN (süre sınırı; ilerlemeli render),
+//   --filter box|triangle|gaussian|blackman-harris, --filter-width PİKSEL,
+//   --passes (çok katmanlı EXR: ışık geçişleri, derinlik, konum, ID'ler, albedo, normal),
+//   --device auto|cpu|cuda:0 (render cihazı), --list-devices (makinedeki cihazlar)
 // stats.json: süre, örnek sayısı, Mray/s (milyon birincil ışın / saniye).
+// Render, uygulamanın son render'ıyla aynı yoldan geçer: RenderDevice + RenderSession (Final).
 #include "scene/project_io.h"
+#include "scene/package.h"
 #include "scene/model_import.h"
 #include "scene/cornell_box.h"
 #include "scene/document.h"
-#include "engine/renderer.h"
+#include "engine/render_session.h"
 #include "camera/perspective_camera.h"
 #include "camera/thin_lens_camera.h"
 #include "camera/orthographic_camera.h"
@@ -50,12 +56,28 @@ struct Options {
     int minSpp = 16;
     float clamp = -1.0f;  ///< < 0 → projedeki değer
     float timeLimit = 0.0f;
+    bool passes = false;       ///< çok katmanlı EXR (yalnız .exr çıktı)
+    std::string filter;        ///< boş → projedeki değer
+    float filterWidth = 0.0f;  ///< ≤ 0 → projedeki / filtrenin varsayılanı
+    std::string device = "auto";
+    bool listDevices = false;
 };
 
 void usage() {
     std::cout << "photon_render <sahne.photon | model.obj | --cornell> [--out dosya.png|.jpg|.exr] [--spp N]\n"
                  "              [--res GxY] [--threads N] [--bounces N] [--no-denoise] [--stats stats.json]\n"
-                 "              [--noise 0.02] [--min-spp N] [--clamp X] [--time saniye]\n";
+                 "              [--noise 0.02] [--min-spp N] [--clamp X] [--time saniye]\n"
+                 "              [--filter box|triangle|gaussian|blackman-harris] [--filter-width piksel]\n"
+                 "              [--passes]  (çıktı .exr: render geçişleri tek dosyada)\n"
+                 "              [--device auto|cpu|cuda:0] [--list-devices]\n";
+}
+
+void printDevices() {
+    for (const DeviceInfo& d : enumerateDevices()) {
+        std::cout << (d.usable ? "  [x] " : "  [ ] ") << d.id << "  " << deviceKindName(d.kind) << "  " << d.name;
+        if (d.memoryBytes > 0) std::cout << "  " << (d.memoryBytes >> 20) << " MB";
+        std::cout << "\n        " << d.note << "\n";
+    }
 }
 
 // Proje dosyasındaki orbit kamera alanlarından (hedef, yarıçap, θ, φ) kamera.
@@ -99,11 +121,26 @@ int main(int argc, char** argv) {
         else if (a == "--min-spp") o.minSpp = std::max(2, std::atoi(next().c_str()));
         else if (a == "--clamp") o.clamp = static_cast<float>(std::atof(next().c_str()));
         else if (a == "--time") o.timeLimit = static_cast<float>(std::atof(next().c_str()));
+        else if (a == "--filter") o.filter = next();
+        else if (a == "--passes") o.passes = true;
+        else if (a == "--filter-width") o.filterWidth = static_cast<float>(std::atof(next().c_str()));
+        else if (a == "--device") o.device = next();
+        else if (a == "--list-devices") o.listDevices = true;
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (!a.empty() && a[0] != '-') o.input = a;
         else { usage(); return 2; }
     }
+    if (o.listDevices) {
+        printDevices();
+        return 0;
+    }
     if (o.input.empty() && !o.cornell) { usage(); return 2; }
+    std::string deviceError;
+    std::unique_ptr<RenderDevice> device = createDevice(o.device, &deviceError);
+    if (!device) {
+        std::cerr << deviceError << std::endl;
+        return 2;
+    }
 
     const auto t0 = std::chrono::steady_clock::now();
     SceneGraph graph;
@@ -152,7 +189,7 @@ int main(int argc, char** argv) {
         const Vec3f c = b.centroid();
         const float r = (b.pMax - b.pMin).length() * 0.5f / std::sin(17.5f * DEG_TO_RAD) * 1.1f;
         data.camera = {{"target", {c.x, c.y, c.z}}, {"radius", r}, {"theta", 1.15}, {"phi", phi}, {"fov", 35}};
-    } else if (!loadProject(o.input, graph, data, &err)) {
+    } else if (isPackageFile(o.input) ? !loadPackage(o.input, graph, data, &err) : !loadProject(o.input, graph, data, &err)) {
         std::cerr << err << std::endl;
         return 1;
     }
@@ -174,42 +211,79 @@ int main(int argc, char** argv) {
     if (o.noise > 0.0f) rs.noiseThreshold = o.noise;
     rs.minAdaptiveSamples = o.minSpp;
     rs.clampIndirect = o.clamp >= 0.0f ? o.clamp : data.render.value("clampIndirect", 0.0f);
-    const ImagerSettings imager = imagerFromJson(data.render.value("imager", nlohmann::json::object()));
-    auto camera = cameraFromJson(data.camera, static_cast<float>(o.width) / static_cast<float>(o.height));
-
-    Renderer renderer;
-    const auto tRender = std::chrono::steady_clock::now();
-    int sppDone = o.spp;
-    Image img;
-    if (o.timeLimit > 0.0f) {
-        // Süre sınırı: piksel başına birer örneklik pass'ler; süre dolunca son pass'te durur.
-        img = renderer.renderProgressive(*scene, *camera, rs, [&](const Film&, int done) {
-            sppDone = done;
-            return std::chrono::duration<float>(std::chrono::steady_clock::now() - tRender).count() < o.timeLimit;
-        });
-        // ponytail: süre dolup erken biten render'da gürültü giderme yapılmaz (renderProgressive
-        // yalnız tamamlanınca denoise eder); AOV'leri tutup burada denoise etmek sonraki adım.
-    } else {
-        img = renderer.render(*scene, *camera, rs);
+    {
+        // Proje (yoksa kutu: eski projeler öyle render edildi; model/Cornell modunda Blackman–Harris).
+        const bool fromProject = !o.cornell && !isSupportedModelFile(o.input);
+        const std::string name = !o.filter.empty() ? o.filter
+                                 : data.render.value("pixelFilter", std::string(fromProject ? "box" : "blackman-harris"));
+        PixelFilter pf{PixelFilterType::Box, 1.0f};
+        if (!parsePixelFilter(name.c_str(), pf.type)) {
+            std::cerr << "Bilinmeyen filtre: " << name << std::endl;
+            return 2;
+        }
+        pf.width = o.filterWidth > 0.0f ? o.filterWidth
+                                        : data.render.value("filterWidth", pf.type == PixelFilterType::Box ? 1.0f : 1.5f);
+        rs.filter = pf;
     }
-    const auto tDone = std::chrono::steady_clock::now();
+    const ImagerSettings imager = imagerFromJson(data.render.value("imager", nlohmann::json::object()));
+    std::shared_ptr<const Camera> camera = cameraFromJson(data.camera, static_cast<float>(o.width) / static_cast<float>(o.height));
 
     std::string ext = pathToUtf8(pathFromUtf8(o.out).extension());
+    if (o.passes && ext != ".exr") {
+        std::cerr << "--passes yalnız .exr çıktıyla kullanılabilir (çok katmanlı EXR)" << std::endl;
+        return 2;
+    }
+    // Son render oturumu: hedef örnek, süre sınırı ya da (uyarlamalıda) yakınsama durdurur.
+    // Süre sınırıyla biten render da gürültü giderilir (eskiden giderilmiyordu).
+    device->setScene(scene);
+    RenderSession session(*device);
+    SessionConfig sc;
+    sc.mode = RenderMode::Final;
+    sc.targetSpp = o.spp;
+    sc.timeLimit = o.timeLimit;
+    sc.aovs = o.denoise || o.passes;
+    sc.passes = o.passes;
+    sc.batchSeconds = 2.0; // ekran önizlemesi yok: büyük partiler (karo önce, önbellek dostu)
+    const auto tRender = std::chrono::steady_clock::now();
+    session.begin(camera, rs, sc);
+    for (const std::string& w : session.warnings()) std::cerr << "Uyarı: " << w << std::endl;
+    while (session.advance()) {
+    }
+    const int sppDone = session.samples();
+    Image img;
+    if (o.denoise) {
+        Denoiser denoiser;
+        img = session.resolveDenoised(denoiser, Denoiser::Quality::High);
+    } else {
+        img = session.resolve();
+    }
+    const auto tDone = std::chrono::steady_clock::now();
+    if (session.converged() || rs.adaptiveSampling)
+        std::cout << "Uyarlamalı: ortalama " << session.averageSamples() << " örnek/piksel (hedef " << o.spp << ")"
+                  << (session.converged() ? ", tüm pikseller eşiğin altında" : "") << "\n";
+
     // Görüntüleyici (bloom, glare, beyaz dengesi...) ekran çıktılarına uygulanır; EXR ham kalır.
     if (ext != ".exr") applyImager(img, imager, rs.exposure);
     bool ok;
-    if (ext == ".exr") ok = saveImageEXR(img, o.out);
+    if (ext == ".exr" && o.passes) {
+        std::vector<Image> storage;
+        const std::vector<ExrLayer> layers = makeExrLayers(session.passes(), session.aovs(), storage);
+        const Image alpha = session.resolveAlpha();
+        ok = saveMultiLayerEXR(o.out, img, &alpha, layers);
+    } else if (ext == ".exr") ok = saveImageEXR(img, o.out);
     else if (ext == ".jpg" || ext == ".jpeg") ok = saveImageJPG(img, o.out, rs.tmo, rs.exposure);
     else ok = saveImagePNG(img, o.out, rs.tmo, rs.exposure);
 
     const double loadS = std::chrono::duration<double>(tLoad - t0).count();
     const double renderS = std::chrono::duration<double>(tDone - tRender).count();
-    const double mrays = static_cast<double>(o.width) * o.height * sppDone / renderS / 1e6;
+    const double mrays = static_cast<double>(o.width) * o.height * session.averageSamples() / renderS / 1e6;
     std::cout << "Sahne: " << loadS << " sn, render: " << renderS << " sn, " << mrays << " M örnek/sn ("
-              << o.width << "x" << o.height << " @ " << o.spp << " spp, " << rs.maxBounces << " sekme)\n";
+              << o.width << "x" << o.height << " @ " << sppDone << " spp, " << rs.maxBounces << " sekme, "
+              << device->info().name << ")\n";
     if (!o.stats.empty()) {
         nlohmann::json s = {{"loadSeconds", loadS}, {"renderSeconds", renderS}, {"width", o.width},
-                            {"height", o.height}, {"spp", o.spp}, {"bounces", rs.maxBounces},
+                            {"height", o.height}, {"spp", sppDone}, {"averageSpp", session.averageSamples()},
+                            {"device", device->info().id}, {"bounces", rs.maxBounces},
                             {"msamplesPerSecond", mrays}, {"threads", o.threads > 0 ? o.threads : static_cast<int>(std::thread::hardware_concurrency())},
                             {"denoise", o.denoise}, {"output", o.out}};
         std::ofstream(pathFromUtf8(o.stats)) << s.dump(2) << "\n";

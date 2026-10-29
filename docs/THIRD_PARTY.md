@@ -16,6 +16,9 @@ vcpkg paketleri `vcpkg.json` (builtin-baseline `eb2d3a3279fd019cb7733072d86900d0
 | Dear ImGui (docking) | vcpkg 1.92.9 | MIT | statik |
 | ImGuizmo | vcpkg 1.10 (yedek: master `105e4fde…`, `src/` düzeni) | MIT | statik |
 | Intel Embree | vcpkg 4.4.x (`geometry-triangle`, `geometry-user`; TBB'siz) | Apache-2.0 | dinamik (`embree4.dll`) |
+| ufbx | `v0.23.1` (`ufbx.c`/`ufbx.h`, SHA-256 sabitli `file(DOWNLOAD)`) | MIT ya da kamu malı (Unlicense) | statik (`photon_ufbx`, `photon_io`) |
+| Alembic | `1.8.12` (yalnız Ogawa; HDF5, Python, araçlar kapalı); önce kurulu paket aranır | BSD-3-Clause | statik (`photon_io`), `PHOTON_ENABLE_ALEMBIC`, CMake ≥ 3.29 |
+| Imath | `v3.2.3` (Alembic bağımlılığı) | BSD-3-Clause | statik |
 | Intel Open Image Denoise | 2.5.1, resmi Windows paketi (`scripts/fetch_deps.ps1` → `third_party/oidn`) | Apache-2.0 (oneTBB: Apache-2.0) | dinamik (`OpenImageDenoise*.dll`, `tbb12.dll`) |
 
 ## Varlıklar (assets/)
@@ -38,6 +41,12 @@ vcpkg paketleri `vcpkg.json` (builtin-baseline `eb2d3a3279fd019cb7733072d86900d0
 | Atmosfer katsayıları (Rayleigh, Mie, ozon) | Nishita 1993; Bruneton & Neyret 2008 |
 | Güneş konumu | NOAA General Solar Position Calculations |
 | Metal n, k değerleri (preset'lerin F0 ve F82 tonu) | refractiveindex.info (Johnson & Christy 1972, Rakić 1995) |
+
+## Test verisi (dağıtılmaz)
+
+| Ne | Kaynak | Lisans |
+| --- | --- | --- |
+| 5 FBX dosyası (Blender 2.79/2.93, 3ds Max 2009; SHA-256 sabitli) | ufbx deposu `data/` | ufbx deposunun lisansı (MIT / kamu malı) |
 
 ## Geliştirme araçları (dağıtılmaz)
 

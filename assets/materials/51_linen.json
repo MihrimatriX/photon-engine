@@ -3,9 +3,15 @@
   "name": "Keten",
   "category": "Kumaş",
   "type": "generic",
-  "baseColor": [0.72, 0.67, 0.57],
+  "baseColor": [
+    0.72,
+    0.67,
+    0.57
+  ],
   "roughness": 0.9,
   "metallic": 0,
   "specular": 0.2,
-  "sheen": 0.7
+  "sheen": 0.7,
+  "diffuseRoughness": 0.8,
+  "sheenRoughness": 0.5
 }

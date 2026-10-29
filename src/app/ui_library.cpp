@@ -229,7 +229,8 @@ void Application::drawLibraryStudios() {
 void Application::drawLibraryModels() {
     const ui::Palette& pal = ui::palette();
     if (ui::PrimaryButton(ICON_UPLOAD "  Model içe aktar…", ImVec2(-FLT_MIN, 0))) openModelDialog();
-    ui::Tooltip("OBJ, glTF, GLB. Dosyayı pencereye sürükleyip bırakmak da yeterli.");
+    ui::Tooltip("FBX, OBJ, glTF/GLB, Alembic (.abc). Dosyayı pencereye sürükleyip bırakmak da yeterli: "
+                "viewport'a bırakılan model imlecin altındaki yüzeye konur.");
 
     // Temel şekiller: tıkla → sahnenin yanına; viewport'a sürükle → imlecin altındaki yüzeye.
     ImGui::SeparatorText("Temel şekiller");

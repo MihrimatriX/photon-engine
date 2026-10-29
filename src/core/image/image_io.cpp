@@ -22,7 +22,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <vector>
 
@@ -176,6 +178,94 @@ bool saveImageEXR(const Image& img, const std::string& path) {
         return false;
     }
     return true;
+}
+
+bool saveMultiLayerEXR(const std::string& path, const Image& beauty, const Image* alpha,
+                       const std::vector<ExrLayer>& layers) {
+    const int w = beauty.width(), h = beauty.height();
+    if (w <= 0 || h <= 0) return false;
+    const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
+    struct Channel {
+        std::string name;
+        std::vector<float> plane;
+        bool full = false;
+    };
+    std::vector<Channel> channels;
+    auto addPlane = [&](const std::string& name, const Image& img, int c, bool full) {
+        if (img.width() != w || img.height() != h) return;
+        Channel ch{name, std::vector<float>(n), full};
+        const float* px = img.data();
+        for (size_t i = 0; i < n; ++i) ch.plane[i] = px[i * 3 + static_cast<size_t>(c)];
+        channels.push_back(std::move(ch));
+    };
+    addPlane("R", beauty, 0, false);
+    addPlane("G", beauty, 1, false);
+    addPlane("B", beauty, 2, false);
+    if (alpha) addPlane("A", *alpha, 0, false);
+    for (const ExrLayer& l : layers) {
+        if (!l.image) continue;
+        const int count = static_cast<int>(std::strlen(l.suffixes));
+        for (int c = 0; c < count && c < 3; ++c) addPlane(l.name + "." + l.suffixes[c], *l.image, c, l.fullFloat);
+    }
+    // OpenEXR kanalları ada göre sıralı saklar; okuyucular sıralı başlık bekler.
+    std::sort(channels.begin(), channels.end(), [](const Channel& a, const Channel& b) { return a.name < b.name; });
+
+    std::vector<EXRChannelInfo> infos(channels.size());
+    std::vector<int> pixelTypes(channels.size(), TINYEXR_PIXELTYPE_FLOAT), stored(channels.size());
+    std::vector<unsigned char*> planes(channels.size());
+    for (size_t i = 0; i < channels.size(); ++i) {
+        std::memset(&infos[i], 0, sizeof(EXRChannelInfo));
+        std::strncpy(infos[i].name, channels[i].name.c_str(), sizeof(infos[i].name) - 1);
+        stored[i] = channels[i].full ? TINYEXR_PIXELTYPE_FLOAT : TINYEXR_PIXELTYPE_HALF;
+        planes[i] = reinterpret_cast<unsigned char*>(channels[i].plane.data());
+    }
+    EXRHeader header;
+    InitEXRHeader(&header);
+    EXRImage exrImage;
+    InitEXRImage(&exrImage);
+    exrImage.num_channels = static_cast<int>(channels.size());
+    exrImage.images = planes.data();
+    exrImage.width = w;
+    exrImage.height = h;
+    header.num_channels = static_cast<int>(channels.size());
+    header.channels = infos.data();
+    header.pixel_types = pixelTypes.data();
+    header.requested_pixel_types = stored.data();
+    header.compression_type = TINYEXR_COMPRESSIONTYPE_ZIP;
+
+    // Belleğe yaz, sonra UTF-8 yolla dosyaya (Türkçe karakterli klasörler Windows'ta da çalışsın).
+    unsigned char* mem = nullptr;
+    const char* err = nullptr;
+    const size_t size = SaveEXRImageToMemory(&exrImage, &header, &mem, &err);
+    if (size == 0 || !mem) {
+        std::cerr << "EXR Save Error: " << (err ? err : "unknown") << std::endl;
+        FreeEXRErrorMessage(err);
+        return false;
+    }
+    std::ofstream out(pathFromUtf8(path), std::ios::binary);
+    out.write(reinterpret_cast<const char*>(mem), static_cast<std::streamsize>(size));
+    std::free(mem);
+    return static_cast<bool>(out);
+}
+
+std::vector<std::string> readExrChannelNames(const std::string& path) {
+    std::vector<std::string> names;
+    std::ifstream in(pathFromUtf8(path), std::ios::binary);
+    if (!in) return names;
+    const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXRVersion version;
+    if (ParseEXRVersionFromMemory(&version, bytes.data(), bytes.size()) != TINYEXR_SUCCESS || version.multipart)
+        return names;
+    EXRHeader header;
+    InitEXRHeader(&header);
+    const char* err = nullptr;
+    if (ParseEXRHeaderFromMemory(&header, &version, bytes.data(), bytes.size(), &err) != TINYEXR_SUCCESS) {
+        FreeEXRErrorMessage(err);
+        return names;
+    }
+    for (int i = 0; i < header.num_channels; ++i) names.emplace_back(header.channels[i].name);
+    FreeEXRHeader(&header);
+    return names;
 }
 
 std::optional<Image> loadImageHDR(const std::string& path) {

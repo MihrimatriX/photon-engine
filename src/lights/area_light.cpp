@@ -1,6 +1,5 @@
-// area_light.cpp — Dikdörtgen ve mesh alan ışıklarının örneklenmesi ve pdf'i.
+// area_light.cpp — Dikdörtgen ve üçgen alan ışıklarının örneklenmesi, pdf'i ve sınırları.
 #include "lights/area_light.h"
-#include "geometry/mesh.h"
 #include "core/math/constants.h"
 #include "core/math/frame.h"
 #include "core/sampling/sampling.h"
@@ -174,7 +173,7 @@ float AreaLight::pdfLi(const Vec3f& ref, const Vec3f& pLight) const {
     float du = d.dot(m_u);
     float dv = d.dot(m_v);
     float det = uu * vv - uv * uv;
-    if (std::abs(det) <= 1e-12f) return 0.0f;
+    if (!(std::abs(det) > 1e-12f * uu * vv)) return 0.0f; // göreli: mm ve km ölçekli ışıklar
 
     float s = (vv * du - uv * dv) / det;
     float t = (uu * dv - uv * du) / det;
@@ -198,124 +197,79 @@ Color3f AreaLight::power() const {
     return m_radiance * m_area * PI;
 }
 
-// Üçgen seçimi için alan CDF'i: büyük üçgen orantılı olarak daha sık seçilir.
-// P(üçgen i) = A_i / A, üçgen içinde düzgün örnekleme p = 1/A_i → birleşik alan pdf'i
-// (A_i / A) · (1 / A_i) = 1/A, yani tüm mesh yüzeyinde düzgün dağılım.
-MeshLight::MeshLight(const TriangleMesh* mesh, const Color3f& radiance)
-    : m_mesh(mesh), m_radiance(radiance) {
-    if (!m_mesh) return;
-    size_t n = m_mesh->numTriangles();
-    m_cdf.resize(n);
-    float sum = 0.0f;
-    Vec3f centroid(0.0f);
-    for (size_t i = 0; i < n; ++i) {
-        const float a = m_mesh->triangleArea(i);
-        sum += a;
-        m_cdf[i] = sum;
-        Vec3f p0, p1, p2;
-        m_mesh->triangleVertices(i, p0, p1, p2);
-        centroid += (p0 + p1 + p2) * (a / 3.0f);
-    }
-    m_area = sum;
-    m_center = sum > 0.0f ? centroid / sum : centroid;
+TriangleLight::TriangleLight(const Vec3f& p0, const Vec3f& p1, const Vec3f& p2, const Color3f& radiance)
+    : m_p0(p0), m_p1(p1), m_p2(p2), m_radiance(radiance) {
+    const Vec3f n = (p1 - p0).cross(p2 - p0);
+    const float len = n.length();
+    m_area = 0.5f * len;
+    m_normal = len > 0.0f ? n / len : Vec3f(0, 1, 0);
 }
 
-float MeshLight::importance(const Vec3f& p, const Vec3f& n) const {
-    const Vec3f d = m_center - p;
+float TriangleLight::importance(const Vec3f& p, const Vec3f& n) const {
+    const Vec3f d = (m_p0 + m_p1 + m_p2) * (1.0f / 3.0f) - p;
     const float dist2 = d.lengthSquared();
     const float lum = std::max(0.0f, m_radiance.luminance());
     if (!(dist2 > 0.0f)) return lum * TWO_PI;
-    // Eğri yayıcı (ampul, şerit): ortalama |cosθl| ≈ 0.5.
-    const float omega = std::min(m_area * 0.5f / dist2, TWO_PI);
-    return lum * omega * receiverCosine(n, d / std::sqrt(dist2));
+    const Vec3f w = d / std::sqrt(dist2);
+    const float cosL = std::max(std::abs(w.dot(m_normal)), 0.2f);
+    const float omega = std::min(m_area * cosL / dist2, TWO_PI);
+    return lum * omega * receiverCosine(n, w);
 }
 
-float MeshLight::pdfLiHit(const Vec3f& ref, const SurfaceInteraction& hit) const {
-    if (m_area <= 0.0f) return 0.0f;
+bool TriangleLight::bounds(LightBounds& out) const {
+    if (!(m_area > 0.0f) || m_radiance.isBlack()) return false;
+    out.bounds = AABB(m_p0.cwiseMin(m_p1).cwiseMin(m_p2), m_p0.cwiseMax(m_p1).cwiseMax(m_p2));
+    out.w = m_normal;
+    out.phi = std::max(0.0f, m_radiance.luminance()) * m_area * PI;
+    out.cosThetaO = 1.0f;
+    out.cosThetaE = 0.0f;
+    out.twoSided = true;
+    return true;
+}
+
+float TriangleLight::pdfLiHit(const Vec3f& ref, const SurfaceInteraction& hit) const {
     const Vec3f toLight = hit.point - ref;
     const float distSq = toLight.lengthSquared();
-    if (distSq <= 0.0f) return 0.0f;
-    const Vec3f ng = hit.ng.lengthSquared() > 0.0f ? hit.ng.normalized() : hit.normal;
-    return areaSolidAnglePdf(distSq, std::abs((toLight / std::sqrt(distSq)).dot(ng)), m_area);
+    if (!(distSq > 0.0f)) return 0.0f;
+    return areaSolidAnglePdf(distSq, std::abs((toLight / std::sqrt(distSq)).dot(m_normal)), m_area);
 }
 
-LightSample MeshLight::sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const {
+LightSample TriangleLight::sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const {
     LightSample ls;
-    if (!m_mesh || m_area <= 0.0f || m_radiance.isBlack() || m_cdf.empty()) return ls;
-
-    // sample.x iki kez kullanılır: önce CDF'te ikili aramayla üçgeni seçer, sonra seçilen aralık
-    // içindeki konumu u0 = (pick - prev) / triArea ile yeniden [0,1)'e ölçeklenir. Yeni rastgele
-    // sayı harcamadan örnek dağılımı korunur. 0.999 kırpması pick'in m_area'ya eşit olup son
-    // elemanı aşmasını önler.
-    float pick = std::clamp(sample.x, 0.0f, 0.999f) * m_area;
-    auto it = std::lower_bound(m_cdf.begin(), m_cdf.end(), pick);
-    size_t tri = static_cast<size_t>(std::min(it, m_cdf.end() - 1) - m_cdf.begin());
-    float prev = tri == 0 ? 0.0f : m_cdf[tri - 1];
-    float triArea = std::max(m_cdf[tri] - prev, 1e-12f);
-    float u0 = (pick - prev) / triArea;
-
-    Vec3f p0, p1, p2;
-    m_mesh->triangleVertices(tri, p0, p1, p2);
-    // Üçgende düzgün örnek (PBRT-v3 §13.6.5): b = (1 - √u, v·√u). Karekök olmadan noktalar
-    // bir köşede yığılırdı. Barisentrik ağırlıklarla p = b0·p0 + b1·p1 + b2·p2.
-    Vec2f b = uniformSampleTriangle(Vec2f(std::clamp(u0, 0.0f, 1.0f), sample.y));
-    float b0 = 1.0f - b.x - b.y;
-    Vec3f pLight = p0 * b0 + p1 * b.x + p2 * b.y;
-    Vec3f n = (p1 - p0).cross(p2 - p0);
-    float len = n.length();
-    if (len <= 1e-12f) return ls;
-    n = n / len;
-
-    Vec3f toLight = pLight - si.point;
-    float distSq = toLight.lengthSquared();
+    if (!(m_area > 0.0f) || m_radiance.isBlack()) return ls;
+    // Üçgende düzgün örnek (PBRT-v3 §13.6.5): b = (1 − √u, v·√u). Karekök olmadan noktalar
+    // bir köşede yığılırdı. p = b0·p0 + b1·p1 + b2·p2.
+    const Vec2f b = uniformSampleTriangle(sample);
+    const Vec3f pLight = m_p0 * (1.0f - b.x - b.y) + m_p1 * b.x + m_p2 * b.y;
+    const Vec3f toLight = pLight - si.point;
+    const float distSq = toLight.lengthSquared();
     ls.distance = std::sqrt(distSq);
-    if (ls.distance <= 0.0f) return ls;
+    if (!(ls.distance > 0.0f)) return ls;
     ls.wi = toLight / ls.distance;
-    float pdf = areaSolidAnglePdf(distSq, std::abs(ls.wi.dot(n)), m_area);
-    if (pdf <= 0.0f) return ls;
+    const float pdf = areaSolidAnglePdf(distSq, std::abs(ls.wi.dot(m_normal)), m_area);
+    if (!(pdf > 0.0f)) return ls;
     ls.Li = m_radiance;
     ls.pdf = pdf;
     return ls;
 }
 
-float MeshLight::pdfLi(const Vec3f& ref, const Vec3f& pLight) const {
-    // ponytail: linear scan to recover which triangle owns the hit. Upgrade = store the tri id on the isect.
-    // Noktanın hangi üçgende olduğu bulunur: düzleme uzaklık eşiği, sonra barisentrik koordinatlar
-    // (Gram matrisi + Cramer, AreaLight::pdfLi ile aynı fikir). Pdf, sampleLi ile tutarlı olsun diye
-    // üçgenin değil mesh'in TOPLAM alanıyla (1/A) hesaplanır.
-    if (!m_mesh || m_area <= 0.0f) return 0.0f;
-    size_t nTris = m_mesh->numTriangles();
-    for (size_t i = 0; i < nTris; ++i) {
-        Vec3f p0, p1, p2;
-        m_mesh->triangleVertices(i, p0, p1, p2);
-        Vec3f e0 = p1 - p0;
-        Vec3f e1 = p2 - p0;
-        Vec3f n = e0.cross(e1);
-        float area2 = n.length();
-        if (area2 <= 1e-12f) continue;
-        Vec3f nh = n / area2;
-        if (std::abs((pLight - p0).dot(nh)) > 1e-3f * (1.0f + area2)) continue;
-        float d00 = e0.dot(e0), d01 = e0.dot(e1), d11 = e1.dot(e1);
-        Vec3f e2 = pLight - p0;
-        float d20 = e2.dot(e0), d21 = e2.dot(e1);
-        float denom = d00 * d11 - d01 * d01;
-        if (std::abs(denom) <= 1e-12f) continue;
-        float v = (d11 * d20 - d01 * d21) / denom;
-        float w = (d00 * d21 - d01 * d20) / denom;
-        float u = 1.0f - v - w;
-        const float eps = 1e-3f;
-        if (u < -eps || v < -eps || w < -eps) continue;
-        Vec3f toLight = pLight - ref;
-        float distSq = toLight.lengthSquared();
-        if (distSq <= 0.0f) return 0.0f;
-        Vec3f wi = toLight / std::sqrt(distSq);
-        return areaSolidAnglePdf(distSq, std::abs(wi.dot(nh)), m_area);
-    }
-    return 0.0f;
+Color3f TriangleLight::power() const {
+    return m_radiance * (m_area * TWO_PI); // iki yüz
 }
 
-Color3f MeshLight::power() const {
-    return m_radiance * m_area * PI;
+bool AreaLight::bounds(LightBounds& out) const {
+    if (!(m_area > 0.0f) || m_radiance.isBlack()) return false;
+    AABB box(m_position);
+    box.merge(m_position + m_u);
+    box.merge(m_position + m_v);
+    box.merge(m_position + m_u + m_v);
+    out.bounds = box;
+    out.w = m_normal;
+    out.phi = std::max(0.0f, m_radiance.luminance()) * m_area * PI;
+    out.cosThetaO = 1.0f;
+    out.cosThetaE = 0.0f;
+    out.twoSided = true; // sampleLi iki yüzlü (|cos θl|)
+    return true;
 }
 
 } // namespace photon

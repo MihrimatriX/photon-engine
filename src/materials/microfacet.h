@@ -99,6 +99,34 @@ inline Vec3f ggxSampleVisibleNormal(Vec3f wo, float ax, float ay, float u1, floa
 /// telafi etmek için kullanılır (Turquin 2019, Kulla–Conty 2017). Ön hesaplı tablo.
 float ggxDirectionalAlbedo(float cosTheta, float alpha);
 
+/// Schlick Fresnel'li (F0) tek saçılmalı GGX lobunun, Turquin çoklu saçılma çarpanı
+/// (1 + F0·(1/E − 1)) dahil yönlü albedosu E_s(μ, α, F0). Yalıtkan bir speküler katmanın
+/// altındaki tabana (difüz, yüzey altı) ne kadar ışık kaldığını söyler: 1 − E_s.
+/// Schlick F0'da doğrusal olduğu için iki tablodan kesin hesaplanır (split-sum gibi):
+///   E_s = (F0·E_a + E_b) · (1 + F0·(1/E − 1)),  E_a = ∫(1 − (1−c)⁵)·f cos,  E_b = ∫(1−c)⁵·f cos.
+float ggxSchlickAlbedo(float cosTheta, float alpha, float f0);
+
+/// E_s'nin yarıküre ortalaması E_avg = 2∫ E_s(μ) μ dμ (Kulla–Conty normalizasyonu).
+float ggxSchlickAverageAlbedo(float alpha, float f0);
+
+/// Charlie sheen (Estevez & Kulla 2017) dağılımı: kumaş liflerinin yatay açıda parlaması.
+/// D(h) = (2 + 1/α) · sin^(1/α)θh / 2π,  α = r².
+inline float charlieD(float cosH, float roughness) {
+    const float a = std::max(roughness * roughness, 1e-4f);
+    const float inv = 1.0f / a;
+    const float sin2 = std::max(0.0f, 1.0f - cosH * cosH);
+    return (2.0f + inv) * std::pow(sin2, 0.5f * inv) * (0.5f * INV_PI);
+}
+
+/// Neubelt–Pettineo görünürlüğü V = 1 / (4(μi + μo − μi·μo)) (Filament, glTF örnekleri).
+inline float charlieV(float cosI, float cosO) {
+    return 1.0f / std::max(4.0f * (cosI + cosO - cosI * cosO), 1e-6f);
+}
+
+/// Charlie·Neubelt lobunun yönlü albedosu E_sh(μ, r) (renk = 1). Neubelt görünürlüğü fiziksel
+/// bir modelden gelmediği için yatayda 1'i aşabilir; malzeme lobu bu tabloyla normalleştirir.
+float charlieSheenAlbedo(float cosTheta, float roughness);
+
 /// x⁵ — std::pow(x, 5) yerine iki çarpma + bir çarpma (Schlick için).
 inline float pow5(float x) {
     float x2 = x * x;

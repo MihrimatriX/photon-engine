@@ -55,31 +55,45 @@ struct PixelSample {
     Color3f albedo;
     Color3f normal;
     float alpha = 1.0f;
+    // Render geçişleri (yalnız istendiğinde dolar)
+    LightPasses light;
+    float depth = 0.0f;
+    Vec3f position;
+    Color3f objectId;
+    Color3f materialId;
 };
 
 // Tek bir alt-piksel örneği. AOV istendiğinde ya da arka plan modu ortam değilse
 // path tracer ilk kesişimi bize bildirir (ayrı bir birincil ışın atılmaz): ıskalayan
 // kamera ışınına arka plan rengi/şeffaflık uygulanır, çarpanda albedo ve normal alınır.
 PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& integrator,
-                       Sampler& sampler, int x, int y, int sampleIndex,
-                       int width, int height, bool wantAovs) {
+                       const PixelFilterSampler& filter, Sampler& sampler, int x, int y, int sampleIndex,
+                       int width, int height, bool wantAovs, bool wantPasses = false) {
     sampler.startPixel(x, y);
     sampler.startSample(sampleIndex);
 
-    Vec2f jitter = sampler.get2D();
-    Vec2f screen = rasterToScreen(static_cast<float>(x) + jitter.x, static_cast<float>(y) + jitter.y,
+    // Alt-piksel konumu filtrenin dağılımından (filtre önem örneklemesi): örnek pikselin
+    // merkezinden filtre yarıçapı kadar uzağa düşebilir, ağırlığı yine 1'dir.
+    const Vec2f offset = filter.sample(sampler.get2D());
+    Vec2f screen = rasterToScreen(static_cast<float>(x) + 0.5f + offset.x, static_cast<float>(y) + 0.5f + offset.y,
                                   width, height);
     Vec2f lensSample = sampler.get2D();
     Ray ray = camera.generateRay(screen.x, screen.y, lensSample);
 
     PixelSample out;
     const Background& bg = scene.background();
-    if (!wantAovs && bg.mode == Background::Mode::Environment) {
+    if (!wantAovs && !wantPasses && bg.mode == Background::Mode::Environment) {
         out.L = integrator.Li(ray, scene, sampler);
         return out;
     }
     PathTracer::PrimaryHit primary;
-    out.L = integrator.Li(ray, scene, sampler, &primary);
+    out.L = integrator.Li(ray, scene, sampler, &primary, wantPasses ? &out.light : nullptr);
+    if (wantPasses && primary.hit) {
+        out.depth = (primary.isect.point - ray.origin).length();
+        out.position = primary.isect.point;
+        out.objectId = idColor(scene.nodeUidOf(primary.isect));
+        out.materialId = idColor(reinterpret_cast<uintptr_t>(primary.isect.material));
+    }
     if (primary.catcherAlpha >= 0.0f) {
         // Gölge yakalayıcı: kapsama = gölgenin opaklığı; albedo = görünen arka plan.
         out.albedo = clamp01(primary.catcherBackground);
@@ -109,6 +123,15 @@ PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& int
     return out;
 }
 
+void addPasses(RenderPassFilms* passes, int x, int y, const PixelSample& s) {
+    if (!passes) return;
+    for (int k = 0; k < static_cast<int>(LightPass::Count); ++k) passes->light[k].addSample(x, y, s.light.c[k]);
+    passes->depth.addSample(x, y, Color3f(s.depth));
+    passes->position.addSampleSigned(x, y, Color3f(s.position.x, s.position.y, s.position.z));
+    passes->objectId.addSample(x, y, s.objectId);
+    passes->materialId.addSample(x, y, s.materialId);
+}
+
 void addAovs(AovFilms* aovs, int x, int y, const PixelSample& s) {
     if (!aovs) return;
     aovs->albedo.addSample(x, y, s.albedo);
@@ -130,88 +153,87 @@ void denoiseWithAovs(Image& out, const AovFilms* aovs) {
 
 // Owen karıştırmalı Sobol (Burley 2020): her piksel ve boyut kendi karıştırmasını
 // alır, ilerlemeli render'da her ön-ek (1, 2, 4... örnek) iyi tabakalanır.
+Color3f idColor(uint64_t id) {
+    if (id == 0) return Color3f::black();
+    // splitmix64 → [0,1) ton; altın oran adımı komşu kimlikleri belirgin ayırır.
+    uint64_t z = id + 0x9e3779b97f4a7c15ull;
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+    z ^= z >> 31;
+    const float h = std::fmod(static_cast<float>(z >> 40) * 0x1p-24f + 0.618034f, 1.0f) * 6.0f;
+    const int i = static_cast<int>(h) % 6;
+    const float f = h - std::floor(h);
+    const float v = 1.0f, s = 0.75f, p0 = v * (1.0f - s), q = v * (1.0f - s * f), t = v * (1.0f - s * (1.0f - f));
+    switch (i) {
+        case 0: return Color3f(v, t, p0);
+        case 1: return Color3f(q, v, p0);
+        case 2: return Color3f(p0, v, t);
+        case 3: return Color3f(p0, q, v);
+        case 4: return Color3f(t, p0, v);
+        default: return Color3f(v, p0, q);
+    }
+}
+
+std::vector<ExrLayer> makeExrLayers(const RenderPassFilms* passes, const AovFilms* aovs, std::vector<Image>& storage) {
+    std::vector<ExrLayer> layers;
+    storage.clear();
+    storage.reserve(static_cast<size_t>(LightPass::Count) + 8); // işaretçiler geçerli kalsın
+    auto add = [&](const std::string& name, const Film& f, const char* suffixes, bool full) {
+        if (f.width() <= 0) return;
+        storage.push_back(f.resolve());
+        layers.push_back(ExrLayer{name, &storage.back(), suffixes, full});
+    };
+    if (passes) {
+        for (int k = 0; k < static_cast<int>(LightPass::Count); ++k)
+            add(lightPassName(static_cast<LightPass>(k)), passes->light[k], "RGB", false);
+        add("Depth", passes->depth, "Z", true);
+        add("Position", passes->position, "XYZ", true);
+        add("ObjectID", passes->objectId, "RGB", false);
+        add("MaterialID", passes->materialId, "RGB", false);
+    }
+    if (aovs) {
+        add("DiffCol", aovs->albedo, "RGB", false);
+        add("Normal", aovs->normal, "XYZ", false);
+    }
+    return layers;
+}
+
 std::unique_ptr<Sampler> createRenderSampler(int samplesPerPixel, uint64_t seed) {
     (void)samplesPerPixel;
     return createSobolSampler(seed);
 }
 
 Image Renderer::render(const Scene& scene, const Camera& camera, const RenderSettings& settings,
-                       const std::atomic<bool>* cancel) {
+                       const std::atomic<bool>* cancel, RenderPassFilms* passes, AovFilms* aovsOut) {
     Film film(settings.width, settings.height);
-    AovFilms aovs;
-    const bool wantAovs = settings.denoiseEnabled;
-    if (wantAovs) aovs.resize(settings.width, settings.height);
+    AovFilms localAovs;
+    AovFilms* aovs = aovsOut ? aovsOut : (settings.denoiseEnabled ? &localAovs : nullptr);
+    if (aovs) aovs->resize(settings.width, settings.height);
+    if (passes) passes->resize(settings.width, settings.height);
 
-    auto startTime = std::chrono::high_resolution_clock::now();
-
-    std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
-    PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
-    integrator.setClampIndirect(settings.clampIndirect);
-    std::unique_ptr<ThreadPool> ownedPool;
-    ThreadPool* pool = makePoolOverride(settings, ownedPool);
-
-    const int w = settings.width;
-    const int h = settings.height;
+    const auto startTime = std::chrono::high_resolution_clock::now();
     const int spp = std::max(1, settings.samplesPerPixel);
-
-    if (!settings.adaptiveSampling) {
-        parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-            const uint64_t tileSeed = 12345; // karo boyutundan bağımsız, deterministik
-            std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
-
-            for (int y = yBegin; y < yEnd; ++y) {
-                for (int x = xBegin; x < xEnd; ++x) {
-                    for (int s = 0; s < spp; ++s) {
-                        PixelSample ps = tracePixel(scene, camera, integrator, *tileSampler, x, y, s, w, h, wantAovs);
-                        film.addSample(x, y, ps.L);
-                        if (wantAovs) addAovs(&aovs, x, y, ps);
-                    }
-                }
-            }
-        }, settings.tileSize, pool, cancel);
-    } else {
-        // Uyarlamalı (gürültü eşiği): her piksel en az minAdaptiveSamples alır, sonra her 8
-        // örnekte bir göreli standart hatasına bakılır; eşiğin altına inen piksel durur. Bütçe
-        // böylece kenarlara, kostiklere ve gölgelere gider; düz fon erken biter.
-        const int minSpp = std::clamp(settings.minAdaptiveSamples, 2, spp);
-        const float threshold = std::max(1e-4f, settings.noiseThreshold);
-        std::atomic<uint64_t> taken{0};
-        parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-            std::unique_ptr<Sampler> tileSampler = baseSampler->clone(12345);
-            uint64_t local = 0;
-            for (int y = yBegin; y < yEnd; ++y) {
-                for (int x = xBegin; x < xEnd; ++x) {
-                    for (int s = 0; s < spp; ++s) {
-                        PixelSample ps = tracePixel(scene, camera, integrator, *tileSampler, x, y, s, w, h, wantAovs);
-                        film.addSample(x, y, ps.L);
-                        if (wantAovs) addAovs(&aovs, x, y, ps);
-                        ++local;
-                        if (s + 1 >= minSpp && ((s + 1) & 7) == 0 && film.relativeError(x, y) < threshold) break;
-                    }
-                }
-            }
-            taken.fetch_add(local, std::memory_order_relaxed);
-        }, settings.tileSize, pool, cancel);
-        std::cout << "Uyarlamalı: ortalama " << static_cast<double>(taken.load()) / (static_cast<double>(w) * h)
+    const SampleBatchResult r = renderSamples(scene, camera, settings, film, 0, spp, cancel, aovs, passes);
+    if (settings.adaptiveSampling)
+        std::cout << "Uyarlamalı: ortalama "
+                  << static_cast<double>(r.samplesTraced) / (static_cast<double>(settings.width) * settings.height)
                   << " örnek/piksel (hedef " << spp << ")" << std::endl;
-    }
 
     Image out = film.resolve();
     if (film.rejectedSamples() > 0) {
         std::cerr << "Rejected " << film.rejectedSamples() << " non-finite or negative samples." << std::endl;
     }
-    if (settings.denoiseEnabled && !(cancel && cancel->load())) {
-        denoiseWithAovs(out, wantAovs ? &aovs : nullptr);
-    }
+    if (settings.denoiseEnabled && r.completed) denoiseWithAovs(out, aovs);
 
     std::chrono::duration<double> elapsed = std::chrono::high_resolution_clock::now() - startTime;
-    std::cout << "Render " << w << "x" << h << " @ " << spp << " spp: " << elapsed.count() << " s" << std::endl;
+    std::cout << "Render " << settings.width << "x" << settings.height << " @ " << spp << " spp: " << elapsed.count()
+              << " s" << std::endl;
     return out;
 }
 
 Image Renderer::renderProgressive(const Scene& scene, const Camera& camera, const RenderSettings& settings,
                                   const std::function<bool(const Film&, int)>& onPass,
-                                  AovFilms* aovsOut) {
+                                  AovFilms* aovsOut, RenderPassFilms* passes) {
     Film film(settings.width, settings.height);
     AovFilms localAovs;
     AovFilms* aovs = aovsOut ? aovsOut : (settings.denoiseEnabled ? &localAovs : nullptr);
@@ -219,7 +241,7 @@ Image Renderer::renderProgressive(const Scene& scene, const Camera& camera, cons
 
     bool cancelled = false;
     for (int s = 0; s < settings.samplesPerPixel; ++s) {
-        renderSamplePass(scene, camera, settings, film, s, nullptr, aovs);
+        renderSamplePass(scene, camera, settings, film, s, nullptr, aovs, passes);
         if (onPass && !onPass(film, s + 1)) {
             cancelled = true;
             break;
@@ -233,28 +255,40 @@ Image Renderer::renderProgressive(const Scene& scene, const Camera& camera, cons
 
 bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const RenderSettings& settings,
                                 Film& accum, int passIndex, const std::atomic<bool>* cancel,
-                                AovFilms* aovs) {
+                                AovFilms* aovs, RenderPassFilms* passes) {
     if (accum.width() != settings.width || accum.height() != settings.height) {
         accum.resize(settings.width, settings.height);
     }
+    return renderSamples(scene, camera, settings, accum, passIndex, 1, cancel, aovs, passes).completed;
+}
+
+SampleBatchResult Renderer::renderSamples(const Scene& scene, const Camera& camera, const RenderSettings& settings,
+                                          Film& accum, int firstSample, int count, const std::atomic<bool>* cancel,
+                                          AovFilms* aovs, RenderPassFilms* passes) {
+    SampleBatchResult result;
     // Çağıranlar RenderSettings'i eşzamanlı değiştirebilir; boyutlar filmden alınır.
     const int w = accum.width();
     const int h = accum.height();
-    if (w <= 0 || h <= 0) return true;
+    if (w <= 0 || h <= 0 || count <= 0) return result;
     if (aovs && (aovs->albedo.width() != w || aovs->albedo.height() != h)) aovs->resize(w, h);
+    if (passes && (passes->depth.width() != w || passes->depth.height() != h)) passes->resize(w, h);
 
     std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
     PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
     integrator.setClampIndirect(settings.clampIndirect);
+    const PixelFilterSampler filter(settings.filter);
     std::unique_ptr<ThreadPool> ownedPool;
     ThreadPool* pool = makePoolOverride(settings, ownedPool);
 
     // Uyarlamalı örnekleme: kendisi ve 3×3 komşuları gürültü eşiğinin altına inen piksel bu
-    // pass'i atlar (komşuluk: temiz bölgenin içinde gürültülü tek piksel kalmasın).
-    const bool adaptive = settings.adaptiveSampling && passIndex >= std::max(2, settings.minAdaptiveSamples);
+    // partiyi atlar (komşuluk: temiz bölgenin içinde gürültülü tek piksel kalmasın). Parti
+    // içinde de her piksel en az minAdaptiveSamples aldıktan sonra 8 örnekte bir kendi
+    // hatasına bakar; bütçe kenarlara, kostiklere ve gölgelere gider, düz fon erken biter.
+    const float threshold = std::max(1e-4f, settings.noiseThreshold);
+    const int minSpp = std::max(2, settings.minAdaptiveSamples);
+    const bool adaptive = settings.adaptiveSampling;
     std::vector<uint8_t> skipMask;
-    if (adaptive) {
-        const float threshold = std::max(1e-4f, settings.noiseThreshold);
+    if (adaptive && firstSample >= minSpp) {
         std::vector<uint8_t> clean(static_cast<size_t>(w) * static_cast<size_t>(h), 0);
         parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
             for (int y = yBegin; y < yEnd; ++y)
@@ -278,24 +312,38 @@ bool Renderer::renderSamplePass(const Scene& scene, const Camera& camera, const 
     }
 
     const bool wantAovs = aovs != nullptr;
-    return parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-        // Sobol karıştırması pass'ler boyunca SABİT kalmalı; yoksa ardışık örnekler
+    const bool wantPasses = passes != nullptr;
+    const int lastSample = firstSample + count;
+    std::atomic<uint64_t> traced{0};
+    result.completed = parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
+        // Sobol karıştırması partiler boyunca SABİT kalmalı; yoksa ardışık örnekler
         // aynı dizinin devamı olmaz ve tabakalanma kaybolur. Piksel ayrışması içeride.
-        const uint64_t tileSeed = 12345;
+        const uint64_t tileSeed = 12345; // karo boyutundan bağımsız, deterministik
         std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
-
+        uint64_t local = 0;
         for (int y = yBegin; y < yEnd; ++y) {
             // Satır başında iptal kontrolü: büyük karolarda bile tepki ~ms.
-            if (cancel && cancel->load(std::memory_order_relaxed)) return;
+            if (cancel && cancel->load(std::memory_order_relaxed)) break;
             for (int x = xBegin; x < xEnd; ++x) {
-                if (adaptive && skipMask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)])
+                if (!skipMask.empty() && skipMask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)])
                     continue;
-                PixelSample ps = tracePixel(scene, camera, integrator, *tileSampler, x, y, passIndex, w, h, wantAovs);
-                accum.addSample(x, y, ps.L);
-                if (wantAovs) addAovs(aovs, x, y, ps);
+                for (int s = firstSample; s < lastSample; ++s) {
+                    PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h,
+                                                wantAovs, wantPasses);
+                    accum.addSample(x, y, ps.L);
+                    if (wantAovs) addAovs(aovs, x, y, ps);
+                    if (wantPasses) addPasses(passes, x, y, ps);
+                    ++local;
+                    if (adaptive && s + 1 < lastSample && s + 1 >= minSpp && ((s + 1) & 7) == 0 &&
+                        accum.relativeError(x, y) < threshold)
+                        break;
+                }
             }
         }
+        traced.fetch_add(local, std::memory_order_relaxed);
     }, settings.tileSize, pool, cancel);
+    result.samplesTraced = traced.load();
+    return result;
 }
 
 } // namespace photon

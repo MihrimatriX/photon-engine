@@ -26,6 +26,17 @@ struct SurfaceInteraction {
     /// Yolun dalga boyu (nm). 0 = RGB modu. Dispersiyonlu camda integratör seçer ve
     /// malzemeye bu alanla iletir (kırılma indisi dalga boyuna göre değişir).
     float wavelength = 0.0f;
+    /// 'point'in bileşen başına mutlak hata sınırı (PBRT-v4 pError). Yüzeyden çıkan ışın bu
+    /// kadar itilir: ofset sahne ölçeğiyle büyür (mm'lik CAD'de de, metrelik mücevherde de doğru).
+    Vec3f pError;
+    /// Gölge terminatörü noktası (Hanika 2021): kaba üçgenli yumuşak modelde, noktanın köşe
+    /// normallerinin teğet düzlemlerine izdüşümü. Terminatör yakınındaki gölge ışınları buradan
+    /// başlar (ray_spawn.h shadowOrigin); yumuşak normalin "aydınlık" dediği yer kaba üçgen
+    /// tarafından gölgelenmez.
+    Vec3f pSmooth;
+    bool hasSmoothPoint = false;
+    /// Kesişilen primitifin sırası (mesh içindeki üçgen); yoksa −1. Yayıcı mesh pdf'i için.
+    int primIndex = -1;
 
     /// İki normal tutulur: 'normal' daima gelen ışına bakar (malzemeler tek yarıküreyle çalışsın),
     /// 'ng' ise çevrilmemiş dış normaldir. frontFace ışının dışarıdan mı içeriden mi geldiğini

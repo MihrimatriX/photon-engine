@@ -276,6 +276,15 @@ Color3f Dielectric::eval(const Vec3f& wo, const Vec3f& wi, const SurfaceInteract
     return evalRoughLocal(g.wo, g.frame.toLocal(wi), iorAt(si), alphaOf(m_roughness), m_tint);
 }
 
+LobeSplit Dielectric::evalSplit(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {
+    LobeSplit s;
+    const Color3f f = eval(wo, wi, si);
+    const Vec3f& n = si.ng.lengthSquared() > 0.0f ? si.ng : si.normal;
+    if (wo.dot(n) * wi.dot(n) >= 0.0f) s.glossy = f;
+    else s.transmission = f;
+    return s;
+}
+
 float Dielectric::pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const {
     if (sharp(m_roughness)) return 0.0f;
     GlassLocal g = glassFrame(wo, si);
