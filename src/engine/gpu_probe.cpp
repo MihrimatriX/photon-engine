@@ -45,7 +45,9 @@ class Library {
 public:
     explicit Library(const char* name) {
 #if defined(_WIN32)
-        m_handle = LoadLibraryA(name);
+        // Yalnız System32'de ara: uygulama ya da çalışma klasörüne konmuş aynı adlı bir DLL
+        // yüklenmesin (DLL planting).
+        m_handle = LoadLibraryExA(name, nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
 #else
         m_handle = dlopen(name, RTLD_NOW | RTLD_LOCAL);
 #endif
