@@ -22,6 +22,8 @@ struct OrbitCamera {
     float fStop = 2.8f;           ///< Kullanıcıya gösterilen f-durağı
     float focusDistance = 5.0f;
     bool focusExplicit = false;   ///< false: odak yörünge yarıçapını izler
+    float shiftX = 0.0f;          ///< lens kaydırma (kare yüksekliği cinsinden); mimari: dikeyler paralel
+    float shiftY = 0.0f;
     int apertureBlades = 0;       ///< 0 = yuvarlak bokeh; 5..9 = çokgen diyafram
     float bladeRotationDeg = 0.0f;
     bool turntable = false;

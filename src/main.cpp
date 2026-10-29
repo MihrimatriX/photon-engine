@@ -97,9 +97,12 @@ std::unique_ptr<Camera> cameraFromJson(const nlohmann::json& c, float aspect) {
         const float focus = c.value("focusExplicit", false) ? c.value("focusDistance", r) : r;
         auto cam = std::make_unique<ThinLensCamera>(eye, target, Vec3f(0, 1, 0), fov, aspect, aperture, focus);
         cam->setApertureShape(c.value("apertureBlades", 0), c.value("bladeRotation", 0.0f));
+        cam->setShift(c.value("shiftX", 0.0f), c.value("shiftY", 0.0f));
         return cam;
     }
-    return std::make_unique<PerspectiveCamera>(eye, target, Vec3f(0, 1, 0), fov, aspect);
+    auto cam = std::make_unique<PerspectiveCamera>(eye, target, Vec3f(0, 1, 0), fov, aspect);
+    cam->setShift(c.value("shiftX", 0.0f), c.value("shiftY", 0.0f));
+    return cam;
 }
 
 } // namespace

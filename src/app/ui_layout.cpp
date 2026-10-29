@@ -183,6 +183,14 @@ void Application::drawMenuBar() {
         ImGui::MenuItem("Tel kafes bindir", nullptr, &m_s.wireOverlay, m_rasterOk && !isRasterMode(m_s.viewMode));
         ImGui::Separator();
         ImGui::MenuItem(ICON_FILM "  Zaman çizelgesi (kamera animasyonu)", "Alt+T", &m_s.showTimeline);
+        ImGui::Separator();
+        if (ImGui::BeginMenu(ICON_GRID_3X3 "  Kompozisyon kılavuzu")) {
+            const char* guides[] = {"Yok", "Üçler kuralı", "Altın oran", "Merkez ve köşegenler"};
+            for (int i = 0; i < 4; ++i)
+                if (ImGui::MenuItem(guides[i], nullptr, m_s.compositionGuide == i)) m_s.compositionGuide = i;
+            ImGui::EndMenu();
+        }
+        ImGui::MenuItem(ICON_FRAME "  Çıktı kadrajı", nullptr, &m_s.showOutputFrame);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Kamera")) {

@@ -52,6 +52,12 @@ ViewProj viewProj(const OrbitCamera& cam, float aspect) {
     const float orthoH = 2.0f * std::tan(cam.fov * DEG_TO_RAD * 0.5f) * cam.radius;
     vp.proj = cam.orthographic ? Mat4f::ortho(orthoH, aspect, zNear, zFar)
                                : Mat4f::perspective(cam.fov * DEG_TO_RAD, aspect, zNear, zFar);
+    if (!cam.orthographic) {
+        // Lens kaydırma (ışın izleyiciyle aynı): kare yüksekliği cinsinden kayma NDC'de 2·shift'tir;
+        // z ile çarpılan terim eksen dışı (off-axis) izdüşüm verir.
+        vp.proj.data[0][2] = 2.0f * cam.shiftX / aspect;
+        vp.proj.data[1][2] = 2.0f * cam.shiftY;
+    }
     return vp;
 }
 
@@ -176,9 +182,13 @@ void Application::drawViewport() {
         } else if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
                    ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f).x * ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f).x +
                            ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f).y * ImGui::GetMouseDragDelta(ImGuiMouseButton_Left, 0.0f).y < 9.0f) {
-            Vec3f hit;
-            const uint64_t uid = pickAt(u, v, &hit);
-            if (m_s.pickFocus) {
+            Vec3f hit, hitN;
+            const uint64_t uid = pickAt(u, v, &hit, &hitN);
+            if (m_s.pickHighlight) {
+                if (uid) placeHighlight(hit, hitN);
+                else setStatus("Modelin üzerine tıklayın", true);
+                m_s.pickHighlight = io.KeyShift; // Shift basılıysa art arda yerleştirmeye devam
+            } else if (m_s.pickFocus) {
                 if (uid) {
                     m_s.camera.focusDistance = (hit - m_s.camera.position()).length();
                     m_s.camera.focusExplicit = true;
@@ -276,6 +286,7 @@ void Application::drawViewport() {
         ImGui::EndDragDropTarget();
     }
 
+    drawCompositionGuides(origin, size);
     drawViewportOverlay(origin, size);
     drawTimeline(origin, size);
     if (m_s.graph.empty()) drawWelcome(origin, size);
@@ -595,6 +606,65 @@ void Application::renderRasterView() {
     m_rasterTex = m_raster.render(f, items, raster ? m_s.viewMode : ViewMode::Wire, !raster);
 }
 
+// Kompozisyon kılavuzları ve çıktı kadrajı. Kamera dikey görüş açısını korur: çıktı ile viewport'un
+// yüksekliği ortaktır, genişlik çıktının en-boy oranından gelir. Çıktı viewport'tan darsa yanlar
+// karartılır; genişse kadraj taşar (kılavuzlar yine çıktıya göre çizilir, viewport'ta kırpılır).
+void Application::drawCompositionGuides(const ImVec2& origin, const ImVec2& size) {
+    if ((m_s.compositionGuide == 0 && !m_s.showOutputFrame) || size.x < 8.0f || size.y < 8.0f) return;
+    const ui::Palette& pal = ui::palette();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 end(origin.x + size.x, origin.y + size.y);
+    dl->PushClipRect(origin, end, true);
+    ImVec2 f0 = origin, f1 = end;
+    if (m_s.showOutputFrame && m_s.output.width > 0 && m_s.output.height > 0) {
+        const float frameW = size.y * static_cast<float>(m_s.output.width) / static_cast<float>(m_s.output.height);
+        f0.x = origin.x + (size.x - frameW) * 0.5f;
+        f1.x = f0.x + frameW;
+        if (frameW < size.x) {
+            const ImU32 dim = IM_COL32(0, 0, 0, 150);
+            dl->AddRectFilled(origin, ImVec2(f0.x, end.y), dim);
+            dl->AddRectFilled(ImVec2(f1.x, origin.y), end, dim);
+        }
+        dl->AddRect(ImVec2(std::max(f0.x, origin.x), f0.y), ImVec2(std::min(f1.x, end.x), f1.y), ui::col(pal.accent, 0.9f), 0.0f, 0, 1.5f);
+        char label[96];
+        std::snprintf(label, sizeof(label), "%d × %d%s", m_s.output.width, m_s.output.height,
+                      frameW > size.x + 0.5f ? "  (çıktı daha geniş: kenarlarda daha fazlası görünür)" : "");
+        const ImVec2 lp(std::max(f0.x, origin.x) + 8.0f, end.y - ImGui::GetFontSize() - 8.0f);
+        dl->AddText(ImVec2(lp.x + 1, lp.y + 1), IM_COL32(0, 0, 0, 160), label);
+        dl->AddText(lp, ui::col(pal.accent), label);
+    }
+    const float W = f1.x - f0.x, H = f1.y - f0.y;
+    auto at = [&](float fx, float fy) { return ImVec2(f0.x + W * fx, f0.y + H * fy); };
+    auto line = [&](const ImVec2& a, const ImVec2& b) {
+        dl->AddLine(ImVec2(a.x + 1, a.y + 1), ImVec2(b.x + 1, b.y + 1), IM_COL32(0, 0, 0, 90), 1.0f); // açık zeminde de görünsün
+        dl->AddLine(a, b, IM_COL32(255, 255, 255, 150), 1.0f);
+    };
+    switch (m_s.compositionGuide) {
+        case 1: // üçler kuralı
+            for (const float t : {1.0f / 3.0f, 2.0f / 3.0f}) {
+                line(at(t, 0), at(t, 1));
+                line(at(0, t), at(1, t));
+            }
+            break;
+        case 2: { // altın oran ızgarası (1 : 0.618 : 1)
+            const float g = 0.381966f;
+            for (const float t : {g, 1.0f - g}) {
+                line(at(t, 0), at(t, 1));
+                line(at(0, t), at(1, t));
+            }
+            break;
+        }
+        case 3: // merkez artı köşegenler
+            line(at(0.5f, 0), at(0.5f, 1));
+            line(at(0, 0.5f), at(1, 0.5f));
+            line(at(0, 0), at(1, 1));
+            line(at(1, 0), at(0, 1));
+            break;
+        default: break;
+    }
+    dl->PopClipRect();
+}
+
 void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) {
     const ui::Palette& pal = ui::palette();
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -731,9 +801,10 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
     dl->AddText(ImVec2(bp.x + 32.0f, bp.y + 5.0f), ui::col(pal.text), line1);
     dl->AddText(ImVec2(bp.x + 32.0f, bp.y + 7.0f + t1.y), ui::col(pal.textDim), line2);
 
-    // Odak seçme modu ipucu.
-    if (m_s.pickFocus) {
-        const char* msg = ICON_CROSSHAIR "  Odaklanacak noktaya tıklayın";
+    // Odak / yansıma seçme modu ipucu.
+    if (m_s.pickFocus || m_s.pickHighlight) {
+        const char* msg = m_s.pickFocus ? ICON_CROSSHAIR "  Odaklanacak noktaya tıklayın"
+                                        : ICON_CROSSHAIR "  Parlamanın görüneceği noktaya tıklayın  (Shift: devam, Esc: vazgeç)";
         const ImVec2 ms = ImGui::CalcTextSize(msg);
         const ImVec2 mp(origin.x + (size.x - ms.x) * 0.5f, origin.y + 18.0f);
         dl->AddRectFilled(ImVec2(mp.x - 12, mp.y - 6), ImVec2(mp.x + ms.x + 12, mp.y + ms.y + 6), ui::col(pal.accent), 8.0f);

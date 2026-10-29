@@ -982,12 +982,14 @@ CameraParams Application::cameraParamsFor(const OrbitCamera& c) const {
     p.focusDistance = effectiveFocusDistance(c);
     p.apertureBlades = c.apertureBlades;
     p.bladeRotationDeg = c.bladeRotationDeg;
+    p.shiftX = c.orthographic ? 0.0f : c.shiftX;
+    p.shiftY = c.orthographic ? 0.0f : c.shiftY;
     return p;
 }
 
 // Viewport koordinatı (u sağa, v aşağı, [0,1]) → kamera ışını → derlenmiş sahnede
 // en yakın kesişim → düğüm kimliği. BVH kullanır, büyük modellerde de anlıktır.
-uint64_t Application::pickAt(float u, float v, Vec3f* hitPoint) {
+uint64_t Application::pickAt(float u, float v, Vec3f* hitPoint, Vec3f* hitNormal) {
     if (!m_s.compiled) return 0;
     const float aspect = m_s.viewportPxH > 0 ? static_cast<float>(m_s.viewportPxW) / m_s.viewportPxH : 1.0f;
     CameraParams p = cameraParams();
@@ -997,7 +999,51 @@ uint64_t Application::pickAt(float u, float v, Vec3f* hitPoint) {
     SurfaceInteraction isect;
     if (!m_s.compiled->intersect(ray, isect)) return 0;
     if (hitPoint) *hitPoint = isect.point;
+    if (hitNormal) *hitNormal = isect.normal.dot(ray.direction) > 0.0f ? -isect.normal : isect.normal; // bakana dönük
     return m_s.compiled->nodeUidOf(isect);
+}
+
+// Yansıma yerleştirme (hesap placeLightForHighlight'ta). Uzaklık korunur ki aydınlık değişmesin;
+// pürüzlü yüzeyde parlama genişler ama yeri aynı kalır.
+void Application::placeHighlight(const Vec3f& point, const Vec3f& normal) {
+    if (m_s.selKind != SelectionKind::Light || m_s.selLight < 0 || m_s.selLight >= static_cast<int>(m_s.lights.size())) {
+        setStatus("Önce yerleştirilecek ışığı seçin", true);
+        return;
+    }
+    pushUndo();
+    LightDesc& l = m_s.lights[static_cast<size_t>(m_s.selLight)];
+    const AABB b = m_s.graph.worldBounds();
+    const Vec3f r = placeLightForHighlight(l, m_s.camera.position(), point, normal, std::max(0.5f, (b.pMax - b.pMin).length()));
+    markDocumentChanged();
+    setStatus("Işık yerleştirildi: \"" + l.name + "\" yansıması tıklanan noktada" +
+              (r.y < -0.2f ? " (ışık zeminin altında kaldı; daha yukarıdan bir noktaya tıklayın)" : ""), r.y < -0.2f);
+}
+
+void Application::applyTwoPointPerspective() {
+    OrbitCamera& c = m_s.camera;
+    if (c.orthographic) return;
+    // Bakışın aşağı/yukarı açısı α; yatay bakışa getirilince konu kare merkezinden tan(α) kadar
+    // kayar. Dikey kaydırma bunu karşılar: shiftY = −tan(α) / (2·tan(fov/2)) (kare yüksekliği cinsinden).
+    const Vec3f eye = c.position(), target = c.targetVec();
+    const Vec3f d = target - eye;
+    const float horiz = std::sqrt(d.x * d.x + d.z * d.z);
+    if (horiz < 1e-4f) {
+        setStatus("Tam yukarıdan/aşağıdan bakışta iki noktalı perspektif yapılamaz", true);
+        return;
+    }
+    pushUndo();
+    const float tanA = d.y / horiz; // yukarı bakış pozitif
+    const float tanHalf = std::tan(c.fov * DEG_TO_RAD * 0.5f);
+    c.shiftY = std::clamp(tanA / (2.0f * tanHalf) + c.shiftY, -2.0f, 2.0f);
+    // Göz yerinde, hedef göz yüksekliğine iner: θ = 90° (yatay).
+    const Vec3f newTarget(target.x, eye.y, target.z);
+    c.target[0] = newTarget.x;
+    c.target[1] = newTarget.y;
+    c.target[2] = newTarget.z;
+    c.radius = horiz;
+    c.theta = 0.5f * PI;
+    c.phi = std::atan2(eye.z - newTarget.z, eye.x - newTarget.x);
+    setStatus("İki noktalı perspektif: dikeyler paralel (lens kaydırma " + std::to_string(c.shiftY).substr(0, 5) + ")");
 }
 
 // ── Proje ────────────────────────────────────────────────────────────────
@@ -1009,7 +1055,7 @@ json cameraJson(const OrbitCamera& c) {
             {"phi", c.phi}, {"fov", c.fov}, {"focalLengthMm", c.focalLengthMm}, {"orthographic", c.orthographic},
             {"aperture", c.aperture}, {"fStop", c.fStop}, {"focusDistance", c.focusDistance},
             {"focusExplicit", c.focusExplicit}, {"apertureBlades", c.apertureBlades},
-            {"bladeRotation", c.bladeRotationDeg}};
+            {"bladeRotation", c.bladeRotationDeg}, {"shiftX", c.shiftX}, {"shiftY", c.shiftY}};
 }
 
 void readCamera(const json& j, OrbitCamera& c) {
@@ -1027,6 +1073,8 @@ void readCamera(const json& j, OrbitCamera& c) {
     c.focusExplicit = j.value("focusExplicit", c.focusExplicit);
     c.apertureBlades = j.value("apertureBlades", c.apertureBlades);
     c.bladeRotationDeg = j.value("bladeRotation", c.bladeRotationDeg);
+    c.shiftX = std::clamp(j.value("shiftX", 0.0f), -2.0f, 2.0f);
+    c.shiftY = std::clamp(j.value("shiftY", 0.0f), -2.0f, 2.0f);
 }
 
 } // namespace
