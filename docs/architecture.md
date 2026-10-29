@@ -110,6 +110,32 @@ kodu doğrudan alınmaz:
 Alınacak fikirlerin kaynakları yayımlanmış makalelerdir: ReSTIR DI/GI, SHaRC radyans önbelleği,
 ışık BVH'si + uyarlamalı NEE, ışın konileriyle MIP seçimi, opaklık mikro haritaları.
 
+## 2c. Gerçek zamanlı mod (app/raster_view, scene/realtime_scene)
+
+Viewport'un "Gerçek zamanlı" modu ışın izlemez: geometriyi OpenGL 3.3 ile rasterleştirir ve her
+pikseli bir kez gölgelendirir (forward PBR). Amaç oyun motoru hızında **aynı** sahneyi göstermektir;
+bu yüzden bütün girdiler ışın izleyicinin tanımlarından hazırlanır ve hazırlık GL'den bağımsız,
+testli bir modüldedir (`scene/realtime_scene.*`, `tests/test_realtime_scene.cpp`):
+
+| Girdi | Kaynak | Not |
+|---|---|---|
+| Ortam | `EnvironmentLight::evalSky` → 1024×512 equirect (dünya yönleri) | Fiziksel gökte güneş zaten ayrı; HDRI'de güneş lekesi **ayıklanır** (`extractSunFromMap`: tepe ≥ 300× ortalama ve bölge < ~3.5°) ve gölgeli yönlü ışık olur. Zemin açıkken alt yarıküre aydınlanmış zemin rengi (ρ·E/π). |
+| Difüz ortam | SH9 ışınımı (Ramamoorthi–Hanrahan) | Işıkların zemine verdiği pay `uGroundExtra` ile analitik eklenir (alt yarıküre π/2·(1 − n_y)); ışık değişince harita yeniden pişmez. |
+| Parlak ortam | equirect mip zinciri, `textureLod` (α → teksel açısı) + Karis'in analitik env-BRDF'i | Küp harita ve BRDF LUT yerine (F8.1'in yalın sürümü). |
+| Işıklar | `packRealtimeLights`: aynı `lightEmission` (Kelvin), nokta/spot I, alan L·A·|cos|, yönlü E | Alan ışığı küre ışık yaklaşımıyla (Karis 2013: en yakın nokta + lob genişletme). Sahne merkezine verdiği ışınıma göre sıralı; en çok 16. |
+| Gölgeler | 2×2 derinlik atlası (4096²), en güçlü 4 ışık | `shadowProjection`: sahne kutusu + kutunun zemine düşen gölge izi kapsanır. PCSS: 16 örnekli engelleyici araması + 32 örnekli Vogel diski; kadraj kenarında söner. Camlar ayrı atlasta, gölgeleri kısmidir (%55). |
+| Temas gölgesi | en üst düzey nesnelerin (grup ise bir alt düzey) zemin izleri | eliptik Gauss; ekran uzayı AO'nun titreşimsiz karşılığı. |
+| Malzeme | `MaterialLibrary::presetFromMaterial` + `DisneyMaterial::*Image()` | Taban rengi, metal, pürüzlülük, specular (F0 = 0.08·s), vernik, emisyon; albedo (sRGB doku), ORM kanalları (G pürüzlülük, B metal), normal (türevlerden kotanjant çerçevesi), kutu eşleme. |
+| Ton eşleme | `buildToneLut`: viewport'un operatörü 64³ LUT (log2 shaper) | Shader'da eğri yeniden yazılmaz; sapma ≤ ~4/255. Beyaz dengesi `whiteBalanceMatrix` ile aynı. |
+
+Çizim sırası (`RasterView::renderRealtime`): gölge atlası → cam derinlik atlası → arka plan (ortam ya
+da düz renk) → opak yüzeyler → zemin (gölge yakalayıcıda yalnız alfa karartması) → cam (arkadan öne;
+çarpımsal geçirgenlik, sonra ön çarpımlı Fresnel bindirme: F·yansıma + (1 − F)·w·kırılan ortam).
+Ton eşleme piksel başına yapılır, MSAA çözümü ekran değerlerinde olur (kenarlar yumuşak).
+
+**Bilinen sınırlar:** ekran uzayı yansıma/kırılma yok (krom kürede nesneler değil ortam görünür), IES
+profilleri yalnız koni olarak, SSS/dispersiyon/kostik yok, görüntüleyiciden (imager) yalnız beyaz dengesi.
+
 ## 3. İki sahne temsili
 
 | | `SceneGraph` (scene/) | `Scene` (engine/) |
@@ -215,7 +241,10 @@ render'da piksel başına her 8 örnekte, ilerlemeli pass'lerde 3×3 komşulukla
 | `application.*` | pencere, ImGui, ana döngü, kısayollar, sürükle-bırak, ekran görüntüsü modu |
 | `render_controller.*` | viewport render thread'i, çözünürlük merdiveni, OIDN, yayınlama |
 | `scene_ops.cpp` | belge işlemleri, geri al, proje kaydet/aç, seçim ışını |
-| `final_render.cpp` | son render ve turntable işleri |
+| `final_render.cpp` | son render, turntable ve kamera animasyonu işleri |
+| `raster_view.*` | GPU modları: Gerçek zamanlı (PBR, gölge atlası), Katı, Tel kafes, Normaller |
+| `live_link.*` | DCC canlı bağlantı sunucusu (127.0.0.1, jeton, satır başına JSON) |
+| `animation.cpp`, `camera_keys.h` | zaman çizelgesi, kamera anahtar kareleri, oynatma |
 | `thumbnails.*` | malzeme küreleri ve HDRI önizlemeleri (arka planda, disk önbellekli) |
 | `ui_layout.cpp` | menü, panel yerleşimi, durum çubuğu, kısayollar |
 | `ui_library.cpp`, `ui_viewport.cpp`, `ui_scene.cpp`, `ui_properties.cpp`, `ui_render.cpp` | paneller |

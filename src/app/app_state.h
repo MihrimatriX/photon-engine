@@ -12,6 +12,7 @@
 #include "scene/scene_graph.h"
 #include "scene/material_library.h"
 #include "scene/document.h"
+#include "scene/camera_animation.h"
 #include "scene/model_import.h"
 #include "scene/undo_stack.h"
 #include "ui/orbit_camera.h"
@@ -106,6 +107,14 @@ struct AppState {
     };
     std::vector<SavedCamera> savedCameras;
 
+    // ── Kamera animasyonu (zaman çizelgesi) ──
+    std::vector<CameraTrack> cameraTracks; ///< projeyle ve paketle kaydedilir
+    int activeTrack = -1;                  ///< zaman çizelgesindeki iz (-1 = yok)
+    float animTime = 0.0f;                 ///< saniye
+    bool animPlaying = false;
+    bool animLoop = true;
+    bool showTimeline = false;
+
     // ── Seçim ──
     // Çoklu seçim: selNodes tüm seçili düğümler; selUid bunlardan "birincil" olanı
     // (son tıklanan). Özellikler paneli ve malzeme düzenleme birincili gösterir;
@@ -153,7 +162,10 @@ struct AppState {
         int alembicFrame = 0;    ///< 0 = ilk örnek
         float alembicFps = 24.0f;
         bool dontAsk = false;    ///< pencereyi gösterme, bu ayarlarla aktar
+        bool importLights = true;  ///< FBX: dosyadaki ışıkları sahneye ekle
+        bool importCameras = true; ///< FBX: kameraları kayıtlı kamera / animasyon olarak ekle
     } importPrefs;
+    bool liveLinkEnabled = true; ///< 3ds Max / Maya / Blender'dan gönderme (yalnız bu bilgisayardan)
     std::vector<std::string> importQueue;  ///< pencerede onay bekleyen dosyalar
     bool importHasPoint = false;           ///< viewport'a bırakıldı: model bu noktaya konur
     Vec3f importPoint;
@@ -178,6 +190,9 @@ struct AppState {
     int viewportPxW = 0;
     int viewportPxH = 0;
     bool pickFocus = false;        ///< Viewport'ta tıklayınca odak mesafesini ayarla
+    bool pickHighlight = false;    ///< Viewport'ta tıklayınca seçili ışığın yansımasını oraya yerleştir
+    int compositionGuide = 0;      ///< 0 yok, 1 üçler kuralı, 2 altın oran, 3 merkez + köşegenler
+    bool showOutputFrame = false;  ///< Render çıktısının en-boy oranındaki kadrajı göster
 };
 
 } // namespace photon

@@ -18,6 +18,7 @@
 #include "materials/dielectric.h"
 #include "camera/orthographic_camera.h"
 #include "engine/denoiser.h"
+#include "core/image/imager.h"
 #include "core/math/constants.h"
 
 #include <imgui_stdlib.h>
@@ -914,8 +915,48 @@ void Application::drawLightProps() {
             l.enabled = en;
             changed = true;
         }
-        ui::Prop("Renk");
-        if (colorEdit("##lc", l.color)) { undoPoint(*this, ImGui::GetID("lc")); changed = true; }
+        ui::Prop("Renk", "RGB: serbest renk. Kelvin: gerçek lambaların renk sıcaklığı "
+                         "(2700 K ev ampulü, 3200 K stüdyo halojeni, 5600 K gün ışığı/flaş, 6500 K bulutlu gök)");
+        int colorMode = l.temperatureK > 0.0f ? 1 : 0;
+        const char* colorModes[] = {"RGB", "Kelvin"};
+        if (ui::Segmented("lcm", &colorMode, colorModes, 2)) {
+            pushUndo();
+            l.temperatureK = colorMode == 1 ? 5600.0f : 0.0f;
+            changed = true;
+        }
+        if (l.temperatureK > 0.0f) {
+            ui::Prop("Sıcaklık");
+            // Sonuç rengini gösteren küçük kutu + kaydırıcı.
+            const Color3f tc = temperatureColor(l.temperatureK);
+            const float m = std::max({tc.r, tc.g, tc.b, 1e-6f});
+            ImGui::ColorButton("##ktc", ImVec4(tc.r / m, tc.g / m, tc.b / m, 1.0f), ImGuiColorEditFlags_NoTooltip,
+                               ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight()));
+            ImGui::SameLine(0, 4);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ui::SliderF("##lk", &l.temperatureK, 1500.0f, 12000.0f, "%.0f K")) { undoPoint(*this, ImGui::GetID("lk")); changed = true; }
+            ui::Prop("Hazır");
+            static const struct { const char* name; float k; } kPresets[] = {
+                {"Mum alevi", 1900},   {"Ev ampulü", 2700},    {"Stüdyo halojeni", 3200}, {"Floresan", 4000},
+                {"Flaş / gün ışığı", 5600}, {"Bulutlu gök", 6500}, {"Gölge, mavi saat", 9000}};
+            const char* current = "Özel";
+            for (const auto& p : kPresets)
+                if (std::abs(l.temperatureK - p.k) < 1.0f) current = p.name;
+            if (ImGui::BeginCombo("##kpre", current)) {
+                for (const auto& p : kPresets) {
+                    char item[64];
+                    std::snprintf(item, sizeof(item), "%s  (%.0f K)", p.name, p.k);
+                    if (ImGui::Selectable(item, std::abs(l.temperatureK - p.k) < 1.0f)) {
+                        pushUndo();
+                        l.temperatureK = p.k;
+                        changed = true;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+        } else {
+            ui::Prop(" ");
+            if (colorEdit("##lc", l.color)) { undoPoint(*this, ImGui::GetID("lc")); changed = true; }
+        }
         ui::Prop("Güç");
         float inten = l.intensity;
         const float maxI = (l.type == LightDesc::Type::Point || l.type == LightDesc::Type::Spot) ? 1e5f : 200.0f;
@@ -995,6 +1036,12 @@ void Application::drawLightProps() {
         ui::EndProps();
     }
     ImGui::Spacing();
+    if (ui::GhostButton(ICON_SPARKLES "  Parlamayı yerleştir (tıkla)", ImVec2(-FLT_MIN, 0))) {
+        m_s.pickHighlight = true;
+        m_s.pickFocus = false;
+    }
+    ui::Tooltip("Modelde parlamanın görünmesini istediğiniz noktaya tıklayın: ışık, yansıması tam oraya "
+                "düşecek yere taşınır ve oraya yönelir. Shift basılıyken art arda deneyebilirsiniz.");
     if (l.type == LightDesc::Type::Area || l.type == LightDesc::Type::Spot) {
         if (ui::GhostButton(ICON_CROSSHAIR "  Seçili parçaya yönelt")) {
             if (SceneNode* n = selectedNode()) {
@@ -1047,6 +1094,32 @@ void Application::drawCameraProps() {
                 c.fov = fovDegreesFromFocalMm(c.focalLengthMm);
             }
             ImGui::PopStyleColor();
+        }
+        if (!c.orthographic) {
+            ImGui::Spacing();
+            if (ui::BeginProps("shift")) {
+                ui::Prop("Kaydırma X", "Lens kaydırma (shift): kamera dönmeden görüntü kayar. Kare yüksekliği cinsinden");
+                ui::SliderF("##shx", &c.shiftX, -1.0f, 1.0f, "%.3f");
+                ui::Prop("Kaydırma Y", "Yüksek binayı alttan çekerken dikeyleri eğmeden tepeyi kadraja almak için");
+                ui::SliderF("##shy", &c.shiftY, -1.0f, 1.0f, "%.3f");
+                ui::EndProps();
+            }
+            const float hw = (ImGui::GetContentRegionAvail().x - 4.0f) * 0.5f;
+            if (ui::GhostButton(ICON_FRAME "  2 nokta perspektif", ImVec2(hw, 0))) applyTwoPointPerspective();
+            ui::Tooltip("Mimari çekim: kamera yatay bakışa getirilir, dikey çizgiler paralel kalır; konu lens "
+                        "kaydırmayla kadrajda tutulur");
+            ImGui::SameLine(0, 4);
+            if (ui::GhostButton("Kaydırmayı sıfırla", ImVec2(hw, 0))) c.shiftX = c.shiftY = 0.0f;
+        }
+    }
+    if (ui::Section(ICON_GRID_3X3, "Kompozisyon", false)) {
+        const char* guides[] = {"Yok", "Üçler", "Altın", "Merkez"};
+        ui::Segmented("guide", &m_s.compositionGuide, guides, 4);
+        ui::Tooltip("Viewport'a kompozisyon kılavuzu çizer (render'a girmez)");
+        if (ui::BeginProps("compo")) {
+            ui::Prop("Çıktı kadrajı", "Render çıktısının en-boy oranındaki alanı gösterir; dışı karartılır");
+            ui::Toggle("outframe", &m_s.showOutputFrame);
+            ui::EndProps();
         }
     }
     if (ui::Section(ICON_APERTURE, "Alan derinliği", c.aperture > 0.0f)) {

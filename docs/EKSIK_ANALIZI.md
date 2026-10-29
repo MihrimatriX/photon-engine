@@ -21,8 +21,8 @@ Bu oturumda kapatılanlar en alttaki tablodadır, ölçümleriyle birlikte.
 |---|---|---|---|
 | 7 | **USD / USDZ** (Omniverse, Houdini Solaris, Apple AR) | OpenUSD (TinyUSDZ ilk adım için yeterli, Apache-2.0; tam OpenUSD ağır ama standart). `UsdPreviewSurface` ve `UsdGeom`, ardından Hydra delegesi. | Uzun vadede bir **Hydra render delegesi**: motor Houdini, Maya ve Blender içinde viewport renderer'ı olur. |
 | 8 | **CAD: STEP / IGES / 3DM** (KeyShot'un ana pazarı) | Open CASCADE (LGPL-2.1, yalnız dinamik bağlanır) ile tessellation. Kalite kaydırıcısı (açı/sapma) ve parça adları. | Rhino 3DM için openNURBS (MIT). SolidWorks ve Creo yerel biçimleri lisans gerektirir. |
-| 9 | **Canlı bağlantı (live link)** | Blender eklentisi (Python) veya Maya/Max eklentisi sahneyi bir yerel soket üzerinden gönderir; motor artımlı günceller (madde 5'e bağlı). | KeyShot'un LiveLinking'i, V-Ray'in Vision'ı. |
-| 10 | **Alembic animasyonu ve hareket bulanıklığı** | Şu an tek kare okunuyor. Zaman çizelgesi, kare dizisi render ve dönüşümle deformasyon hareket bulanıklığı. | FBX animasyonu ufbx'te `ufbx_evaluate_scene` ile hazır. |
+| 9 | ~~Canlı bağlantı~~ **yapıldı** (aşağıda). Kalan: artımlı güncelleme (yalnız değişen nesne), DCC tarafında malzeme eşleme (V-Ray/Corona → Principled). | KeyShot LiveLinking, V-Ray Vision. |
+| 10 | **Nesne/deformasyon animasyonu ve hareket bulanıklığı** | Kamera animasyonu yapıldı. Kalan: nesne dönüşüm animasyonu, Alembic/FBX deformasyonu kare kare, dönüşüm ve deformasyon hareket bulanıklığı. | ufbx `ufbx_evaluate_scene`, Alembic zaman örnekleri hazır. |
 | 11 | **glTF malzeme uzantıları** | transmission, volume, ior, clearcoat, sheen, specular, emissive_strength, texture_transform (F7.9). | Bu oturumda gelen sheen ve vernik lobu bunları doğrudan karşılıyor; eşleme işi kaldı. |
 | 12 | **MaterialX / OpenPBR** | OpenPBR Surface'e geçiş (F7.10). MaterialX ile Substance, Houdini ve Maya'dan malzeme alışverişi. | Disney, referans ve fırın testleriyle kalır. |
 | 13 | **Cryptomatte, ışık grupları, ışık bağlama** | Cryptomatte (MurmurHash3 + iki derinlik katmanı, EXR meta verisi). Işık grupları: geçişler zaten lob başına; ışık başına ek film. | Bu oturumda gelen nesne ve malzeme ID katmanları basit maskeler için yeterli. |
@@ -38,6 +38,17 @@ Bu oturumda kapatılanlar en alttaki tablodadır, ölçümleriyle birlikte.
 - **Mitsuba 3 referans karşılaştırması** (F2.14) ve altın görüntü (golden) regresyonu (F2.8).
 - **Windows/MSVC**: bu oturumun değişiklikleri yalnız GCC 13 ile derlendi; `/W4` ve FetchContent ile Alembic (CMake ≥ 3.29, VS 18 ile geliyor) denenmeli.
 
+## Gerçek zamanlı modun sıradaki adımları
+
+| Eksik | Önerilen yol | Not |
+|---|---|---|
+| Ekran uzayı yansıma ve kırılma | Hi-Z ile SSR; cam için arka tamponu bulanık örnekleme | Krom kürede bugün nesneler değil ortam görünüyor. |
+| Doğru alan ışığı | LTC (Heitz 2016): dikdörtgen softbox'ın parlaması ve difüzü analitik | Bugün küre ışık yaklaşımı (yuvarlak parlama). |
+| Ortam kapatma ve dolaylı ışık | GTAO; ileride RTGI/ReSTIR GI (GPU ışın izleme gelince) | Bugün yalnız zemin temas gölgesi. |
+| Kenar yumuşatma ve gürültü | TAA (PCSS'in döndürülmüş disk gürültüsünü de temizler) | Bugün 4× MSAA. |
+| Görüntüleyici | bloom, vinyet, kontrast, doygunluk shader'da | Bugün yalnız beyaz dengesi + ton eşleme. |
+| IES | 1B profil dokusu (γ açısına göre) | Bugün yalnız koni. |
+
 ## Bu oturumda kapatılanlar (ölçümlü)
 
 | Alan | Yapılan | Kanıt |
@@ -50,5 +61,9 @@ Bu oturumda kapatılanlar en alttaki tablodadır, ölçümleriyle birlikte.
 | Compositing | 9 ışık geçişi, derinlik, konum, normal, albedo, ID. Çok katmanlı EXR. | Geçişlerin toplamı beauty'ye 1e-4 içinde eşit. Kanal adları Nuke/Blender düzeninde. |
 | Entegrasyon | FBX (ufbx) ve Alembic içe aktarma: hiyerarşi, adlar, instancing, birim ve eksen, malzeme eşleme, gömülü dokular. | Blender 2.79/2.93 ve 3ds Max 2009 dosyalarıyla testler, test içinde yazılan Alembic arşivi. |
 | Arayüz | İçe aktarma penceresi, imlecin altına bırakma, çoklu dosya, son dosyalar, kütüphaneden modeli yüzeye bırakma. | Uygulamanın ekran görüntüleriyle doğrulandı (Xvfb). |
+| Cihaz/mod katmanı | `RenderDevice` + `RenderSession`; viewport, son render, turntable ve CLI tek yoldan. | Toplu (batch) render tek tek geçişlerle bit bit aynı (`test_render_session`). |
+| 3ds Max / Maya / Blender | Canlı bağlantı (jetonlu yerel TCP, yerinde güncelleme, malzemeler korunur), `.max/.ma/.mb/.blend` doğrudan açma (kurulu DCC ile, önbellekli), FBX kamera + ışık + kamera animasyonu, `.photonpack`. | Sahte DCC araçlarıyla uçtan uca testler; uygulamada iki gönderim → tek yerinde güncelleme. Gerçek Max/Maya bu ortamda denenemedi. |
+| Kamera ve ışık araçları | Parlamayı yerleştir, Kelvin, lens kaydırma + iki noktalı perspektif, kompozisyon kılavuzları, çıktı kadrajı. | Render testi: krom kürede en parlak piksel tıklanan pikselde (formül bozulunca 3–7 px sapıyor). |
+| Gerçek zamanlı mod | GPU'da PBR: aynı ışıklar/ortam/malzemeler, 4 ışığa PCSS gölge, HDRI güneşi ayıklama, dokular, cam, zemin, aynı ton eşleme (LUT). | Işın izleyiciyle yan yana ekran görüntüleri (stüdyo, güneşli HDRI, dokulu, gölge yakalayıcı); alan ışığı ışınımı Monte Carlo'ya %2 içinde; LUT sapması ≤ 4/255; llvmpipe'ta ~50 fps. |
 
-Test sayısı 133'ten 157'ye çıktı.
+Test sayısı 133'ten 203'e çıktı.

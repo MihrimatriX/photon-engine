@@ -9,7 +9,9 @@ add_library(photon_scene STATIC
     camera_animation.cpp
     mesh_binary.cpp
     package.cpp
+    dcc_convert.cpp
     primitives.cpp
+    realtime_scene.cpp
 )
 
 target_link_libraries(photon_scene PUBLIC

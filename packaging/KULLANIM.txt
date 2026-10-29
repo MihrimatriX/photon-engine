@@ -91,6 +91,11 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
 6) GÖRÜNTÜ MODLARI (Z ya da araç çubuğundaki mod düğmesi)
 -------------------------------------------------------
   Render     : ışın izleme, son görüntü (malzemeler, ışık, yansıma)
+  Gerçek zamanlı : ekran kartında oyun motoru gibi anında PBR görüntü — aynı ışıklar (Kelvin
+               dahil), en güçlü 4 ışığın yumuşak gölgeleri, HDRI yansımaları ve HDRI'deki
+               güneşin gölgesi, dokular, cam, zemin ve temas gölgesi, aynı ton eşleme.
+               Hızlı yerleştirme, ışık düzeni ve kamera animasyonu önizlemesi için; son
+               görüntüyü yine Render verir (kostik, çoklu yansıma, SSS, dispersiyon yok).
   Kil        : ışın izleme, tüm yüzeyler mat gri — ışığı ve formu değerlendirmek için
   Katı       : ekran kartında anında çizim; büyük modelde yerleştirme için
   Tel kafes  : üçgen ağı (arkadaki çizgiler gizli)
@@ -114,7 +119,16 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
   Işıklar sekmesi:
    - Alan ışığı > "Kameraya görünür" (kapalıyken softbox yalnız yansımalarda görünür).
    - Spot ışık: koni açısı, kenar yumuşaklığı, IES profili (assets\ies\ örnekleri).
+   - Renk: RGB ya da Kelvin (1500–12000 K; hazır: ev ampulü 2700, halojen 3200,
+     gün ışığı 5600, bulutlu 6500). Kelvin rengi parlaklığı değiştirmez.
+   - "Parlamayı yerleştir (tıkla)": modelde parlamanın görünmesini istediğiniz noktaya
+     tıklayın; seçili ışık yansıması tam oraya düşecek yere taşınır ve oraya yönelir.
+     Shift basılıyken art arda deneyebilirsiniz, Esc vazgeçer.
   Kamera sekmesi: alan derinliğinde "Diyafram kanatları" (altıgen/sekizgen bokeh).
+   - Lens kaydırma X/Y ve "2 nokta perspektif": mimari çekimde kamera yatay bakışa
+     getirilir, dikey çizgiler paralel kalır, konu kaydırmayla kadrajda tutulur.
+   - Kompozisyon: üçler kuralı, altın oran, merkez kılavuzları ve çıktı kadrajı
+     (render en-boy oranı; dışı karartılır). Görünüm menüsünden de açılır.
   Görüntü sekmesi: bloom, yıldız parlaması, beyaz dengesi, kontrast, doygunluk, vinyet,
    renk sapması; uyarlamalı örnekleme (gürültü eşiği) ve parlama sınırı.
 

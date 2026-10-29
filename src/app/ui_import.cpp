@@ -21,10 +21,13 @@ std::string lowerExt(const std::string& path) {
 
 /// Biçimin kısa açıklaması: kullanıcı neyin otomatik geldiğini görsün.
 const char* formatNote(const std::string& ext) {
-    if (ext == ".fbx") return "FBX: birim ve eksen dosyadan; hiyerarşi, adlar ve malzemeler korunur";
+    if (ext == ".fbx") return "FBX: birim ve eksen dosyadan; hiyerarşi, adlar, malzemeler, kameralar (animasyonuyla) ve ışıklar";
     if (ext == ".abc") return "Alembic: hiyerarşi ve yüz kümeleri (malzeme dilimleri); birim aşağıdan";
     if (ext == ".gltf" || ext == ".glb") return "glTF: metre, Y yukarı (standart)";
     if (ext == ".obj") return "OBJ: birim bilgisi yok, aşağıdan seçin";
+    if (ext == ".max") return "3ds Max sahnesi: kurulu 3ds Max arka planda FBX'e çevirir (ilk açılış uzun sürebilir)";
+    if (ext == ".ma" || ext == ".mb") return "Maya sahnesi: kurulu Maya (mayapy) arka planda FBX'e çevirir";
+    if (ext == ".blend") return "Blender sahnesi: kurulu Blender arka planda FBX'e çevirir";
     return "";
 }
 
@@ -48,11 +51,12 @@ void Application::drawImportDialog() {
     AppState::ImportPrefs& ip = m_s.importPrefs;
 
     // Dosyalar ve biçim notları.
-    bool anyUnitless = false, anyAlembic = false;
+    bool anyUnitless = false, anyAlembic = false, anyFbx = false;
     for (const auto& p : m_s.importQueue) {
         const std::string ext = lowerExt(p);
         anyUnitless = anyUnitless || ext == ".obj" || ext == ".abc";
         anyAlembic = anyAlembic || ext == ".abc";
+        anyFbx = anyFbx || ext == ".fbx" || ext == ".max" || ext == ".ma" || ext == ".mb" || ext == ".blend";
         ImGui::PushFont(ui::fonts().semibold, 0.0f);
         ImGui::TextUnformatted((std::string(ICON_BOX "  ") + ui::fileName(p)).c_str());
         ImGui::PopFont();
@@ -77,6 +81,14 @@ void Application::drawImportDialog() {
             ui::SliderI("##abcf", &ip.alembicFrame, 0, 1000);
             ui::Prop("Kare hızı (fps)");
             ui::SliderF("##abcfps", &ip.alembicFps, 1.0f, 120.0f, "%.0f");
+        }
+        if (anyFbx) {
+            ui::Prop("Işıkları al", "3ds Max / Maya / Blender ışıkları (nokta, spot, yönlü, alan). Şiddetler "
+                                    "uygulamalar arasında standart değil: oranlar korunur, düzey ölçeklenir");
+            ui::Toggle("implights", &ip.importLights);
+            ui::Prop("Kameraları al", "Sabit kameralar Kayıtlı kameralara, animasyonlu kameralar zaman çizelgesine "
+                                      "eklenir. Boş sahnede görünüm ilk kameraya geçer");
+            ui::Toggle("impcams", &ip.importCameras);
         }
         ui::Prop("Bir daha sorma", "Sonraki içe aktarmalar bu ayarlarla doğrudan yapılır. Geri açmak için: "
                                    "Dosya → İçe aktarma ayarları");

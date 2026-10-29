@@ -18,6 +18,12 @@ public:
                    float vFovDegrees, float aspectRatio, float apertureRadius, float focusDistance);
 
     Ray generateRay(float u, float v, const Vec2f& lensSample) const override;
+    /// Lens kaydırma (shift), kare yüksekliği cinsinden: görüntü düzlemi kamera yönü değişmeden
+    /// kayar. Dikey kaydırma mimaride dikeyleri paralel tutar (iki noktalı perspektif; tilt-shift
+    /// objektif gibi). 0.1 = karenin %10'u yukarı/sağa.
+    void setShift(float shiftX, float shiftY) {
+        m_lowerLeft = m_lowerLeft + m_u * (shiftX * m_vertical.length()) + m_vertical * shiftY;
+    }
 
     /// Diyafram kanatları: 0 = yuvarlak açıklık; ≥ 3 → düzgün çokgen (odak dışı ışıklar
     /// gerçek objektiflerdeki gibi altıgen/sekizgen "bokeh" verir). Açı derece.
