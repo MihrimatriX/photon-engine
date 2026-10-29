@@ -190,6 +190,9 @@ struct AppState {
     int viewportPxW = 0;
     int viewportPxH = 0;
     bool pickFocus = false;        ///< Viewport'ta tıklayınca odak mesafesini ayarla
+    bool pickHighlight = false;    ///< Viewport'ta tıklayınca seçili ışığın yansımasını oraya yerleştir
+    int compositionGuide = 0;      ///< 0 yok, 1 üçler kuralı, 2 altın oran, 3 merkez + köşegenler
+    bool showOutputFrame = false;  ///< Render çıktısının en-boy oranındaki kadrajı göster
 };
 
 } // namespace photon

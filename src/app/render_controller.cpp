@@ -30,9 +30,12 @@ std::unique_ptr<Camera> makeCamera(const CameraParams& p, float aspect) {
         auto cam = std::make_unique<ThinLensCamera>(p.eye, p.target, up, p.fovDeg, aspect, p.apertureRadius,
                                                     std::max(1e-3f, p.focusDistance));
         cam->setApertureShape(p.apertureBlades, p.bladeRotationDeg);
+        cam->setShift(p.shiftX, p.shiftY);
         return cam;
     }
-    return std::make_unique<PerspectiveCamera>(p.eye, p.target, up, p.fovDeg, aspect);
+    auto cam = std::make_unique<PerspectiveCamera>(p.eye, p.target, up, p.fovDeg, aspect);
+    cam->setShift(p.shiftX, p.shiftY);
+    return cam;
 }
 
 RenderController::RenderController() = default;

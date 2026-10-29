@@ -172,7 +172,12 @@ public:
     void applyCameraPreset(const char* id);
     CameraParams cameraParams() const;
     CameraParams cameraParamsFor(const OrbitCamera& c) const;
-    uint64_t pickAt(float u, float v, Vec3f* hitPoint = nullptr);
+    uint64_t pickAt(float u, float v, Vec3f* hitPoint = nullptr, Vec3f* hitNormal = nullptr);
+    /// Seçili ışığı, yansıması tıklanan noktada görünecek yere taşır (Maverick/KeyShot "highlight").
+    void placeHighlight(const Vec3f& point, const Vec3f& normal);
+    /// Kamerayı yatay bakışa getirir, konuyu kadrajda tutmak için dikey lens kaydırması uygular.
+    void applyTwoPointPerspective();
+    void drawCompositionGuides(const ImVec2& origin, const ImVec2& size);
     void saveProjectAs();
     void savePackageAs();
     void saveProject();

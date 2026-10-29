@@ -201,6 +201,17 @@ void illuminantXy(float T, float& x, float& y) {
 
 } // namespace
 
+Color3f temperatureColor(float kelvin) {
+    float x, y;
+    illuminantXy(std::clamp(kelvin, 1000.0f, 25000.0f), x, y);
+    const float X = x / y, Y = 1.0f, Z = (1.0f - x - y) / y;
+    float rgb[3];
+    for (int i = 0; i < 3; ++i) rgb[i] = std::max(0.0f, kXyzToRgb[i * 3] * X + kXyzToRgb[i * 3 + 1] * Y + kXyzToRgb[i * 3 + 2] * Z);
+    Color3f c(rgb[0], rgb[1], rgb[2]);
+    const float lum = c.luminance();
+    return lum > 0.0f ? c / lum : Color3f(1.0f);
+}
+
 void whiteBalanceMatrix(float temperatureK, float tint, float out[9]) {
     float xs, ys;
     illuminantXy(temperatureK, xs, ys);

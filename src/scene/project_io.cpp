@@ -394,6 +394,7 @@ json lightJson(const LightDesc& d, const PathMap& paths) {
     j["name"] = d.name;
     j["enabled"] = d.enabled;
     j["color"] = col3(d.color);
+    if (d.temperatureK > 0.0f) j["temperature"] = d.temperatureK;
     j["intensity"] = d.intensity;
     j["position"] = vec3(d.position);
     j["target"] = vec3(d.target);
@@ -420,6 +421,7 @@ LightDesc lightFromJson(const json& j, const fs::path& base) {
     d.name = j.value("name", d.name);
     d.enabled = j.value("enabled", true);
     d.color = readCol3(j, "color", d.color);
+    d.temperatureK = std::clamp(j.value("temperature", 0.0f), 0.0f, 25000.0f);
     d.intensity = j.value("intensity", d.intensity);
     d.position = readVec3(j, "position", d.position);
     d.target = readVec3(j, "target", d.target);

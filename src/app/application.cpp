@@ -404,7 +404,10 @@ void Application::handleShortcuts() {
     if (pressed(ImGuiKey_F)) frameSelection();
     if (pressed(ImGuiKey_A) && shift) frameAll();
     if (pressed(ImGuiKey_Delete) || pressed(ImGuiKey_Backspace)) deleteSelection();
-    if (pressed(ImGuiKey_Escape)) clearSelection();
+    if (pressed(ImGuiKey_Escape)) {
+        if (m_s.pickHighlight || m_s.pickFocus) m_s.pickHighlight = m_s.pickFocus = false;
+        else clearSelection();
+    }
     if (pressed(ImGuiKey_Q)) m_s.gizmoOp = 0;
     if (pressed(ImGuiKey_W)) m_s.gizmoOp = 1;
     if (pressed(ImGuiKey_E)) m_s.gizmoOp = 2;
@@ -577,6 +580,23 @@ int Application::run() {
     else if (ui == "env") { m_s.rightTab = 2; m_s.leftTab = 1; }
     else if (ui == "light") { selectLight(0); m_s.leftTab = 2; }
     else if (ui == "camera") { m_s.rightTab = 4; m_s.leftTab = 3; }
+    else if (ui == "protools") {
+        // Işık araçları: Kelvin (halojen), üçler kuralı, 4:5 çıktı kadrajı; parlama yerleştirme
+        // sahne derlenince döngüde yapılır (tıklama gibi pickAt üzerinden).
+        selectLight(0);
+        m_s.leftTab = 2;
+        m_s.lights[0].temperatureK = 3200.0f;
+        m_s.compositionGuide = 1;
+        m_s.showOutputFrame = true;
+        m_s.output.width = 1080;
+        m_s.output.height = 1350;
+    }
+    else if (ui == "twopoint") {
+        // Mimari çekim: yukarıdan bakan varsayılan kamera → yatay bakış + dikey lens kaydırma.
+        m_s.rightTab = 4;
+        applyTwoPointPerspective();
+        m_s.compositionGuide = 3;
+    }
     else if (ui == "image") m_s.rightTab = 5;
     else if (ui.rfind("import:", 0) == 0) {
         // İçe aktarma penceresi, bir modelin viewport'a bırakılmış hâli (imleç ortada).
@@ -617,7 +637,27 @@ int Application::run() {
                 startAnimationRender();
                 m_animSmokeStarted = true;
             }
+            if (m_opts.uiState == "protools" && !m_animSmokeStarted && frames > 5 && m_jobs.empty() && m_s.compiled) {
+                // Krom kürenin ekrandaki kapladığı alanı bul, sol üst çeyreğine "tıkla".
+                const SceneNode* chrome = nullptr;
+                for (const auto& c : m_s.graph.root()->children)
+                    if (c->name == "Krom Küre") chrome = c.get();
+                float su = 0, sv = 0, n = 0, minU = 1, minV = 1;
+                for (int y = 0; y < 60 && chrome; ++y)
+                    for (int x = 0; x < 80; ++x) {
+                        const float u = (x + 0.5f) / 80.0f, v = (y + 0.5f) / 60.0f;
+                        if (pickAt(u, v) != chrome->uid) continue;
+                        su += u, sv += v, n += 1, minU = std::min(minU, u), minV = std::min(minV, v);
+                    }
+                if (n > 0) {
+                    Vec3f p, nn;
+                    const float u = 0.5f * (su / n + minU), v = 0.5f * (sv / n + minV);
+                    if (pickAt(u, v, &p, &nn)) placeHighlight(p, nn);
+                }
+                m_animSmokeStarted = true;
+            }
             const bool waitAnim = (m_opts.uiState == "animrender" && !m_animSmokeStarted) ||
+                                  (m_opts.uiState == "protools" && !m_animSmokeStarted) ||
                                   (m_opts.uiState == "livelink" && m_liveUpdates < 1); // bir yerinde güncelleme bekle
             const bool ready = frames > 30 && !st.interactive && (gpuView || st.converged || st.spp >= m_opts.screenshotSpp) &&
                                m_jobs.empty() && !m_s.thumbs.busy() && !m_s.finalJob.active.load() && !waitAnim;

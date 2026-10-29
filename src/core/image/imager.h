@@ -41,4 +41,10 @@ void applyImager(Image& hdr, const ImagerSettings& s, float exposureEV = 0.0f);
 /// kaynağının beyazını D65'e taşır (Bradford uyarlaması; T ≥ 4000 K gün ışığı eğrisi).
 void whiteBalanceMatrix(float temperatureK, float tint, float out[9]);
 
+/// Renk sıcaklığındaki (Kelvin) ışık kaynağının doğrusal sRGB rengi, parlaklığı 1'e normalize:
+/// 1900 K mum, 2700 K akkor ampul, 4000 K nötr beyaz, 5500 K öğle güneşi, 6500 K D65, 10000 K
+/// kapalı gök. 3500 K altı Planck (siyah cisim), üstü gün ışığı eğrisi (CIE), arada yumuşak geçiş.
+/// sRGB gamının dışındaki çok sıcak tonlar (< ~1900 K) gama kırpılır.
+Color3f temperatureColor(float kelvin);
+
 } // namespace photon

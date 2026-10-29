@@ -47,13 +47,16 @@ struct CameraParams {
     float focusDistance = 5.0f;
     int apertureBlades = 0;
     float bladeRotationDeg = 0.0f;
+    float shiftX = 0.0f; ///< lens kaydırma, kare yüksekliği cinsinden
+    float shiftY = 0.0f;
 
     bool operator==(const CameraParams& o) const {
         return eye.x == o.eye.x && eye.y == o.eye.y && eye.z == o.eye.z && target.x == o.target.x &&
                target.y == o.target.y && target.z == o.target.z && fovDeg == o.fovDeg &&
                orthographic == o.orthographic && orthoHeight == o.orthoHeight &&
                apertureRadius == o.apertureRadius && focusDistance == o.focusDistance &&
-               apertureBlades == o.apertureBlades && bladeRotationDeg == o.bladeRotationDeg;
+               apertureBlades == o.apertureBlades && bladeRotationDeg == o.bladeRotationDeg && shiftX == o.shiftX &&
+               shiftY == o.shiftY;
     }
     bool operator!=(const CameraParams& o) const { return !(*this == o); }
 };
