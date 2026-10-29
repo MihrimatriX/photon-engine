@@ -1,6 +1,8 @@
 // path.cpp — Çalışan exe'nin klasörü ve assets/ kökünün bulunması (uygulama ve CLI ortak).
 #include "core/platform/path.h"
 
+#include <cstdlib>
+
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -33,6 +35,19 @@ std::string findAssetsRoot() {
         }
     }
     return "assets";
+}
+
+fs::path userDataDir() {
+    fs::path base;
+#ifdef _WIN32
+    if (const wchar_t* appdata = _wgetenv(L"APPDATA")) base = fs::path(appdata) / "PhotonEngine";
+#else
+    if (const char* home = std::getenv("HOME")) base = fs::path(home) / ".photon-engine";
+#endif
+    if (base.empty()) base = fs::current_path() / "photon-user";
+    std::error_code ec;
+    fs::create_directories(base, ec);
+    return base;
 }
 
 } // namespace photon
