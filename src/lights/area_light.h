@@ -1,4 +1,4 @@
-// area_light.h — Alan ışıkları: dikdörtgen (AreaLight) ve yayıcı üçgen mesh (MeshLight).
+// area_light.h — Alan ışıkları: dikdörtgen (AreaLight) ve yayıcı üçgen (TriangleLight).
 // Delta ışıkların aksine yüzeyleri vardır: ışınlar onlara çarpabilir, yumuşak gölge verirler.
 // Yüzeyde düzgün (uniform) alan örneklemesi yapılır, pdf katı açıya çevrilir. pdfLi aynı pdf'i
 // verir ki BSDF örneklemesi ışığa çarptığında MIS ağırlığı hesaplanabilsin.
@@ -12,8 +12,6 @@
 #include <vector>
 
 namespace photon {
-
-class TriangleMesh;
 
 /// @brief Rectangular area light. Radiance leaves both sides of the quad.
 class AreaLight : public Light {
@@ -38,6 +36,7 @@ public:
     Color3f power() const override;
     float importance(const Vec3f& p, const Vec3f& n) const override;
     float pdfLiHit(const Vec3f& ref, const SurfaceInteraction& hit) const override { return pdfLi(ref, hit.point); }
+    bool bounds(LightBounds& out) const override;
 
     /// Solid-angle PDF of @p pLight as seen from @p ref. Matches sampleLi. 0 if @p pLight is off the quad.
     float pdfLi(const Vec3f& ref, const Vec3f& pLight) const;
@@ -70,30 +69,30 @@ private:
     bool m_visibleToCamera = true;
 };
 
-/// Emissive triangle mesh for next-event estimation. Does not own the mesh.
-class MeshLight : public Light {
+/// Işık yayan tek bir üçgen (yayıcı mesh'lerin her üçgeni ayrı bir ışık olur). Böylece ışık
+/// BVH'si büyük bir yayıcı mesh'te (LED şerit, neon, ekran) noktaya yakın ve ona bakan
+/// üçgenleri seçer; eskiden tüm mesh alan oranıyla örneklenir, uzaktaki üçgen yakındaki kadar
+/// sık seçilirdi. İki yüzden ışır (yayıcı malzeme yüzün iki tarafında da görünür).
+class TriangleLight : public Light {
 public:
-    MeshLight(const TriangleMesh* mesh, const Color3f& radiance);
+    TriangleLight(const Vec3f& p0, const Vec3f& p1, const Vec3f& p2, const Color3f& radiance);
 
     LightSample sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const override;
     bool isDelta() const override { return false; }
     Color3f power() const override;
     float importance(const Vec3f& p, const Vec3f& n) const override;
-    /// O(1): çarpılan nokta mesh üzerindedir, geometrik normali kesişim kaydındadır.
+    /// O(1): çarpılan nokta üçgenin üzerindedir.
     float pdfLiHit(const Vec3f& ref, const SurfaceInteraction& hit) const override;
-    /// Solid-angle PDF of a point on this mesh. 0 if @p pLight is off every triangle.
-    float pdfLi(const Vec3f& ref, const Vec3f& pLight) const;
+    bool bounds(LightBounds& out) const override;
 
     const Color3f& radiance() const { return m_radiance; }
     float area() const { return m_area; }
 
 private:
-    const TriangleMesh* m_mesh = nullptr;
+    Vec3f m_p0, m_p1, m_p2;
+    Vec3f m_normal;
     Color3f m_radiance;
-    // m_cdf[i] = 0..i üçgenlerinin alan toplamı (normalize edilmemiş CDF, son eleman = m_area).
-    std::vector<float> m_cdf;
     float m_area = 0.0f;
-    Vec3f m_center;
 };
 
 } // namespace photon

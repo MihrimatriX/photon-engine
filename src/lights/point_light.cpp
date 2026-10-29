@@ -28,6 +28,18 @@ Color3f PointLight::power() const {
     return m_intensity * 4.0f * PI;
 }
 
+bool PointLight::bounds(LightBounds& out) const {
+    const float I = std::max(0.0f, m_intensity.luminance());
+    if (!(I > 0.0f)) return false;
+    out.bounds = AABB(m_position);
+    out.w = Vec3f(0, 1, 0);
+    out.phi = PI * I; // alan ışıklarıyla aynı ölçü: π × (şiddet ≈ ışınım · uzaklık²)
+    out.cosThetaO = -1.0f; // her yöne
+    out.cosThetaE = 0.0f;
+    out.twoSided = false;
+    return true;
+}
+
 float PointLight::importance(const Vec3f& p, const Vec3f& n) const {
     const Vec3f d = m_position - p;
     const float d2 = std::max(d.lengthSquared(), 1e-6f);

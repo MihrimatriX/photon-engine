@@ -59,6 +59,19 @@ Color3f SpotLight::power() const {
     return m_intensity * (TWO_PI * (1.0f - cosAvg));
 }
 
+bool SpotLight::bounds(LightBounds& out) const {
+    const float I = std::max(0.0f, m_intensity.luminance());
+    if (!(I > 0.0f)) return false;
+    out.bounds = AABB(m_position);
+    out.w = m_frame.n;
+    out.phi = PI * I;
+    // Işık yalnız dış koninin içine gider: normal konisi = dış koni, ek yayılma yok.
+    out.cosThetaO = m_cosOuter > -1.0f ? m_cosOuter : -1.0f;
+    out.cosThetaE = 1.0f;
+    out.twoSided = false;
+    return true;
+}
+
 float SpotLight::importance(const Vec3f& p, const Vec3f& n) const {
     const Vec3f d = m_position - p;
     const float d2 = std::max(d.lengthSquared(), 1e-6f);

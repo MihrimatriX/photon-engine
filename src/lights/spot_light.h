@@ -24,6 +24,7 @@ public:
     bool isDelta() const override { return true; }
     Color3f power() const override;
     float importance(const Vec3f& p, const Vec3f& n) const override;
+    bool bounds(LightBounds& out) const override;
 
     /// Işıktan @p w yönüne (birim) giden şiddetin göreli çarpanı [0, 1].
     float falloff(const Vec3f& w) const;

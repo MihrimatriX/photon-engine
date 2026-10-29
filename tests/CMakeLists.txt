@@ -31,6 +31,7 @@ add_executable(photon_tests
     test_bsdf_verification.cpp
     test_pixel_filter.cpp
     test_robustness.cpp
+    test_light_sampler.cpp
 )
 
 target_link_libraries(photon_tests PRIVATE
