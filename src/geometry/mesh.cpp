@@ -87,7 +87,9 @@ bool TriangleMesh::intersectTriangle(size_t index, Ray& ray, SurfaceInteraction&
 
     Triangle tri(m_positions[idx0], m_positions[idx1], m_positions[idx2],
                  n0, n1, n2, uv0, uv1, uv2, m_material);
-    return tri.intersect(ray, isect);
+    if (!tri.intersect(ray, isect)) return false;
+    isect.primIndex = static_cast<int>(index);
+    return true;
 }
 
 void TriangleMesh::shadeTriangle(size_t index, const Ray& ray, float t, float u, float v,
@@ -102,6 +104,7 @@ void TriangleMesh::shadeTriangle(size_t index, const Ray& ray, float t, float u,
                  hasUV ? m_uvs[i0] : Vec2f(0.0f), hasUV ? m_uvs[i1] : Vec2f(0.0f), hasUV ? m_uvs[i2] : Vec2f(0.0f),
                  m_material);
     tri.fillHit(ray, t, u, v, isect);
+    isect.primIndex = static_cast<int>(index);
 }
 
 std::shared_ptr<Triangle> TriangleMesh::getTriangle(size_t index) const {

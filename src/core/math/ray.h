@@ -15,13 +15,13 @@ namespace photon {
 
 /// @brief A parametric ray:  P(t) = origin + t * direction.
 ///
-/// @c tMin is set to a small positive value (1e-4) to avoid self-intersection
-/// artifacts (shadow acne). @c tMax defaults to a large value representing
-/// an effectively infinite ray.
+/// @c tMin varsayılanı 0: yüzeyden çıkan ışınlar başlangıçta zaten hata sınırı kadar itilir
+/// (geometry/ray_spawn.h). Sabit bir tMin ölçeğe bağlı olurdu (mm'lik CAD'de sivilce, metrelik
+/// mücevherde sızma). @c tMax defaults to a large value representing an effectively infinite ray.
 struct Ray {
     Vec3f origin;                 ///< Ray origin point.
     Vec3f direction;              ///< Ray direction (not necessarily normalized).
-    float tMin = 1e-4f;           ///< Minimum parametric distance.
+    float tMin = 0.0f;            ///< Minimum parametric distance.
     float tMax = 1e30f;           ///< Maximum parametric distance.
 
     // ── Constructors ─────────────────────────────────────────

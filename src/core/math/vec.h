@@ -159,6 +159,8 @@ struct Vec3f {
     // ── Component-wise operations ────────────────────────────
     constexpr Vec3f cwiseMin(const Vec3f& v) const { return {std::min(x, v.x), std::min(y, v.y), std::min(z, v.z)}; }
     constexpr Vec3f cwiseMax(const Vec3f& v) const { return {std::max(x, v.x), std::max(y, v.y), std::max(z, v.z)}; }
+    /// En büyük bileşen.
+    constexpr float maxComponent() const { return std::max(x, std::max(y, z)); }
     inline    Vec3f cwiseAbs()               const { return {std::abs(x), std::abs(y), std::abs(z)}; }
 
     // ── Static factories ─────────────────────────────────────

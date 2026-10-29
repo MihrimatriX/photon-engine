@@ -2,6 +2,8 @@
 // teğet enterpolasyonu. Mesh dışındaki bağımsız üçgenler (ör. alan ışığı quad'ları) bunu kullanır.
 
 #include "geometry/triangle.h"
+#include "core/math/float_bits.h"
+#include <algorithm>
 #include <cmath>
 
 namespace photon {
@@ -53,10 +55,21 @@ void Triangle::fillHit(const Ray& ray, float t, float u, float v, SurfaceInterac
     const Vec3f edge1 = m_v1 - m_v0;
     const Vec3f edge2 = m_v2 - m_v0;
     isect.t = t;
-    isect.point = ray.at(t);
 
     // Compute barycentric weights
     float w = 1.0f - u - v;
+
+    // Nokta barisentriklerden (o + t·d değil): hatası yalnız köşe büyüklüklerine bağlıdır, ışının
+    // ne kadar yol aldığına değil. Sınır PBRT-v4 Triangle ile aynı biçim, γ(7) yerine fast-math
+    // (FMA, yeniden sıralama) payıyla γ(16). Ek izotrop terim (köşelerin en büyük bileşeni ×
+    // γ(32)): PBRT kesişim testinin kendisinde t > 0'ı muhafazakâr denetler; Möller–Trumbore'un
+    // t hatası köşe büyüklüğüyle orantılıdır ve bunu ofset karşılar. Yoksa y = 0 düzlemindeki
+    // bir noktanın y hatası tam 0 çıkar, ışın kendi düzlemine t = 0'da çarpar.
+    const Vec3f a0 = m_v0 * w, a1 = m_v1 * u, a2 = m_v2 * v;
+    isect.point = a0 + a1 + a2;
+    const float iso = floatGamma(32) * std::max({m_v0.cwiseAbs().maxComponent(), m_v1.cwiseAbs().maxComponent(),
+                                                 m_v2.cwiseAbs().maxComponent(), 1e-20f});
+    isect.pError = (a0.cwiseAbs() + a1.cwiseAbs() + a2.cwiseAbs()) * floatGamma(16) + Vec3f(iso);
 
     // Geometric normal (cross product of edges)
     Vec3f geomNormal = edge1.cross(edge2).normalized();
@@ -71,6 +84,24 @@ void Triangle::fillHit(const Ray& ray, float t, float u, float v, SurfaceInterac
 
     isect.ng = geomNormal;
     isect.setFaceNormal(ray, shadingNormal);
+
+    // Gölge terminatörü (Hanika 2021, "Hacking the Shadow Terminator", RTG II böl. 4): noktanın
+    // her köşenin teğet düzlemine olan uzaklığı, o köşenin altında kalıyorsa yukarı itilir ve
+    // barisentrik ağırlıkla toplanır: p' = p + Σ bᵢ · max(0, (vᵢ − p)·nᵢ) · nᵢ. Bu, köşe
+    // normallerinin tarif ettiği yumuşak yüzeye (Phong tessellation gibi) bir yaklaşımdır.
+    // Düz yüzde (nᵢ = ng) etkisizdir.
+    isect.hasSmoothPoint = false;
+    if (m_n0.lengthSquared() > 0.0f && m_n1.lengthSquared() > 0.0f && m_n2.lengthSquared() > 0.0f) {
+        const Vec3f& p = isect.point;
+        const Vec3f n0 = m_n0.normalized(), n1 = m_n1.normalized(), n2 = m_n2.normalized();
+        const Vec3f lift = n0 * (w * std::max(0.0f, (m_v0 - p).dot(n0))) +
+                           n1 * (u * std::max(0.0f, (m_v1 - p).dot(n1))) +
+                           n2 * (v * std::max(0.0f, (m_v2 - p).dot(n2)));
+        if (lift.lengthSquared() > 0.0f) {
+            isect.pSmooth = p + lift;
+            isect.hasSmoothPoint = true;
+        }
+    }
 
     // Interpolate UV coordinates
     isect.uv = m_uv0 * w + m_uv1 * u + m_uv2 * v;

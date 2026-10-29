@@ -18,7 +18,8 @@ TEST(RayTest, Construction) {
     EXPECT_FLOAT_EQ(r.direction.y, 0.0f);
     EXPECT_FLOAT_EQ(r.direction.z, 1.0f);
 
-    EXPECT_FLOAT_EQ(r.tMin, 1e-4f); // Default tMin value
+    // Varsayılan tMin 0: yüzeyden çıkan ışınlar hata sınırı kadar itilir (ray_spawn.h).
+    EXPECT_FLOAT_EQ(r.tMin, 0.0f);
 }
 
 TEST(RayTest, Evaluation) {
