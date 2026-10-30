@@ -125,7 +125,7 @@ PhotonEngine çalışırken kullanıcı veri klasörüne `livelink.json` dosyas�
 İçeriği:
 
 ```json
-{"port": 47260, "token": "…32 hex…", "app": "PhotonEngine", "version": "0.2.0"}
+{"port": 47260, "token": "…32 hex…", "app": "PhotonEngine", "version": "0.3.0"}
 ```
 
 `127.0.0.1:port` adresine TCP ile bağlanın, tek satır JSON gönderin ve tek satır yanıt alın:
