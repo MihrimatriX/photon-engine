@@ -1,8 +1,10 @@
 # package.ps1 — Release derlemesinden taşınabilir (kurulum gerektirmeyen) bir paket üretir:
 #   dist\PhotonEngine-<sürüm>-win64\  ve  dist\PhotonEngine-<sürüm>-win64.zip
 # İçerik: iki exe, DLL'ler, VC++ çalışma zamanı (uygulama yanına, kurulum gerekmez),
-# assets\, örnek proje, kullanım kılavuzu ve bağımlılık lisansları.
-#   powershell -ExecutionPolicy Bypass -File scripts\package.ps1
+# assets\, örnek proje, 3ds Max / Maya / Blender eklentileri (integrations\), kullanım
+# kılavuzu ve bağımlılık lisansları. Hem vcpkg'li (release) hem vcpkg'siz (fetch-release,
+# CI) derlemeyle çalışır; dağıtılan her bileşenin lisans metni bulunamazsa durur.
+#   powershell -ExecutionPolicy Bypass -File scripts\package.ps1 [-Build build\fetch-release]
 param([string]$Build = 'build\release')
 
 $ErrorActionPreference = 'Stop'
@@ -26,9 +28,17 @@ Copy-Item (Join-Path $app '*.dll') $out
 Copy-Item -Recurse (Join-Path $app 'assets') $out
 
 # VC++ çalışma zamanı: Microsoft "app-local" dağıtıma izin verir; böylece hedef
-# makinede vc_redist kurulu olmasa (ya da eski sürüm olsa) da çalışır.
-$crt = Get-ChildItem 'C:\Program Files\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT' -Directory |
-    Sort-Object FullName -Descending | Select-Object -First 1
+# makinede vc_redist kurulu olmasa (ya da eski sürüm olsa) da çalışır. Geliştirici
+# kabuğundaysak derleyicinin kendi redist klasörü, değilse en yeni kurulu sürüm.
+$crt = $null
+if ($env:VCToolsRedistDir) {
+    $crt = Get-ChildItem (Join-Path $env:VCToolsRedistDir 'x64') -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+}
+if (-not $crt) {
+    $crt = Get-ChildItem 'C:\Program Files\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT' -Directory |
+        Sort-Object FullName -Descending | Select-Object -First 1
+}
 if (-not $crt) { throw 'VC++ Redist klasörü bulunamadı (Visual Studio kurulu mu?)' }
 foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') { Copy-Item (Join-Path $crt.FullName $dll) $out }
 
@@ -39,16 +49,39 @@ $proj = [IO.File]::ReadAllText((Join-Path $repo 'bench\scenes\showcase.photon'))
 
 Copy-Item (Join-Path $repo 'packaging\KULLANIM.txt') $out
 
+# DCC eklentileri (canlı bağlantı betikleri): Python önbellekleri hariç.
+Copy-Item -Recurse (Join-Path $repo 'integrations') $out
+Get-ChildItem "$out\integrations" -Recurse -Directory -Filter '__pycache__' | Remove-Item -Recurse -Force
+
 # Lisanslar: dağıttığımız her bileşenin metni.
 Copy-Item (Join-Path $repo 'docs\THIRD_PARTY.md') "$out\lisanslar"
 Copy-Item (Join-Path $repo 'third_party\oidn\LICENSE.txt') "$out\lisanslar\oidn.txt"
 Copy-Item (Join-Path $repo 'third_party\embree\LICENSE.txt') "$out\lisanslar\embree.txt"
-foreach ($p in 'glfw3', 'imgui', 'imguizmo', 'nlohmann-json') {
-    Copy-Item (Join-Path $build "vcpkg_installed\x64-windows\share\$p\copyright") "$out\lisanslar\$p.txt"
+# Her bileşen: vcpkg'nin copyright dosyası ya da FetchContent kaynağındaki LICENSE.
+function Copy-License([string]$name, [string[]]$vcpkgNames, [string[]]$fetchDirs) {
+    foreach ($v in $vcpkgNames) {
+        $f = Join-Path $build "vcpkg_installed\x64-windows\share\$v\copyright"
+        if (Test-Path $f) { Copy-Item $f "$out\lisanslar\$name.txt"; return }
+    }
+    foreach ($d in $fetchDirs) {
+        $dir = Join-Path $build "_deps\$d"
+        if (-not (Test-Path $dir)) { continue }
+        $lic = Get-ChildItem $dir -File | Where-Object Name -match '^(LICENSE|COPYING)' | Select-Object -First 1
+        if ($lic) { Copy-Item $lic.FullName "$out\lisanslar\$name.txt"; return }
+    }
+    throw "$name lisans metni bulunamadı (dağıtılan bileşenin lisansı pakete girmeli)"
 }
-foreach ($p in 'cgltf', 'stb', 'tinyobjloader') {
-    $lic = Get-ChildItem (Join-Path $build "_deps\$p-src") -File | Where-Object Name -match '^(LICENSE|COPYING)' | Select-Object -First 1
-    if ($lic) { Copy-Item $lic.FullName "$out\lisanslar\$p.txt" } else { Write-Warning "$p lisans dosyası yok" }
+Copy-License 'glfw' @('glfw3') @('glfw-src')
+Copy-License 'imgui' @('imgui') @('imgui_fc-src')
+Copy-License 'imguizmo' @('imguizmo') @('imguizmo_fc-src')
+Copy-License 'nlohmann-json' @('nlohmann-json') @('nlohmann_json-src')
+Copy-License 'cgltf' @() @('cgltf-src')
+Copy-License 'stb' @() @('stb-src')
+Copy-License 'tinyobjloader' @() @('tinyobjloader-src')
+Copy-License 'ufbx' @() @((Get-ChildItem (Join-Path $build '_deps') -Directory -Filter 'ufbx-*' | Select-Object -First 1).Name)
+if (Test-Path (Join-Path $build '_deps\alembic-src')) {
+    Copy-License 'alembic' @() @('alembic-src')
+    Copy-License 'imath' @() @('imath-src')
 }
 # tinyexr'in BSD-3 metni ayrı dosyada değil, başlığın en üstündeki yorum bloğunda.
 $h = Get-Content (Join-Path $build '_deps\tinyexr-src\tinyexr.h') -TotalCount 120

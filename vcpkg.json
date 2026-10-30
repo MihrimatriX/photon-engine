@@ -1,6 +1,6 @@
 {
   "name": "photon-engine",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Physically-based product visualization renderer",
   "dependencies": [
     "glfw3",

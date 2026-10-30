@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(PhotonEngine VERSION 0.2.0 LANGUAGES CXX)
+project(PhotonEngine VERSION 0.3.0 LANGUAGES CXX)
 
 # ──────────────────────────────────────────────
 # C++ Standard
@@ -81,7 +81,8 @@ endfunction()
 # Process-wide definitions only. Warnings and float-model flags live on
 # photon_build_flags so third-party code keeps its own settings.
 if(MSVC)
-    add_compile_options(/MP)
+    # /bigobj: googletest ve nlohmann/json yoğun test dosyaları COFF bölüm sınırını (65k) aşar.
+    add_compile_options(/MP /bigobj)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
 endif()
 

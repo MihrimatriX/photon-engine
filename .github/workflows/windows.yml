@@ -1,0 +1,127 @@
+# Windows paketi: her push'ta MSVC ile derler, testleri çalıştırır ve taşınabilir zip'i
+# üretir (Actions sekmesinde "artifact" olarak indirilebilir). "v*" etiketinde aynı zip ve
+# SHA-256 özeti GitHub Release'e eklenir; sürüm notları docs/releases/<etiket>.md'den.
+#
+# Bağımlılıklar vcpkg'siz gelir (fetch-release preset'i, CMake FetchContent); Intel OIDN ve
+# Embree'nin resmi Windows paketleri scripts/fetch_deps.ps1 ile third_party/'ye iner.
+name: Windows
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: MSVC derle, test et, paketle
+    runs-on: windows-2025
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: OIDN ve Embree önbelleği
+        uses: actions/cache@v4
+        with:
+          path: third_party
+          key: third-party-${{ hashFiles('scripts/fetch_deps.ps1') }}
+
+      - name: OIDN ve Embree (resmi Windows paketleri)
+        shell: pwsh
+        run: ./scripts/fetch_deps.ps1
+
+      # VS geliştirici ortamı (cl, link, ninja) sonraki adımlara GITHUB_ENV ile aktarılır.
+      - name: MSVC ortamı
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'MSVC araç takımı bulunamadı' }
+          $before = @{}
+          Get-ChildItem env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          Import-Module (Join-Path $vs 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64' | Out-Null
+          Get-ChildItem env: | Where-Object { $before[$_.Name] -ne $_.Value } |
+            ForEach-Object { "$($_.Name)=$($_.Value)" } | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          cl 2>&1 | Select-Object -First 1
+          cmake --version | Select-Object -First 1
+
+      - name: Yapılandır
+        shell: pwsh
+        run: cmake --preset fetch-release
+
+      - name: Derle
+        shell: pwsh
+        run: cmake --build --preset fetch-release
+
+      - name: Test
+        shell: pwsh
+        run: ctest --preset fetch-release --output-on-failure --timeout 600
+
+      - name: Paketle
+        shell: pwsh
+        run: ./scripts/package.ps1 -Build build/fetch-release
+
+      # Paket kendi başına çalışıyor mu: eksik DLL ya da varlık yolu burada yakalanır.
+      # (Arayüz OpenGL 3.3 ister; GPU'suz CI makinesinde açılmaz, CLI denenir.)
+      - name: Paketlenmiş CLI ile duman testi
+        shell: pwsh
+        run: |
+          $dir = Get-ChildItem dist -Directory | Select-Object -First 1
+          Push-Location $dir.FullName
+          ./photon_render.exe ornekler/vitrin.photon --res 320x180 --spp 4 --out "$env:RUNNER_TEMP\duman.png"
+          if ($LASTEXITCODE -ne 0) { throw "photon_render çıkış kodu $LASTEXITCODE" }
+          Pop-Location
+          if ((Get-Item "$env:RUNNER_TEMP\duman.png").Length -lt 1000) { throw 'duman.png boş' }
+
+      - name: SHA-256
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -Filter *.zip | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" | Out-File "$($_.FullName).sha256" -Encoding ascii
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhotonEngine-win64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: PhotonEngine-win64
+          path: dist
+      - name: Sürümü yayınla
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          # Etiket ile CMakeLists.txt'teki sürüm aynı olmalı (paket adı oradan gelir).
+          ls "dist/PhotonEngine-${version}-win64.zip" > /dev/null
+          notes="docs/releases/${TAG}.md"
+          flags=()
+          if [ -f "$notes" ]; then flags+=(--notes-file "$notes"); else flags+=(--generate-notes); fi
+          case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$TAG" dist/*.zip dist/*.sha256 --verify-tag --title "PhotonEngine ${TAG}" "${flags[@]}"

@@ -22,7 +22,7 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - Her yeni bağımlılık `docs/THIRD_PARTY.md`'ye yazılır.
   - Ticari maddeler `01-gorevler.md`'deki "Ürünleşme (karar bekliyor)" ekinde durur.
 - **GPU:** GTX 1080 üzerinde CUDA 12.x ve TinyBVH CWBVH. Çekirdekler `PHOTON_HD` ile CPU ile paylaşılır. OptiX yalnız RTX kart gelince. Vulkan/DXR ikinci bir shading kod tabanı demek; yalnız seçmeli öğrenme egzersizi.
-- **Hafif süreç:** her görev için önce kırmızı sonra yeşil bir test. Görüntü değişiyorsa bench sayısı ya da önce/sonra ekran görüntüsü eklenir. ADR, CHANGELOG ve Linux CI yalnız ürünleşme kararıyla gelir.
+- **Hafif süreç:** her görev için önce kırmızı sonra yeşil bir test. Görüntü değişiyorsa bench sayısı ya da önce/sonra ekran görüntüsü eklenir. ADR ve Linux CI yalnız ürünleşme kararıyla gelir. Windows CI + otomatik sürüm 2026-10-30 kullanıcı isteğiyle geldi (sürüm notları `docs/releases/`).
 - **Hız rakamları tahmin.** Plandaki tüm "N× hızlanma" değerleri ölçülmedi. Faz 2'deki gerçek Mrays/s ölçümünden sonra Faz 3–7'nin sırası yeniden değerlendirilir.
 
 ## Öğrenme yöntemi (her görev için)
@@ -114,6 +114,10 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - **3ds Max / Maya / Blender:** `integrations/` (canlı bağlantı betikleri, ortak istemci + `sync_client.py`), `app/live_link.*` (127.0.0.1, 128-bit jeton, JSON satırı, yerinde güncelleme), `scene/dcc_convert.*` + `core/platform/process.*` (kabuksuz süreç, zaman aşımı), FBX kamera/ışık/kamera animasyonu (`ImportExtras`), `scene/camera_animation.*` + zaman çizelgesi, `.photonpack` (`core/io/zip`, `scene/mesh_binary`, `scene/package`).
   - **Kamera ve ışık araçları:** `placeLightForHighlight` (document), Kelvin (`temperatureColor`, `LightDesc.temperatureK`, proje `"temperature"`), lens kaydırma (`setShift`; GPU izdüşümünde de), iki noktalı perspektif, kompozisyon kılavuzları ve çıktı kadrajı.
   - **Gerçek zamanlı mod (Faz 8):** `scene/realtime_scene.*` (ortam pişirme, HDRI güneşi ayıklama, SH9, ışık listesi, gölge izdüşümü, ton LUT'u) + `app/raster_view.*` (`ViewMode::Realtime`, PBR shader, 2×2 PCSS gölge atlası, cam atlası, arka plan, cam iki geçiş). Ayrıntı `docs/architecture.md` §2c. Testler → 203.
+- **2026-10-30 (oturum 8 devamı, sürüm 0.3.0):**
+  - **Windows CI ve otomatik sürüm:** `.github/workflows/windows.yml` (windows-2025, MSVC, vcpkg'siz `fetch-release` + `fetch_deps.ps1`; her push'ta derle, test, `package.ps1`, paketlenmiş CLI ile duman testi, zip + SHA-256 artifact; `v*` etiketinde ayrı iş `gh release create`, notlar `docs/releases/<etiket>.md`, etiket = CMake sürümü denetimi). `package.ps1` hem vcpkg hem FetchContent derlemesiyle çalışır; lisansı bulunamayan bileşende durur; `integrations\` pakete girer. MSVC `/bigobj`.
+  - Windows'a özel kod yolları MinGW-w64 ile sözdizimi denetiminden geçirildi (`-fsyntax-only -Wvla -Wpedantic`, 128 dosya temiz); MSVC'nin kendisi CI'da.
+  - GitHub Pages (`docs/index.html`, main'den yayınlanıyor): 0.3 bölümü, gerçek zamanlı görünüm, İndir düğmeleri (`releases/latest`), güncel yol haritası sayıları.
 - **Sıradaki adımlar:**
   - Gerçek zamanlı mod: LTC alan ışıkları, SSR, GTAO, TAA, imager efektleri, IES dokusu (`docs/EKSIK_ANALIZI.md`).
   - Gerçek 3ds Max / Maya / Blender ile canlı bağlantı ve doğrudan açma denemesi (bu ortamda yok); Windows'ta `CreateProcessW` yolu.
