@@ -309,12 +309,14 @@
   <a class="brand" href="#"><i aria-hidden="true"></i>PhotonEngine</a>
   <div class="links">
     <a href="#ozellikler">Özellikler</a>
+    <a href="#yenilikler">0.3</a>
     <a href="#gorunumler">Görünümler</a>
     <a href="#ic-yapi">İç yapı</a>
     <a href="#yol-haritasi">Yol haritası</a>
     <a href="#derleme">Derleme</a>
+    <a href="https://github.com/MihrimatriX/photon-engine">GitHub</a>
   </div>
-  <a class="btn btn-accent gh" href="https://github.com/MihrimatriX/photon-engine">GitHub</a>
+  <a class="btn btn-accent gh" href="https://github.com/MihrimatriX/photon-engine/releases/latest">İndir</a>
 </nav>
 
 <main>
@@ -322,14 +324,18 @@
     <div class="wrap hero-grid">
       <div>
         <h1>Işığın fiziğiyle çalışan bir ürün stüdyosu</h1>
-        <p class="lead">PhotonEngine, ürün görselleştirme için yazılmış bir yol izleyici ve masaüstü stüdyo. Modeli bırakın, malzemeyi parçanın üzerine sürükleyin, birkaç saniyede gürültüsüz önizlemeyi görün.</p>
+        <p class="lead">PhotonEngine, ürün görselleştirme için yazılmış bir yol izleyici ve masaüstü stüdyo. Modeli bırakın ya da 3ds Max, Maya veya Blender'dan tek tıkla gönderin, malzemeyi parçanın üzerine sürükleyin, birkaç saniyede gürültüsüz önizlemeyi görün.</p>
         <div class="actions">
-          <a class="btn btn-light" href="https://github.com/MihrimatriX/photon-engine">
+          <a class="btn btn-light" href="https://github.com/MihrimatriX/photon-engine/releases/latest">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+            Windows için indir
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/MihrimatriX/photon-engine">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
             Kaynak kodu
           </a>
-          <a class="btn btn-ghost" href="#yol-haritasi">Yol haritası</a>
         </div>
+        <p class="lead" style="font-size:0.95rem;margin-top:18px">Sürüm 0.3.0 · Windows 10/11 x64 · kurulum gerektirmeyen zip</p>
       </div>
       <figure class="shot">
         <div class="frame">
@@ -363,7 +369,7 @@
         </article>
 
         <article class="card c-b">
-          <h3>37 hazır malzeme</h3>
+          <h3>61 hazır malzeme</h3>
           <p>Disney Principled tabanlı: vernikli araç boyası, fırçalanmış metal, buzlu cam, kadife. Küçük resimler motorun kendisiyle render edilir.</p>
           <div class="spheres" id="spheres"></div>
         </article>
@@ -395,12 +401,60 @@
     <div class="wrap">
       <p class="inline-head">Modeli <span class="pill p-model" aria-hidden="true"></span> bırakın, malzemeyi <span class="pill p-mat" aria-hidden="true"></span> sürükleyin, ışığı <span class="pill p-light" aria-hidden="true"></span> seçin, render'ı <span class="pill p-render" aria-hidden="true"></span> alın.</p>
       <ol class="steps">
-        <li><strong>İçe aktarın</strong>OBJ, glTF ya da GLB dosyasını pencereye sürükleyin. Model zemine oturur, kamera kadrajlanır.</li>
+        <li><strong>İçe aktarın</strong>FBX, Alembic, OBJ, glTF ya da doğrudan <code>.max</code>, <code>.ma</code>, <code>.blend</code> dosyasını pencereye sürükleyin. Model imlecin altındaki yüzeye oturur.</li>
         <li><strong>Malzeme verin</strong>Kütüphaneden bir küreyi viewport'taki parçanın üzerine bırakın.</li>
         <li><strong>Işığı seçin</strong>Bir HDRI ya da stüdyo hazırı seçin, ortamı döndürün.</li>
         <li><strong>Düzenleyin</strong><kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> ile taşıyın, döndürün, ölçekleyin. <kbd>Z</kbd> görünümü değiştirir.</li>
         <li><strong>Render alın</strong><kbd>Ctrl</kbd> + <kbd>P</kbd> ile çözünürlüğü ve kaliteyi seçin. PNG, JPEG ya da EXR.</li>
       </ol>
+    </div>
+  </section>
+
+  <section id="yenilikler" class="chapter" style="padding-top:0">
+    <div class="wrap">
+      <h2>0.3: Max, Maya ve Blender'la birlikte, oyun motoru hızında</h2>
+      <p class="lead">Sahne DCC'nizde kalır, PhotonEngine'e tek tıkla gelir. Yerleştirmeyi ve ışığı oyun motoru hızındaki gerçek zamanlı modda yaparsınız, son görüntüyü ışın izleme verir. İkisi aynı ışıkları, malzemeleri ve ton eşlemeyi kullanır.</p>
+      <div class="bento">
+        <article class="card c-a">
+          <h3>Gerçek zamanlı mod</h3>
+          <p>Ekran kartında anında PBR: en güçlü dört ışığın yumuşak gölgeleri (temasta keskin, uzaklaştıkça yumuşak), HDRI yansımaları, HDRI'nin içindeki güneşin keskin gölgesi, dokular, cam ve zemin.</p>
+          <ul>
+            <li>Işın izleyiciyle aynı ışıklar, ortam ve malzemeler</li>
+            <li>Ton eşleme tablosu: fark en çok 4/255</li>
+            <li>Yazılım OpenGL'inde bile ~50 fps</li>
+          </ul>
+          <div class="media"><img src="img/v4-realtime.jpg" alt="Solda ışın izleme, sağda gerçek zamanlı mod: güneşli HDRI'de aynı gölgeler; altta ahşap ve deri dokulu aynı sahne." loading="lazy"></div>
+        </article>
+
+        <article class="card c-b">
+          <h3>3ds Max, Maya ve Blender</h3>
+          <p>DCC'deki <em>Gönder</em> düğmesi sahneyi dokular, kameralar, ışıklar ve animasyonla yollar. Aynı sahne yeniden gelince model yerinde güncellenir; PhotonEngine'de atadığınız malzemeler korunur.</p>
+          <ul>
+            <li><code>.max</code>, <code>.ma</code>, <code>.mb</code>, <code>.blend</code> doğrudan açılır (kurulu DCC arka planda çevirir)</li>
+            <li>FBX kameraları zaman çizelgesine, ışıkları sahneye gelir</li>
+          </ul>
+        </article>
+
+        <article class="card c-c">
+          <div class="big-num">1<small>dosya</small></div>
+          <h3>.photonpack</h3>
+          <p>Sahne, dokular, HDRI ve geometri tek pakette. Başka bilgisayarda kaynak model olmadan açılır.</p>
+        </article>
+
+        <article class="card c-d">
+          <div class="big-num">203<small>test</small></div>
+          <h3>Her push'ta Windows'ta</h3>
+          <p>GitHub Actions her değişikliği MSVC ile derler, testleri çalıştırır ve indirilebilir paketi kendisi üretir.</p>
+        </article>
+
+        <article class="card c-e">
+          <div class="text">
+            <h3>Kamera ve ışık araçları</h3>
+            <p>Parlamayı yerleştir: modelde tıkladığınız noktaya ışığın yansıması düşer. Kelvin ile ışık rengi, lens kaydırma ve tek tıkla iki noktalı perspektif, üçler kuralı ve altın oran kılavuzları, render oranında çıktı kadrajı.</p>
+          </div>
+          <div class="media"><img src="img/v4-protools.jpg" alt="Arayüz: üçler kuralı kılavuzu ve 4:5 çıktı kadrajı, sağda Kelvin ve hazır renk sıcaklıklarıyla ışık paneli." width="1200" height="705" loading="lazy"></div>
+        </article>
+      </div>
     </div>
   </section>
 
@@ -464,6 +518,10 @@
         <figure class="slice is-open" tabindex="0">
           <img src="img/view-render.jpg" alt="Render görünümü." width="925" height="889" loading="lazy">
           <figcaption class="cap"><h3>Render</h3><p>İlerlemeli yol izleme ve anlık OIDN. Gördüğünüz, son render'ın kendisi.</p></figcaption>
+        </figure>
+        <figure class="slice" tabindex="0">
+          <img src="img/view-realtime.jpg" alt="Gerçek zamanlı görünüm: güneşli gökte keskin gölgeler, krom kürede gök yansıması." width="925" height="889" loading="lazy">
+          <figcaption class="cap"><h3>Gerçek zamanlı</h3><p>Oyun motoru gibi anında PBR: aynı ışıklar, yumuşak gölgeler, HDRI yansımaları ve dokular.</p></figcaption>
         </figure>
         <figure class="slice" tabindex="0">
           <img src="img/view-solid.jpg" alt="Katı görünüm." width="925" height="889" loading="lazy">
@@ -547,7 +605,7 @@
             <span class="state">Sırada</span>
           </div>
           <ul>
-            <li><strong>Faz 2: Ölçüm <em>4 / 15</em></strong><span>Kanıt: <code>bench/BASELINE.md</code> ilk satırı ve fırın testi ≈ 1.</span><div class="bar"><i style="width:27%"></i></div></li>
+            <li><strong>Faz 2: Ölçüm <em>6 / 15</em></strong><span>Chi-kare ve fırın testleri geldi. Kanıt: <code>bench/BASELINE.md</code> ve fırın testi ≈ 1.</span><div class="bar"><i style="width:40%"></i></div></li>
           </ul>
         </article>
 
@@ -569,10 +627,10 @@
             <div class="range">5–6</div>
             <h3>Işık taşıma ve ham hız</h3>
             <p class="lead" style="margin-top:0;font-size:1.05rem">Daha akıllı örnekleme ve hızlandırma yapıları. Embree 4 bu fazın önünde, erken geldi.</p>
-            <span class="state">Planlandı</span>
+            <span class="state">Sürüyor</span>
           </div>
           <ul>
-            <li><strong>Faz 5: Örnekleme <em>7 / 14</em></strong><span>Sobol, noktaya özel ışık seçimi, küresel dikdörtgen, uyarlamalı örnekleme. Kanıt: eşit örnekte relMSE yarıya indi.</span><div class="bar"><i style="width:50%"></i></div></li>
+            <li><strong>Faz 5: Örnekleme <em>11 / 14</em></strong><span>Işık BVH'si (2.9×), HDRI MIS telafisi (6.8×), piksel filtresi, küresel dikdörtgen, uyarlamalı örnekleme.</span><div class="bar"><i style="width:79%"></i></div></li>
             <li><strong>Faz 6: Hızlandırma <em>0 / 11</em></strong><span>Yalın BVH, BLAS/TLAS, Embree 4. Kanıt: Mrays/s artışı.</span><div class="bar"><i style="width:0%"></i></div></li>
           </ul>
         </article>
@@ -582,11 +640,11 @@
             <div class="range">7–8</div>
             <h3>Malzeme gerçekçiliği ve raster izi</h3>
             <p class="lead" style="margin-top:0;font-size:1.05rem">Enerji koruyan mikro yüzeyler, OpenPBR ve yol izlemeyle karşılaştırılabilir bir rasterizasyon yolu.</p>
-            <span class="state">Planlandı</span>
+            <span class="state">Sürüyor</span>
           </div>
           <ul>
-            <li><strong>Faz 7: Malzeme ve renk <em>4 / 12</em></strong><span>Çoklu saçılma telafisi, F82, Beer–Lambert, yuvarlatılmış kenar bitti; OpenPBR sırada. Kanıt: fırın ≈ 1.</span><div class="bar"><i style="width:33%"></i></div></li>
-            <li><strong>Faz 8: Rasterizasyon <em>0 / 6</em></strong><span>Split-sum IBL, gölge haritası. Kanıt: fark haritası.</span><div class="bar"><i style="width:0%"></i></div></li>
+            <li><strong>Faz 7: Malzeme ve renk <em>5 / 12</em></strong><span>Enerji korunan katmanlama, EON difüz, sheen, F82, Beer–Lambert bitti; OpenPBR sırada. Kanıt: fırın ≈ 1.</span><div class="bar"><i style="width:42%"></i></div></li>
+            <li><strong>Faz 8: Rasterizasyon <em>4 / 6</em></strong><span>Gerçek zamanlı mod: split-sum IBL, PCSS gölge atlası, dokular, cam. Kanıt: ışın izlemeyle yan yana.</span><div class="bar"><i style="width:67%"></i></div></li>
           </ul>
         </article>
 
@@ -598,7 +656,7 @@
             <span class="state">Planlandı</span>
           </div>
           <ul>
-            <li><strong>Faz 9: GTX 1080'de CUDA <em>0 / 9</em></strong><span>En büyük faz. Kanıt: CPU ile GPU eşleşme testi.</span><div class="bar"><i style="width:0%"></i></div></li>
+            <li><strong>Faz 9: GTX 1080'de CUDA <em>1 / 9</em></strong><span>Cihaz/mod katmanı hazır; GPU arka ucu sırada. Kanıt: CPU ile GPU eşleşme testi.</span><div class="bar"><i style="width:11%"></i></div></li>
             <li><strong>Faz 10: İleri konular <em>4 / 12</em></strong><span>Hacimler ve SSS, dispersiyon, ince duvar, görüntüleyici bitti.</span><div class="bar"><i style="width:33%"></i></div></li>
           </ul>
         </article>
@@ -611,7 +669,7 @@
   <section id="derleme" class="chapter" style="padding-top:0">
     <div class="wrap">
       <h2>Derleyin ve çalıştırın</h2>
-      <p class="lead">Windows ve MSVC. Gerekenler: Visual Studio 2022 ya da 2026 (C++ masaüstü), CMake 3.21+ ve Ninja. glfw, Dear ImGui, ImGuizmo ve nlohmann-json vcpkg ile gelir.</p>
+      <p class="lead">Hazır paket için <a href="https://github.com/MihrimatriX/photon-engine/releases/latest">son sürümü indirin</a>: her etiket GitHub Actions'ta MSVC ile derlenir, testlerden geçer ve zip olarak sürüme eklenir. Kendiniz derlemek için: Visual Studio 2022 ya da 2026 (C++ masaüstü), CMake 3.21+ ve Ninja. glfw, Dear ImGui, ImGuizmo ve nlohmann-json vcpkg ile gelir; vcpkg'siz <code>fetch-release</code> preset'i her şeyi kendisi indirir (Linux'ta da çalışır).</p>
       <div class="build">
         <pre><code><span class="c"># Bir kez: OIDN ve Embree paketlerini indir</span>
 powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
@@ -663,10 +721,11 @@ pwsh -File scripts\package.ps1</code></pre>
 
   <section class="cta">
     <div class="wrap">
-      <h2>Kodu açın, ilk render'ınızı alın</h2>
+      <h2>İndirin, ilk render'ınızı alın</h2>
       <p class="lead">PhotonEngine aynı zamanda bir öğrenme projesi: kod, bilgisayar grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazıldı.</p>
       <div class="actions">
-        <a class="btn btn-accent" href="https://github.com/MihrimatriX/photon-engine">GitHub'da açın</a>
+        <a class="btn btn-accent" href="https://github.com/MihrimatriX/photon-engine/releases/latest">Windows için indir</a>
+        <a class="btn btn-ghost" href="https://github.com/MihrimatriX/photon-engine">GitHub'da açın</a>
         <a class="btn btn-ghost" href="https://github.com/MihrimatriX/photon-engine/blob/main/docs/architecture.md">Mimariyi okuyun</a>
       </div>
     </div>
@@ -675,8 +734,9 @@ pwsh -File scripts\package.ps1</code></pre>
 
 <footer>
   <div class="wrap">
-    <span>PhotonEngine 0.1.0. C++20, Windows.</span>
+    <span>PhotonEngine 0.3.0. C++20, Windows ve Linux.</span>
     <nav aria-label="Belgeler">
+      <a href="https://github.com/MihrimatriX/photon-engine/releases/latest">Sürümler</a>
       <a href="https://github.com/MihrimatriX/photon-engine#readme">README</a>
       <a href="https://github.com/MihrimatriX/photon-engine/blob/main/docs/architecture.md">Mimari</a>
       <a href="https://github.com/MihrimatriX/photon-engine/blob/main/docs/ROADMAP.md">Yol haritası</a>
