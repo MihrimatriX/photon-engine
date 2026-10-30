@@ -1,6 +1,14 @@
 # PhotonEngine
 
+[![Windows](https://github.com/MihrimatriX/photon-engine/actions/workflows/windows.yml/badge.svg)](https://github.com/MihrimatriX/photon-engine/actions/workflows/windows.yml)
+[![Son sürüm](https://img.shields.io/github/v/release/MihrimatriX/photon-engine?label=s%C3%BCr%C3%BCm)](https://github.com/MihrimatriX/photon-engine/releases/latest)
+
 **Ürün görselleştirme için fiziksel tabanlı render motoru ve masaüstü stüdyo.**
+
+**İndir (Windows 10/11 x64):** [son sürüm](https://github.com/MihrimatriX/photon-engine/releases/latest) →
+`PhotonEngine-<sürüm>-win64.zip`. Bir klasöre açıp `photon_app.exe`'yi çalıştırın; kurulum gerekmez.
+Her sürüm GitHub Actions'ta MSVC ile derlenir, testlerden geçer ve otomatik paketlenir
+(`.github/workflows/windows.yml`). Ara derlemeler Actions sekmesinde "artifact" olarak durur.
 
 PhotonEngine, KeyShot / Octane tarzı bir iş akışı sunan C++20 bir yol izleyicidir (path tracer):
 modeli sürükle-bırak ile içe aktar, kütüphaneden malzemeleri parçaların üzerine bırak,
@@ -165,11 +173,16 @@ ctest --preset fetch-release
 
 Arayüzsüz sunucuda uygulama `xvfb-run` ile çalışır (`--screenshot` modu görsel kontrol için).
 
-### Paketleme
+### Paketleme ve sürüm
 
 ```powershell
-pwsh -File scripts\package.ps1   # → dist\PhotonEngine-<sürüm>-win64.zip
+pwsh -File scripts\package.ps1                             # vcpkg'li derleme → dist\PhotonEngine-<sürüm>-win64.zip
+pwsh -File scripts\package.ps1 -Build build\fetch-release  # vcpkg'siz derleme (CI bunu kullanır)
 ```
+
+Sürüm çıkarmak: kök `CMakeLists.txt`'te `project(VERSION)`'ı artırın, `docs/releases/v<sürüm>.md`
+notlarını yazın ve `v<sürüm>` etiketini push'layın. İş akışı paketi derler, test eder ve GitHub
+Release'e zip + SHA-256 özetiyle ekler (etiket ile CMake sürümü aynı olmalı).
 
 Kurulum gerektirmeyen paket: iki exe, DLL'ler, VC++ çalışma zamanı (uygulama yanına),
 `assets\`, `ornekler\vitrin.photon`, `KULLANIM.txt` (kullanıcı kılavuzu, `packaging\`) ve
