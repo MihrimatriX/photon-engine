@@ -463,12 +463,6 @@ mat.h — 4×4 matris (Mat4f): afin dönüşümler (öteleme/döndürme/ölçek)
 Transform sınıfı bu matrisi ve tersini birlikte saklar; noktalar/vektörler/normaller
 sahne ↔ nesne uzayı arasında bu matrislerle taşınır.
 
-### `src/core/math/quaternion.h`
-
-quaternion.h — Birim kuaterniyon ile 3B döndürme (eksen-açı, Euler, matris, SLERP).
-q = (sin(θ/2)·eksen, cos(θ/2)); v' = q·v·q* bir θ dönmesidir. Gimbal kilidi yoktur ve
-iki yönelim arasında pürüzsüz ara değer (SLERP) almak kolaydır.
-
 ### `src/core/math/ray.h`
 
 ray.h — Işın: P(t) = origin + t·direction, geçerli aralık [tMin, tMax].

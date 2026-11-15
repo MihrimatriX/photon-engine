@@ -118,18 +118,25 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - **Windows CI ve otomatik sürüm:** `.github/workflows/windows.yml` (windows-2025, MSVC, vcpkg'siz `fetch-release` + `fetch_deps.ps1`; her push'ta derle, test, `package.ps1`, paketlenmiş CLI ile duman testi, zip + SHA-256 artifact; `v*` etiketinde ayrı iş `gh release create`, notlar `docs/releases/<etiket>.md`, etiket = CMake sürümü denetimi). `package.ps1` hem vcpkg hem FetchContent derlemesiyle çalışır; lisansı bulunamayan bileşende durur; `integrations\` pakete girer. MSVC `/bigobj`.
   - Windows'a özel kod yolları MinGW-w64 ile sözdizimi denetiminden geçirildi (`-fsyntax-only -Wvla -Wpedantic`, 128 dosya temiz); MSVC'nin kendisi CI'da.
   - GitHub Pages (`docs/index.html`, main'den yayınlanıyor): 0.3 bölümü, gerçek zamanlı görünüm, İndir düğmeleri (`releases/latest`), güncel yol haritası sayıları.
+- **2026-11-06 (oturum 9, yerel Windows, kesikler + veri güvenliği):**
+  - Bu makinede ilk temiz kurulum: `fetch_deps.ps1` + `cmake --preset fetch-release` (vcpkg gerekmiyor, ~7,5 dk). Tüm testler yeşil, photon kodunda 0 MSVC uyarısı; bu yüzden `/WX` her yerde varsayılan açık (F0.9). tinyexr C4702'si `image_io.cpp`'de susturuldu. CI 2026-11-02'de zaten yeşildi, "Windows'ta derlenmedi" notu eskimişti.
+  - **Alfa kesikleri:** `Material::opacity`, Disney'de çarpan + `opacityMap`. Mevcut ince duvarlı cam mekanizması kullanıldı: gölge ışını `shadowTransmittance` ile (kesik varsa yavaş yol), kamera/sekme ışını `passesCutout` ile stokastik geçiş; Embree filtresi gerekmedi, iki kesişim arka ucu aynı kodla çalışıyor. Maske: dosyanın alfası, yoksa gri (doğrusal). Proje/preset/paket kalıcılığı. glTF `alphaMode`/`alphaCutoff`, baseColor alfası. FBX: `opacity` + klasik `TransparentColor`/`TransparencyFactor` (eskiden malzemeyi cama çeviriyordu). Gerçek zamanlı: alpha hashing, gölgede 0.5 eşiği. Arayüz: Temel > Opaklık, Dokular > Opaklık.
+  - **Veri güvenliği:** otomatik kayıt (`tickAutosave`, 120 sn, anlık görüntü + arka plan yazımı), çökme kurtarma sorusu, kaydedilmemiş işte çıkış/yeni/aç onayı (eskiden pencere kapanınca iş sessizce gidiyordu). `scripts/smoke_recovery.ps1` gerçek uygulamayla uçtan uca dener (GPU ister, CI'da yok).
+  - Temizlik: kullanılmayan `quaternion.h` silindi (F1.26). F6.9, F7.1 kutuları gerçeğe getirildi.
+  - **Dikkat:** GitHub'da etiket ve sürüm yok; sitenin İndir düğmeleri `releases/latest` adresine gidiyor. `v0.3.0` etiketi atılırsa CI paketi üretip yayımlar.
+  - Bu makinede `gh` ve Python yok; GitHub sorguları `Invoke-RestMethod` ile.
 - **Sıradaki adımlar:**
   - Gerçek zamanlı mod: LTC alan ışıkları, SSR, GTAO, TAA, imager efektleri, IES dokusu (`docs/EKSIK_ANALIZI.md`).
   - Gerçek 3ds Max / Maya / Blender ile canlı bağlantı ve doğrudan açma denemesi (bu ortamda yok); Windows'ta `CreateProcessW` yolu.
-  - `docs/EKSIK_ANALIZI.md` öncelik 1: GPU (CUDA), path guiding (Open PGL), alfa kesikleri, doku belleği + mipmap, BLAS/TLAS, otomatik kayıt.
-  - Windows/MSVC'de oturum 7 ve 8'in değişiklikleri derlenmedi (yalnız GCC 13). `/W4` uyarıları ve `std::complex` kullanımı kontrol edilmeli; OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli.
+  - `docs/EKSIK_ANALIZI.md` öncelik 1: GPU (CUDA), path guiding (Open PGL), doku belleği + mipmap, BLAS/TLAS.
+  - OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli.
   - Kostikler: cam arkası ve delta ışık + parlak yüzey yolları hâlâ gürültülü (parlama sınırı geçici çözüm). Path guiding (Open PGL) ya da MNEE.
   - Render geçişleri (AOV'ler, ışık grupları, çok katmanlı EXR, Cryptomatte); ışık bağlama; yansımada görünürlük bayrağı.
   - GPU (Faz 9).
   - Pullar ve kutu eşleme dünya uzayında (nesne hareket edince kayar).
   - GPU Katı modunda dokular ve ışıklar yok (yalnız taban rengi).
   - Tutamaç sürüklenirken Esc ile iptal (şimdilik Ctrl+Z).
-  - Kurulum paketi (Inno Setup, makinede yok), kod imzalama, log + çökme dökümü, otomatik kaydetme (eksik analizi "Faz 1").
+  - Kurulum paketi (Inno Setup, makinede yok), kod imzalama, log + çökme dökümü (eksik analizi "Faz 1").
   - Embree sonrası ölçüm ve `bench/BASELINE.md` (F2.13).
   - F2.6/F2.7 furnace + chi-kare testleri; F2.8 golden görüntüler.
   - F3.8 malzeme ID tablosu / geometri önbelleği: büyük modelde ışık-ortam düzenlemesi tüm sahneyi yeniden bake ediyor. Faz 6 TLAS/BLAS (Embree instancing) ile birlikte.

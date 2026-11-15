@@ -147,8 +147,17 @@ bool makeShadowRay(const SurfaceInteraction& isect, const LightSample& ls, bool 
     return spawnRayTo(isect, isect.point + ls.wi * ls.distance, out);
 }
 
-/// Gölge ışınının geçirgenliği: ince duvarlı camlar (doğrultu değiştirmeyen yüzeyler)
-/// renkli geçirgenlikle aşılır, başka her yüzey ışığı tamamen keser. Sahnede böyle bir
+/// Yüzey noktası bu ışın için "yok" mu? (alfa kesiği, Material::opacity)
+/// true dönerse çağıran ışını doğrultusunu bozmadan sürdürür: köşe sayılmaz, sekme harcanmaz.
+bool passesCutout(const SurfaceInteraction& isect, Sampler& sampler) {
+    // TODO(human): opaklığı α olan noktada ışın yüzeyi (1 − α) olasılıkla geçmeli.
+    (void)isect;
+    (void)sampler;
+    return false;
+}
+
+/// Gölge ışınının geçirgenliği: ince duvarlı camlar ve kesik yüzeyler (doğrultu değiştirmeyen
+/// yüzeyler) geçirgenlikle aşılır, başka her yüzey ışığı tamamen keser. Sahnede böyle bir
 /// malzeme yoksa hızlı "herhangi bir isabet" testi kullanılır.
 Color3f shadowTransmittance(const Scene& scene, const Ray& shadow) {
     if (!scene.hasShadowTransmitters()) return scene.intersectAny(shadow) ? Color3f::black() : Color3f(1.0f);
@@ -156,7 +165,7 @@ Color3f shadowTransmittance(const Scene& scene, const Ray& shadow) {
     Vec3f origin = shadow.origin;
     const Vec3f dir = shadow.direction;
     float remaining = shadow.tMax;
-    for (int i = 0; i < 16; ++i) {
+    for (int i = 0; i < 64; ++i) {
         Ray r(origin, dir, 0.0f, remaining);
         SurfaceInteraction hit;
         if (!scene.intersect(r, hit)) return T;
@@ -362,8 +371,10 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             isect = SurfaceInteraction{};
             const Vec3f segmentStart = currentRay.origin;
             hit = scene.intersect(currentRay, isect);
-            // Kameraya görünmez ışık dörtgenleri: kamera ışını içinden geçip devam eder.
-            for (int skip = 0; hit && cameraRay && skip < 8 && scene.cameraInvisible(isect); ++skip) {
+            // Kameraya görünmez ışık dörtgenleri ve kesik yüzeyler: ışın içinden geçip devam eder.
+            // Köşe sayılmaz: sekme, MIS durumu ve birincil isabet (AOV) ilk gerçek yüzeye aittir.
+            for (int skip = 0; hit && skip < 64; ++skip) {
+                if (!(cameraRay && scene.cameraInvisible(isect)) && !passesCutout(isect, sampler)) break;
                 currentRay = Ray(offsetRayOrigin(isect.point, isect.pError, isect.ng, currentRay.direction),
                                  currentRay.direction, 0.0f, 1e30f);
                 isect = SurfaceInteraction{};

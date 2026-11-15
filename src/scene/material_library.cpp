@@ -76,6 +76,7 @@ bool MaterialLibrary::loadFile(const std::string& path) {
     p.albedoMap = mapPath("albedo");
     p.normalMap = mapPath("normal");
     p.roughnessMap = mapPath("roughness");
+    p.opacityMap = mapPath("opacity");
     p.boxMapping = j.value("mapping", std::string("uv")) == "box";
     p.texScale = j.value("texScale", 1.0f);
     presetAdvancedFromJson(j, p);
@@ -140,6 +141,7 @@ std::shared_ptr<Material> MaterialLibrary::createMaterial(const MaterialPreset& 
     if (!p.albedoMap.empty()) m->setAlbedoMap(p.albedoMap);
     if (!p.normalMap.empty()) m->setNormalMap(p.normalMap);
     if (!p.roughnessMap.empty()) m->setRoughnessMap(p.roughnessMap);
+    if (!p.opacityMap.empty()) m->setOpacityMap(p.opacityMap);
     m->setTextureMapping(p.boxMapping ? DisneyMaterial::TextureMapping::Box : DisneyMaterial::TextureMapping::UV);
     m->setTextureScale(p.texScale);
     applyAdvanced(p, *m);
@@ -155,6 +157,7 @@ void MaterialLibrary::applyAdvanced(const MaterialPreset& p, Material& mat) {
         g->setScattering(p.scatterDensity, p.scatterColor, p.scatterAnisotropy);
         g->setAbbe(p.abbe);
     } else if (auto* d = dynamic_cast<DisneyMaterial*>(&mat)) {
+        d->setOpacity(p.opacity);
         d->setDiffuseRoughness(p.diffuseRoughness);
         d->setSheenRoughness(p.sheenRoughness);
         d->setSubsurface(p.subsurface);
@@ -176,6 +179,7 @@ json colJson(const Color3f& c) { return json::array({c.r, c.g, c.b}); }
 void presetAdvancedToJson(const MaterialPreset& p, json& j) {
     const MaterialPreset def;
     if (p.roundEdges > 0.0f) j["roundEdges"] = p.roundEdges;
+    if (p.opacity < 1.0f) j["opacity"] = p.opacity;
     if (p.kind == MaterialKind::Glass) {
         if (p.thinWalled) {
             j["thinWalled"] = true;
@@ -202,6 +206,7 @@ void presetAdvancedToJson(const MaterialPreset& p, json& j) {
 }
 
 void presetAdvancedFromJson(const json& j, MaterialPreset& p) {
+    p.opacity = j.value("opacity", p.opacity);
     if (auto a = j.find("absorption"); a != j.end() && a->is_object()) {
         p.absorbColor = readColor(*a, "color", p.absorbColor);
         p.absorbDistance = a->value("distance", p.absorbDistance);
@@ -241,7 +246,7 @@ std::string presetSignature(const MaterialPreset& p) {
     j["c"] = colJson(p.baseColor);
     j["v"] = {p.metallic, p.roughness, p.specular, p.clearCoat, p.clearCoatRoughness, p.anisotropy,
               p.sheen, p.diffuseTransmission, p.emissive, p.ior, p.texScale};
-    j["m"] = {p.albedoMap, p.normalMap, p.roughnessMap};
+    j["m"] = {p.albedoMap, p.normalMap, p.roughnessMap, p.opacityMap};
     j["b"] = p.boxMapping;
     presetAdvancedToJson(p, j);
     return j.dump();
@@ -286,6 +291,8 @@ MaterialPreset MaterialLibrary::presetFromMaterial(const Material& mat, const st
         p.albedoMap = d->albedoMap();
         p.normalMap = d->normalMap();
         p.roughnessMap = d->roughnessMap();
+        p.opacityMap = d->opacityMap();
+        p.opacity = d->baseOpacity();
         p.boxMapping = d->textureMapping() == DisneyMaterial::TextureMapping::Box;
         p.texScale = d->textureScale();
     } else if (const auto* g = dynamic_cast<const Dielectric*>(&mat)) {
@@ -332,6 +339,7 @@ bool MaterialLibrary::savePreset(MaterialPreset p, const std::string& dir) {
     if (!p.albedoMap.empty()) maps["albedo"] = p.albedoMap;
     if (!p.normalMap.empty()) maps["normal"] = p.normalMap;
     if (!p.roughnessMap.empty()) maps["roughness"] = p.roughnessMap;
+    if (!p.opacityMap.empty()) maps["opacity"] = p.opacityMap;
     if (!maps.empty()) {
         j["maps"] = maps;
         j["mapping"] = p.boxMapping ? "box" : "uv";

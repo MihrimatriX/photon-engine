@@ -88,9 +88,16 @@ std::shared_ptr<Material> convertMaterial(const ufbx_material* fm, Context& ctx)
     const float metal = std::clamp(real(pbr.metalness, 0.0f), 0.0f, 1.0f);
     const float ior = std::clamp(real(pbr.specular_ior, 1.5f), 1.0f, 3.0f);
 
+    // Kesik doku: modern kaplamalarda opacity, klasik Lambert/Phong'da (Max, Maya, çoğu oyun
+    // varlığı) TransparentColor/TransparencyFactor'a bağlanır. ufbx ikincisini "transmission"
+    // sayar; dokulu saydamlık cam değil maskedir, aksi hâlde yaprak kartı kırıcı levha olur.
+    const ufbx_texture* cutout = mapTexture(pbr.opacity);
+    if (!cutout) cutout = mapTexture(fm->fbx.transparency_color);
+    if (!cutout) cutout = mapTexture(fm->fbx.transparency_factor);
+
     std::shared_ptr<Material> result;
     const float transmission = feat.transmission.enabled ? real(pbr.transmission_factor, 0.0f) : 0.0f;
-    if (transmission >= 0.5f && metal < 0.5f) {
+    if (transmission >= 0.5f && metal < 0.5f && !cutout) {
         // Saydam malzeme (cam, sıvı, akrilik): kırıcı dielektrik.
         Color3f tint = pbr.transmission_color.has_value ? col(pbr.transmission_color.value_vec3) : Color3f(1.0f);
         float tr = pbr.transmission_roughness.has_value ? real(pbr.transmission_roughness, rough) : rough;
@@ -132,9 +139,12 @@ std::shared_ptr<Material> convertMaterial(const ufbx_material* fm, Context& ctx)
         if (!feat.roughness_as_glossiness.enabled)
             if (const std::string p = resolveTexture(mapTexture(pbr.roughness), ctx); !p.empty()) d->setRoughnessMap(p);
         if (const std::string p = resolveTexture(mapTexture(pbr.metalness), ctx); !p.empty()) d->setMetalnessMap(p);
+        if (feat.opacity.enabled) d->setOpacity(real(pbr.opacity, 1.0f));
+        if (const std::string p = resolveTexture(cutout, ctx); !p.empty()) d->setOpacityMap(p);
         result = d;
     }
-    if (feat.opacity.enabled && real(pbr.opacity, 1.0f) < 0.99f) ++ctx.unsupportedOpacity;
+    if (!std::dynamic_pointer_cast<DisneyMaterial>(result) && feat.opacity.enabled && real(pbr.opacity, 1.0f) < 0.99f)
+        ++ctx.unsupportedOpacity; // cam: geçirgenliği zaten kendi lobu
     ctx.materials[fm] = result;
     return result;
 }

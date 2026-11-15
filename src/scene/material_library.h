@@ -42,6 +42,8 @@ struct MaterialPreset {
     std::string albedoMap;  ///< Mutlak yol (JSON'da assets/textures'a göreli)
     std::string normalMap;
     std::string roughnessMap;
+    std::string opacityMap;  ///< Maske: alfa ya da gri (yaprak, file, etiket)
+    float opacity = 1.0f;    ///< Doku varsa onunla çarpılır
     bool boxMapping = false; ///< UV yerine kutu (triplanar) eşleme
     float texScale = 1.0f;
 

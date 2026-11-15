@@ -425,6 +425,23 @@ void DisneyMaterial::setMetalnessMap(const std::string& p) {
     m_metalnessTex = loadMap(p, TextureEncoding::Linear);
 }
 
+void DisneyMaterial::setOpacityMap(const std::string& p) {
+    m_opacityMap = p;
+    m_opacityTex.reset();
+    if (p.empty()) return;
+    if (auto mask = loadOpacityImage(p)) m_opacityTex = std::make_shared<Image>(std::move(*mask));
+}
+
+float DisneyMaterial::opacity(const SurfaceInteraction& si) const {
+    if (!m_opacityTex) return m_opacity;
+    const Vec2f uv = textureCoord(si);
+    return m_opacity * std::clamp(m_opacityTex->sampleBilinear(uv.x, uv.y).r, 0.0f, 1.0f);
+}
+
+Color3f DisneyMaterial::shadowTransmittance(const SurfaceInteraction& si, const Vec3f&) const {
+    return Color3f(1.0f - opacity(si));
+}
+
 // Doku koordinatı. Kutu eşleme (triplanar'ın en basit hali): geometrik normalin
 // mutlak değerce en büyük bileşeni hangi eksense, nokta o eksene dik düzleme
 // izdüşürülür (ör. yukarı bakan yüzeyde (x, z)). ponytail: dünya uzayında; nesne

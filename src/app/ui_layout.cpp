@@ -3,6 +3,7 @@
 #include "app/application.h"
 #include "ui/theme.h"
 #include "ui/icons.h"
+#include "core/platform/path.h"
 #include "ui/widgets.h"
 #include "engine/denoiser.h"
 #include "scene/package.h"
@@ -77,7 +78,7 @@ void Application::drawMenuBar() {
 
     const bool busy = m_s.finalJob.active.load();
     if (ImGui::BeginMenu("Dosya")) {
-        if (ImGui::MenuItem(ICON_FILE_PLUS "  Yeni sahne", "Ctrl+N")) newScene();
+        if (ImGui::MenuItem(ICON_FILE_PLUS "  Yeni sahne", "Ctrl+N")) confirmDiscard([this] { newScene(); });
         if (ImGui::MenuItem(ICON_FOLDER_OPEN "  Proje aç…", "Ctrl+Shift+O")) openProjectDialog();
         if (ImGui::MenuItem(ICON_SAVE "  Kaydet", "Ctrl+S")) saveProject();
         if (ImGui::MenuItem("      Farklı kaydet…", "Ctrl+Shift+S")) saveProjectAs();
@@ -102,7 +103,7 @@ void Application::drawMenuBar() {
             }
             ImGui::EndMenu();
             if (!pick.empty()) {
-                if (isProjectPath(pick)) openProject(pick);
+                if (isProjectPath(pick)) confirmDiscard([this, pick] { openProject(pick); });
                 else requestImport({pick});
             }
         }
@@ -299,6 +300,59 @@ void Application::drawStatusBar() {
     ImGui::End();
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();
+}
+
+void Application::drawDocumentDialogs() {
+    const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings;
+
+    constexpr const char* kRecovery = "Önceki oturum kurtarılsın mı?";
+    if (m_recoveryPending && !ImGui::IsPopupOpen(kRecovery)) ImGui::OpenPopup(kRecovery);
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal(kRecovery, nullptr, flags)) {
+        ImGui::TextUnformatted("Uygulama beklenmedik şekilde kapanmış. Kaydedilmemiş\nçalışmanın otomatik kaydı bulundu.");
+        ImGui::Spacing();
+        if (ui::PrimaryButton("Kurtar")) {
+            m_recoveryPending = false;
+            ImGui::CloseCurrentPopup();
+            openProject(pathToUtf8(recoveryFile()), true);
+        }
+        ImGui::SameLine();
+        if (ui::GhostButton("Sil")) {
+            m_recoveryPending = false;
+            discardRecovery();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    constexpr const char* kDiscard = "Kaydedilmemiş değişiklikler";
+    if (m_pendingDiscard && !ImGui::IsPopupOpen(kDiscard)) ImGui::OpenPopup(kDiscard);
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    std::function<void()> proceed;
+    if (ImGui::BeginPopupModal(kDiscard, nullptr, flags)) {
+        ImGui::TextUnformatted("Bu sahnede kaydedilmemiş değişiklikler var.");
+        ImGui::Spacing();
+        bool close = false;
+        if (ui::PrimaryButton("Kaydet")) {
+            saveProject(); // "farklı kaydet" iptal edilirse sahne kirli kalır, hiçbir şey kaybolmaz
+            close = true;
+            if (!m_s.documentDirty) proceed = m_pendingDiscard;
+        }
+        ImGui::SameLine();
+        if (ui::GhostButton("Kaydetme")) {
+            close = true;
+            proceed = m_pendingDiscard;
+        }
+        ImGui::SameLine();
+        if (ui::GhostButton("Vazgeç") || ImGui::IsKeyPressed(ImGuiKey_Escape)) close = true;
+        if (close) {
+            m_pendingDiscard = nullptr;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    if (proceed) proceed(); // popup bittikten sonra: eylem dosya penceresi açabilir
 }
 
 void Application::drawAboutWindows() {

@@ -46,6 +46,16 @@ bool saveRGBA8PNG(const uint8_t* rgba, int w, int h, const std::string& path, bo
 
 /// PNG/JPG dosyasını ham RGBA8 olarak oku (renk dönüşümü yok; küçük resim önbelleği için).
 bool loadRGBA8(const std::string& path, std::vector<uint8_t>& out, int& w, int& h);
+/// Bellekteki sıkıştırılmış dosyanın RGBA8 hali (.glb içine gömülü dokular).
+bool loadRGBA8Memory(const unsigned char* bytes, int size, std::vector<uint8_t>& out, int& w, int& h);
+
+/// RGBA8 tamponun alfa kanalı, doğrusal veri olarak (r = g = b). Bütün pikseller tam opaksa boş
+/// döner: "alfa yok" demektir ve çağıran yavaş geçirgen gölge yolunu boşuna açmaz.
+std::optional<Image> alphaImageFromRGBA8(const uint8_t* rgba, int w, int h);
+
+/// Opaklık maskesi: dosyanın alfası doluysa o, değilse gri değer. Veri haritasıdır, sRGB eğrisi
+/// uygulanmaz. Ağırlıkla opak ama alfalı PNG'lerde de maske alfadır (etiket, yaprak dokuları).
+std::optional<Image> loadOpacityImage(const std::string& path);
 
 /// Save scene-linear radiance as OpenEXR (half float RGB, ZIP compression).
 bool saveImageEXR(const Image& img, const std::string& path);

@@ -125,6 +125,12 @@ public:
         return Color3f::black();
     }
 
+    /// Yüzeyin bu noktadaki kapsaması (alfa): 1 = tam yüzey, 0 = burada yüzey yok (yaprak
+    /// kartı, file, etiket kesiği). Bir saçılma lobu değil "yüzey burada var mı?" sorusudur:
+    /// kapsamayan ışın için yüzey hiç yoktur. Yayıcı yüzeylerde NEE bunu görmez (ışık seçimi
+    /// üçgen başına); opak olmayan yayıcıda doğrudan ışık biraz fazla çıkar.
+    virtual float opacity(const SurfaceInteraction&) const { return 1.0f; }
+
     /// Yuvarlatılmış kenarlar (KeyShot "Round edges", Cycles "Bevel"): keskin model
     /// kenarları gölgelendirmede bu yarıçapla (sahne birimi) yuvarlanır; geometri değişmez.
     void setRoundEdgeRadius(float r) { m_roundEdges = r > 0.0f ? r : 0.0f; }

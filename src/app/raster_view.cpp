@@ -262,7 +262,9 @@ uniform vec3 uEmit;
 uniform int uGlass;        // 0 opak, 1 cam geçirgenlik geçişi, 2 cam yansıma geçişi
 uniform float uIor;
 uniform vec3 uTint;
-uniform int uMaps;         // bit 0 albedo, 1 pürüzlülük, 2 metallik, 3 normal, 4 kutu eşleme
+uniform int uMaps;         // bit 0 albedo, 1 pürüzlülük, 2 metallik, 3 normal, 4 kutu eşleme, 5 opaklık
+uniform float uOpacity;
+uniform sampler2D tOpacity;
 uniform float uTexScale;
 uniform sampler2D tAlbedo;
 uniform sampler2D tRough;
@@ -430,6 +432,11 @@ void main() {
         vec3 a = abs(ng);
         uv = ((a.x >= a.y && a.x >= a.z) ? vW.zy : (a.y >= a.z ? vW.xz : vW.xy)) * uTexScale;
     }
+    // Kesik yüzey: ışın izleyicideki rastgele geçişin ekran uzayı karşılığı (alpha hashing,
+    // gürültü Jimenez 2014 IGN). Sıralama gerektirmez; yarı saydamlık ince bir doku gibi görünür.
+    float alpha = uOpacity;
+    if ((uMaps & 32) != 0) alpha *= texture(tOpacity, uv).r;
+    if (alpha <= fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))))) discard;
     if ((uMaps & 1) != 0) base = texture(tAlbedo, uv).rgb;
     if ((uMaps & 2) != 0) rough = max(0.001, texture(tRough, uv).g);
     if ((uMaps & 4) != 0) metal = clamp(texture(tMetal, uv).b, 0.0, 1.0);
@@ -545,12 +552,21 @@ void main() {
 
 const char* kDepthVertexSrc = R"(#version 330 core
 layout(location = 0) in vec3 aPos;
+layout(location = 2) in vec2 aUV;
 uniform mat4 uViewProj;
 uniform mat4 uModel;
-void main() { gl_Position = uViewProj * uModel * vec4(aPos, 1.0); }
+uniform float uTexScale;
+out vec2 vUV;
+void main() {
+    vUV = aUV * uTexScale;
+    gl_Position = uViewProj * uModel * vec4(aPos, 1.0);
+}
 )";
 const char* kDepthFragmentSrc = R"(#version 330 core
-void main() {}
+in vec2 vUV;
+uniform sampler2D tOpacity;
+uniform int uCutout;
+void main() { if (uCutout != 0 && texture(tOpacity, vUV).r < 0.5) discard; }
 )";
 
 // Tam ekran üçgen: köşeler gl_VertexID'den, tampon yok.
@@ -1129,6 +1145,7 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
     glEnable(GL_POLYGON_OFFSET_FILL);
     glPolygonOffset(2.0f, 4.0f);
     gl_glUseProgram(m_progDepth);
+    set1i(m_progDepth, "tOpacity", 9);
     for (int i = 0; i < lightCount && slots < 4; ++i) {
         const RealtimeLight& L = rt.lights[static_cast<size_t>(i)];
         if (!L.castsShadow) continue;
@@ -1151,12 +1168,23 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
             // Cam ışığı geçirir: ışın izleyicide gölgesi neredeyse yok (kostik bile düşer); opak
             // gölge düşürmesi yanlış ve göze batan bir kama bırakırdı.
             if (it.material && it.material->glass) continue;
+            // ponytail: gölge haritası ikilidir: kesik 0.5'te eşiklenir, yarı saydam yüzey ya tam
+            // gölge ya hiç; kutu eşlemeli maske gölgede dolu kalır. Işın izleyici ikisini de doğru yapar.
+            if (it.material && it.material->opacity < 0.5f) continue;
             GpuMesh* g = upload(it.mesh);
             if (!g) continue;
+            const bool cut = it.material && it.material->opacityMap && !it.material->boxMapping;
+            set1i(m_progDepth, "uCutout", cut ? 1 : 0);
+            if (cut) {
+                set1f(m_progDepth, "uTexScale", it.material->texScale);
+                gl_glActiveTexture(kTexture0 + 9);
+                glBindTexture(GL_TEXTURE_2D, texture(it.material->opacityMap, false));
+            }
             setMat(m_progDepth, "uModel", it.model);
             drawMesh(*g);
         }
     }
+    set1i(m_progDepth, "uCutout", 0);
     // Camların derinliği (aynı izdüşümler, ½ çözünürlüklü atlas): kısmi gölge.
     gl_glBindFramebuffer(kFramebuffer, m_glassFbo);
     glViewport(0, 0, kShadowSize, kShadowSize);
@@ -1229,6 +1257,7 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
     set1i(p, "tRough", 4);
     set1i(p, "tMetal", 5);
     set1i(p, "tNormal", 6);
+    set1i(p, "tOpacity", 9);
     float sh[27] = {};
     if (rt.env)
         for (int i = 0; i < 9; ++i)
@@ -1306,8 +1335,10 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         if (bindMap(4, m.roughnessMap, false)) maps |= 2;
         if (bindMap(5, m.metalnessMap, false)) maps |= 4;
         if (bindMap(6, m.normalMap, false)) maps |= 8;
+        if (bindMap(9, m.opacityMap, false)) maps |= 32;
         if (maps && m.boxMapping) maps |= 16;
         set1i(p, "uMaps", maps);
+        set1f(p, "uOpacity", m.opacity);
         set1f(p, "uTexScale", m.texScale);
         set1f(p, "uSelected", selected ? 1.0f : 0.0f);
     };

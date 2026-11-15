@@ -123,6 +123,20 @@ public:
     float diffuseTransmission() const { return m_diffuseTransmission; }
     void setAlbedoImage(std::shared_ptr<Image> image) { m_albedoTex = std::move(image); }
 
+    /// Opaklık çarpanı (doku varsa onunla çarpılır). opacity(si) noktadaki sonucu verir.
+    void setOpacity(float v) { m_opacity = std::clamp(v, 0.0f, 1.0f); }
+    float baseOpacity() const { return m_opacity; }
+    /// Maske dosyası: dosyanın alfası doluysa o, değilse gri değer (bkz. loadOpacityImage).
+    void setOpacityMap(const std::string& p);
+    void setOpacityImage(std::shared_ptr<Image> image) { m_opacityTex = std::move(image); }
+    const std::string& opacityMap() const { return m_opacityMap; }
+    std::shared_ptr<const Image> opacityImage() const { return m_opacityTex; }
+    float opacity(const SurfaceInteraction& si) const override;
+    // ponytail: gölge ışını kesik yüzeyde tam kesişimle yürür; yapraklı sahnede yavaşlarsa Embree
+    // filtre fonksiyonu (any-hit) ekle. Sahnede kesik yoksa hızlı intersectAny kalır.
+    bool transmitsShadows() const override { return m_opacity < 1.0f || m_opacityTex != nullptr; }
+    Color3f shadowTransmittance(const SurfaceInteraction& si, const Vec3f& dir) const override;
+
     Color3f emitted(const SurfaceInteraction&) const override { return m_emission; }
 
     /// Yüklü doku görüntüleri (gerçek zamanlı mod GPU'ya yükler); yoksa nullptr.
@@ -195,10 +209,13 @@ private:
     std::string m_normalMap;
     std::string m_roughnessMap;
     std::string m_metalnessMap;
+    std::string m_opacityMap;
     std::shared_ptr<Image> m_albedoTex;
     std::shared_ptr<Image> m_normalTex;
     std::shared_ptr<Image> m_roughnessTex;
     std::shared_ptr<Image> m_metalnessTex;
+    std::shared_ptr<Image> m_opacityTex;
+    float m_opacity = 1.0f;
     TextureMapping m_mapping = TextureMapping::UV;
     float m_texScale = 1.0f;
 

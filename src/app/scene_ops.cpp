@@ -1079,11 +1079,7 @@ void readCamera(const json& j, OrbitCamera& c) {
 
 } // namespace
 
-void Application::saveProject() {
-    if (m_s.projectPath.empty()) {
-        saveProjectAs();
-        return;
-    }
+ProjectData Application::currentProjectData() const {
     ProjectData d;
     d.camera = cameraJson(m_s.camera);
     d.render = {{"toneMap", static_cast<int>(m_s.settings.tmo)}, {"exposure", m_s.settings.exposure},
@@ -1101,6 +1097,56 @@ void Application::saveProject() {
     d.environment = m_s.environment;
     d.lights = m_s.lights;
     d.cameraTracks = m_s.cameraTracks;
+    return d;
+}
+
+fs::path Application::recoveryFile() const {
+    return pathFromUtf8(m_s.userDir) / "autosave" / "recovery.photon";
+}
+
+void Application::discardRecovery() {
+    if (!m_ownsRecovery || m_recoveryPending) return;
+    std::error_code ec;
+    fs::remove(recoveryFile(), ec);
+}
+
+// ponytail: tek kurtarma dosyası: aynı anda iki pencere birbirininkini ezer ve ikinci açılış
+// ötekinin canlı dosyasını sorar. Gerekirse süreç kimliğiyle adlandır, ölü süreçlerinkini sor.
+void Application::tickAutosave(float dt) {
+    m_autosaveTimer += dt;
+    if (m_autosaveTimer < kAutosaveSeconds || m_autosaveBusy) return;
+    m_autosaveTimer = 0.0f;
+    if (!m_ownsRecovery || m_recoveryPending || !m_s.documentDirty) return;
+    m_autosaveBusy = true;
+    // Geri al yığınıyla aynı anlık görüntü: geometri paylaşılır, kopya ucuz. Yazım arka planda;
+    // büyük gömülü geometride JSON saniyeler sürebilir, arayüz takılmaz.
+    auto snapshot = std::make_shared<SceneGraph>();
+    snapshot->setRoot(SceneGraph::cloneTree(*m_s.graph.root(), true));
+    auto data = std::make_shared<ProjectData>(currentProjectData());
+    data->render["recoveryOrigin"] = m_s.projectPath;
+    runAsync("Otomatik kayıt", [this, snapshot, data, file = recoveryFile()]() -> std::function<void()> {
+        std::error_code ec;
+        fs::create_directories(file.parent_path(), ec);
+        std::string err;
+        const bool ok = ::photon::saveProject(pathToUtf8(file), *snapshot, *data, &err);
+        return [this, ok, err] {
+            m_autosaveBusy = false;
+            if (!ok) setStatus("Otomatik kayıt yazılamadı: " + err, true);
+        };
+    });
+}
+
+void Application::confirmDiscard(std::function<void()> action) {
+    if (m_s.documentDirty) m_pendingDiscard = std::move(action);
+    else action();
+}
+
+void Application::saveProject() {
+    if (m_s.projectPath.empty()) {
+        saveProjectAs();
+        return;
+    }
+    const ProjectData d = currentProjectData();
     std::string err;
     std::vector<std::string> warnings;
     // Paket (.photonpack): dokular, HDRI, IES ve geometri dosyanın içinde; değilse JSON proje.
@@ -1112,6 +1158,7 @@ void Application::saveProject() {
         return;
     }
     m_s.documentDirty = false;
+    discardRecovery();
     addRecent(m_s.projectPath);
     std::string msg = (package ? "Paket kaydedildi: " : "Kaydedildi: ") + ui::fileName(m_s.projectPath);
     for (const auto& w : warnings) msg += "  ·  " + w;
@@ -1137,12 +1184,14 @@ void Application::savePackageAs() {
 }
 
 void Application::openProjectDialog() {
-    std::string path = m_s.projectPath;
-    FileDialogFilter f[] = {{"Photon projesi ve paketi", "*.photon;*.photonpack"}, {"Tüm dosyalar", "*.*"}};
-    if (showFileDialog(path, FileDialogMode::Open, "Proje aç", f, 2)) openProject(path);
+    confirmDiscard([this] {
+        std::string path = m_s.projectPath;
+        FileDialogFilter f[] = {{"Photon projesi ve paketi", "*.photon;*.photonpack"}, {"Tüm dosyalar", "*.*"}};
+        if (showFileDialog(path, FileDialogMode::Open, "Proje aç", f, 2)) openProject(path);
+    });
 }
 
-bool Application::openProject(const std::string& path) {
+bool Application::openProject(const std::string& path, bool recovery) {
     ProjectData d;
     std::string err;
     SceneGraph loaded;
@@ -1198,13 +1247,19 @@ bool Application::openProject(const std::string& path) {
     } catch (const json::exception& e) {
         err += (err.empty() ? "" : "; ") + std::string("kamera/render ayarlarının bir kısmı okunamadı (") + e.what() + ")";
     }
-    m_s.projectPath = path;
-    addRecent(path);
+    if (recovery) {
+        const auto origin = d.render.find("recoveryOrigin");
+        m_s.projectPath = origin != d.render.end() && origin->is_string() ? origin->get<std::string>() : std::string();
+    } else {
+        m_s.projectPath = path;
+        addRecent(path);
+    }
     m_s.undo.clear();
     clearSelection();
     markDocumentChanged();
-    m_s.documentDirty = false;
-    setStatus(err.empty() ? "Proje açıldı: " + ui::fileName(path) : "Proje açıldı, uyarılar: " + err, !err.empty());
+    m_s.documentDirty = recovery;
+    if (recovery) setStatus("Otomatik kayıt kurtarıldı; saklamak için kaydedin", !err.empty());
+    else setStatus(err.empty() ? "Proje açıldı: " + ui::fileName(path) : "Proje açıldı, uyarılar: " + err, !err.empty());
     return true;
 }
 

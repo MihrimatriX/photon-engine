@@ -24,7 +24,7 @@ Nasıl okunur:
 - [x] **F0.6** `.gitignore`'a `!assets/models/*.obj`, `Testing/` ve `photon_ui.ini` ekle. `[build-14]` `[build-m1]` `[io-7]`
 - [x] **F0.7** `PHOTON_BUILD_GPU=ON` var olmayan `src/gpu`'yu gösteriyor. Şimdilik ya kaldır ya da dizin varsa ekle. `[build-6]`
 - [x] **F0.8** `memory-bank/` git'e commit edilecek mi, karar ver. Evet; ilk baz commit ile girdi.
-- [ ] **F0.9** Uyarılar: motor kütüphanelerinde `/W4 /WX`; üçüncü taraf kodu hariç tutulur. Bilinen iki uyarı çalışma ağacında zaten düzeltildi. `[build-11]`
+- [x] **F0.9** Uyarılar: motor kütüphanelerinde `/W4 /WX`; üçüncü taraf kodu hariç tutulur. Bilinen iki uyarı çalışma ağacında zaten düzeltildi. `[build-11]`
   - 2026-10-02: `photon_build_flags` arayüz hedefi; üçüncü taraf include'ları `SYSTEM`. GCC/Clang'da `-Werror` varsayılan açık ve temiz. MSVC'de `PHOTON_WARNINGS_AS_ERRORS` varsayılanı **kapalı**: temiz bir `/W4` derlemesi görülünce açılacak.
 - [x] **F0.10** FetchContent kullanılmayan üçüncü taraf hedeflerini de derliyor; `THIRD_PARTY.md`'deki miniz satırı yanlış. `[build-13]`
 - **Öğrenme:** *Ray Tracing in One Weekend* 1. kitap (2–3 akşam) ve Scratchapixel'de kamera ışınları üretimi.
@@ -82,7 +82,7 @@ Nasıl okunur:
 - [x] **F1.23** AO çarpanı güzellik geçişinden çıkar, varsayılanı 0. `[lighting-4]` `[engine-13]` `[build-2]`
 - [x] **F1.24** Möller–Trumbore'un mutlak 1e-6 determinant eşiği kalkar. `[geometry-1]`
 - [x] **F1.25** Küre tangent işareti düzelir; küreler dünya ölçeğini ve dönüşünü dikkate alır. `[geometry-9]` `[io-18]`
-- [ ] **F1.26** Quaternion: slerp ve Y-up `fromEuler` düzeltilir. Kullanılmıyorsa ölü kodla birlikte silinir. `[core-10]` `[core-14]`
+- [x] **F1.26** Quaternion: kullanılmıyordu, ölü kodla birlikte silindi (2026-11-06). `[core-10]` `[core-14]`
 - [ ] **F1.41** Dejenere dönüşümler sessizce başarısız oluyor: ölçek alt sınırı ve `inverse()` başarı bayrağı; perspektif yorumu düzeltilir. `[core-15]`
 - [ ] **F1.42** Ton eşleme API varsayılanları ve belgeler EV anlamıyla uyumlu hale gelir; EXR sıkıştırmalı yazılır. `[color-16]`
 - [x] **F1.27** GGX D, iptal hatasına dayanıklı forma geçer; roughness < 0.016'da inf üretmesin. `[materials-7]`
@@ -271,7 +271,7 @@ Nasıl okunur:
 - [ ] **F6.6** BLAS/TLAS ve örnekleme (instancing); dönüşüm düzenlemesi yalnız TLAS'ı yeniden kurar. `[geometry-6]`
 - [ ] **F6.7** Vertex kaynaklama, kopyasız taşıma, bake edilmiş kopyaların kalkması, açıya göre otomatik yumuşatma. `[geometry-11]` `[io-11]`
 - [ ] **F6.8** Gölge any-hit: alfa/kesik desteği; ışığın kendi primitifi atlanır. `[geometry-12]`
-- [ ] **F6.9** Embree 4.4 (vcpkg, `default-features: false`; triangle, instance, filter-function açık). `PHOTON_USE_EMBREE` bayrağı; `bvh.cpp` referans test olarak kalır.
+- [x] **F6.9** Embree 4.4 (resmi derlenmiş paket, `scripts/fetch_deps.ps1`; vcpkg portu ~1 saat sürüyor). `PHOTON_ENABLE_EMBREE` bayrağı; `bvh.cpp` referans test olarak kalır.
 - [ ] **F6.10** Global `/arch:AVX2`'nin faydası ölçülür; gerekirse varsayılan SSE4.2 olur. `[core-9]` `[build-12]`
 - [ ] **F6.11** Küre kesişim hassasiyeti (pbrt-v4 diskriminant formu). `[core-13]`
 - **Öğrenme:** Bikker "How to build a BVH" serisi (1–9), PBRT bölüm 7, *Ray Tracing: The Next Week*.
@@ -279,7 +279,7 @@ Nasıl okunur:
 
 ## Faz 7 — Malzeme ve renk gerçekçiliği (4–5 hafta)
 
-- [ ] **F7.1** VNDF örnekleme (Heitz 2018) ve yükseklik-korelasyonlu Smith G2. `[materials-15]` **[SEN]** VNDF (~10 satır).
+- [x] **F7.1** VNDF örnekleme (Heitz 2018) ve yükseklik-korelasyonlu Smith G2. `[materials-15]` **[SEN]** VNDF (~10 satır).
 - [x] **F7.2** (2026-10-24: Turquin 2019 biçimi, 32×32 E(μ, α) tablosu; `Metal.WhiteRoughMetalConservesEnergy`) Kulla–Conty çoklu saçılma telafisi. **[SEN]** telafi terimi.
 - [x] **F7.3** F82-tint iletken Fresnel ve metal presetleri (altın, gümüş, bakır, alüminyum, krom).
 - [x] **F7.4** (2026-10-29: Kulla–Conty albedo ölçekleme; LTC yerine Charlie sheen + albedo tablosu; EON difüz) Enerji koruyan kaplama (taban zayıflatma) ve LTC sheen.

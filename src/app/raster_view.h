@@ -51,7 +51,8 @@ public:
         bool glass = false;
         float ior = 1.5f;
         Color3f tint{1.0f};            ///< camın geçirgenlik rengi
-        std::shared_ptr<const Image> albedo, roughnessMap, metalnessMap, normalMap;
+        std::shared_ptr<const Image> albedo, roughnessMap, metalnessMap, normalMap, opacityMap;
+        float opacity = 1.0f;          ///< Kesik yüzey: alpha hashing (bkz. PBR fragment shader)
         bool boxMapping = false;
         float texScale = 1.0f;
     };

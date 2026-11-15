@@ -14,7 +14,14 @@
 #define TINYEXR_USE_MINIZ 0
 #define TINYEXR_USE_STB_ZLIB 1
 #define TINYEXR_IMPLEMENTATION
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4702) // tinyexr'de erişilemez kod; /WX altında derlemeyi kırmasın
+#endif
 #include "tinyexr.h"
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 #include "core/image/image_io.h"
 #include "core/color/transfer.h"
@@ -448,6 +455,36 @@ bool loadRGBA8(const std::string& path, std::vector<uint8_t>& out, int& w, int& 
     out.assign(data, data + static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
     stbi_image_free(data);
     return true;
+}
+
+bool loadRGBA8Memory(const unsigned char* bytes, int size, std::vector<uint8_t>& out, int& w, int& h) {
+    if (!bytes || size <= 0 || static_cast<uint64_t>(size) > kMaxImageFileBytes) return false;
+    int channels = 0;
+    if (!stbi_info_from_memory(bytes, size, &w, &h, &channels) || !imageDimsOk(w, h)) return false;
+    uint8_t* data = stbi_load_from_memory(bytes, size, &w, &h, &channels, 4);
+    if (!data) return false;
+    out.assign(data, data + static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
+    stbi_image_free(data);
+    return true;
+}
+
+std::optional<Image> alphaImageFromRGBA8(const uint8_t* rgba, int w, int h) {
+    const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
+    bool anyTransparent = false;
+    for (size_t i = 0; i < n && !anyTransparent; ++i) anyTransparent = rgba[i * 4 + 3] != 255;
+    if (!anyTransparent) return std::nullopt;
+    Image img(w, h);
+    float* dst = img.data();
+    for (size_t i = 0; i < n; ++i) dst[i * 3] = dst[i * 3 + 1] = dst[i * 3 + 2] = rgba[i * 4 + 3] / 255.0f;
+    return img;
+}
+
+std::optional<Image> loadOpacityImage(const std::string& path) {
+    std::vector<uint8_t> px;
+    int w = 0, h = 0;
+    if (!loadRGBA8(path, px, w, h)) return std::nullopt;
+    if (auto alpha = alphaImageFromRGBA8(px.data(), w, h)) return alpha;
+    return loadImageLDR(path, TextureEncoding::Linear);
 }
 
 } // namespace photon

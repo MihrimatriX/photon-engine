@@ -509,6 +509,16 @@ void Application::drawMaterialProps() {
                    "0 = ayna gibi parlak, 1 = tamamen mat");
             slider("Yansıma", "##spec", d->specular(), 0, 1, [&](float v) { d->setSpecular(v); },
                    "Yalıtkanlarda dik açıdaki yansıma gücü (0.5 ≈ %4)");
+            {
+                ui::Prop("Opaklık", "1 = tam yüzey, 0 = yüzey yok. Yaprak, file ve etiket gibi kesik yüzeyler için; "
+                                    "cam değildir, ışık kırılmadan geçer");
+                float op = d->baseOpacity();
+                if (ui::SliderF("##opacity", &op, 0.0f, 1.0f, "%.2f")) {
+                    undoPoint(*this, ImGui::GetID("##opacity"));
+                    editLive([&] { d->setOpacity(op); });
+                    markDocumentChanged(true); // sahnenin "geçirgen gölge var mı" bayrağı derlemede hesaplanır
+                }
+            }
             if (d->metallic() > 0.0f) {
                 ui::Prop("Kenar tonu", "Metalin sıyırma açısındaki rengi (F82). Beyaz = standart; altın ve "
                                        "bakırda ölçülmüş metaller kenarda hafif renk değiştirir");
@@ -652,11 +662,17 @@ void Application::drawMaterialProps() {
     }
     if (ui::Section(ICON_IMAGE, "Dokular", !d->albedoMap().empty() || !d->normalMap().empty())) {
         if (ui::BeginProps("tex", 0.34f)) {
-            std::string a = d->albedoMap(), nm = d->normalMap(), r = d->roughnessMap(), m = d->metalnessMap();
+            std::string a = d->albedoMap(), nm = d->normalMap(), r = d->roughnessMap(), m = d->metalnessMap(),
+                        o = d->opacityMap();
             if (textureSlot("Taban rengi", a)) { pushUndo(); editLive([&] { d->setAlbedoMap(a); }); }
             if (textureSlot("Normal", nm)) { pushUndo(); editLive([&] { d->setNormalMap(nm); }); }
             if (textureSlot("Pürüzlülük", r)) { pushUndo(); editLive([&] { d->setRoughnessMap(r); }); }
             if (textureSlot("Metalik", m)) { pushUndo(); editLive([&] { d->setMetalnessMap(m); }); }
+            if (textureSlot("Opaklık", o)) {
+                pushUndo();
+                editLive([&] { d->setOpacityMap(o); });
+                markDocumentChanged(true);
+            }
             ui::EndProps();
         }
         int mapping = d->textureMapping() == DisneyMaterial::TextureMapping::Box ? 1 : 0;

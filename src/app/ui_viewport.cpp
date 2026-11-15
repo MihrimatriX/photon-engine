@@ -611,6 +611,8 @@ void Application::renderRasterView() {
             r->roughnessMap = d->roughnessImage();
             r->metalnessMap = d->metalnessImage();
             r->normalMap = d->normalImage();
+            r->opacityMap = d->opacityImage();
+            r->opacity = d->baseOpacity();
             r->boxMapping = d->textureMapping() == DisneyMaterial::TextureMapping::Box;
             r->texScale = d->textureScale();
         }

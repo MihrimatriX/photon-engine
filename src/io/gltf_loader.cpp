@@ -176,12 +176,16 @@ Mat4f fromCgltfColumnMajor(const cgltf_float* cm) {
 // glTF'e göre baseColor dokusu sRGB kodludur; loadImageLDR varsayılan olarak sRGB → doğrusal
 // (linear) çözer (bkz. image_io.h TextureEncoding). Pürüzlülük/normal haritaları doğrusal
 // veri olurdu (TextureEncoding::Linear); onlar henüz okunmuyor.
-void tryBaseColor(DisneyMaterial& disney, const cgltf_material& mat, const std::filesystem::path& baseDir) {
-    if (!mat.has_pbr_metallic_roughness) return;
+// Dönen değer dokunun alfa kanalı (yalnız OPAQUE olmayan malzemede ve alfa gerçekten varsa).
+std::optional<Image> tryBaseColor(DisneyMaterial& disney, const cgltf_material& mat, const std::filesystem::path& baseDir) {
+    if (!mat.has_pbr_metallic_roughness) return std::nullopt;
     const cgltf_texture* tex = mat.pbr_metallic_roughness.base_color_texture.texture;
-    if (!tex || !tex->image) return;
+    if (!tex || !tex->image) return std::nullopt;
     const cgltf_image* image = tex->image;
 
+    const bool wantAlpha = mat.alpha_mode != cgltf_alpha_mode_opaque;
+    std::vector<uint8_t> rgba;
+    int rgbaW = 0, rgbaH = 0;
     std::optional<Image> loaded;
     if (image->uri && std::strncmp(image->uri, "data:", 5) != 0) {
         std::string uri = image->uri;
@@ -193,6 +197,7 @@ void tryBaseColor(DisneyMaterial& disney, const cgltf_material& mat, const std::
         // stb already decodes these. KTX/Basis and other GPU formats are skipped.
         if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp") {
             loaded = loadImageLDR((baseDir / uri).string());
+            if (wantAlpha) loadRGBA8((baseDir / uri).string(), rgba, rgbaW, rgbaH);
         }
     }
     if (!loaded && image->buffer_view && image->buffer_view->buffer && image->buffer_view->buffer->data) {
@@ -203,9 +208,29 @@ void tryBaseColor(DisneyMaterial& disney, const cgltf_material& mat, const std::
             && view->size <= static_cast<cgltf_size>(std::numeric_limits<int>::max())) {
             const auto* bytes = static_cast<const unsigned char*>(buf->data) + view->offset;
             loaded = loadImageLDRMemory(bytes, static_cast<int>(view->size));
+            if (wantAlpha) loadRGBA8Memory(bytes, static_cast<int>(view->size), rgba, rgbaW, rgbaH);
         }
     }
     if (loaded) disney.setAlbedoImage(std::make_shared<Image>(std::move(*loaded)));
+    if (rgba.empty()) return std::nullopt;
+    return alphaImageFromRGBA8(rgba.data(), rgbaW, rgbaH);
+}
+
+// glTF alfası = baseColorFactor.a × doku alfası. OPAQUE yok sayar, BLEND olduğu gibi kullanır,
+// MASK eşikler (alpha ≥ cutoff tam dolu, değilse yok; eşik doku pikseline uygulanır).
+void applyAlphaMode(DisneyMaterial& disney, const cgltf_material& mat, std::optional<Image> texAlpha) {
+    if (mat.alpha_mode == cgltf_alpha_mode_opaque) return;
+    const float factor = mat.has_pbr_metallic_roughness ? mat.pbr_metallic_roughness.base_color_factor[3] : 1.0f;
+    if (mat.alpha_mode == cgltf_alpha_mode_blend) {
+        disney.setOpacity(factor);
+    } else if (!texAlpha) {
+        disney.setOpacity(factor >= mat.alpha_cutoff ? 1.0f : 0.0f);
+    } else {
+        for (int y = 0; y < texAlpha->height(); ++y)
+            for (int x = 0; x < texAlpha->width(); ++x)
+                texAlpha->setPixel(x, y, Color3f(texAlpha->getPixel(x, y).r * factor >= mat.alpha_cutoff ? 1.0f : 0.0f));
+    }
+    if (texAlpha) disney.setOpacityImage(std::make_shared<Image>(std::move(*texAlpha)));
 }
 
 // glTF metallic-roughness → Disney: baseColor, metallic ve roughness doğrudan eşleşir.
@@ -218,7 +243,7 @@ std::shared_ptr<Material> makePbrMaterial(const cgltf_material& mat, const std::
         float metallic = pbr.metallic_factor;
         float roughness = std::max(0.001f, pbr.roughness_factor);
         auto disney = std::make_shared<DisneyMaterial>(base, metallic, roughness, 0.5f);
-        tryBaseColor(*disney, mat, baseDir);
+        applyAlphaMode(*disney, mat, tryBaseColor(*disney, mat, baseDir));
         return disney;
     }
     return std::make_shared<Lambertian>(Color3f(0.8f));

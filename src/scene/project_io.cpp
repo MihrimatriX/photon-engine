@@ -121,6 +121,7 @@ json materialJson(const Material& mat, const PathMap& paths) {
         if (!d->normalMap().empty()) maps["normal"] = paths(d->normalMap());
         if (!d->roughnessMap().empty()) maps["roughness"] = paths(d->roughnessMap());
         if (!d->metalnessMap().empty()) maps["metalness"] = paths(d->metalnessMap());
+        if (!d->opacityMap().empty()) maps["opacity"] = paths(d->opacityMap());
         if (!maps.empty()) j["maps"] = maps;
         j["mapping"] = d->textureMapping() == DisneyMaterial::TextureMapping::Box ? "box" : "uv";
         j["texScale"] = d->textureScale();
@@ -181,6 +182,7 @@ std::shared_ptr<Material> materialFromJson(const json& j, const fs::path& base) 
         if (maps->contains("normal")) d->setNormalMap(resolvePath((*maps)["normal"].get<std::string>(), base));
         if (maps->contains("roughness")) d->setRoughnessMap(resolvePath((*maps)["roughness"].get<std::string>(), base));
         if (maps->contains("metalness")) d->setMetalnessMap(resolvePath((*maps)["metalness"].get<std::string>(), base));
+        if (maps->contains("opacity")) d->setOpacityMap(resolvePath((*maps)["opacity"].get<std::string>(), base));
     }
     applyAdvanced(*d);
     return d;

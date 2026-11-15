@@ -145,6 +145,8 @@ void Application::addRecent(const std::string& path) {
 }
 
 Application::~Application() {
+    for (AsyncJob& job : m_jobs) job.result.wait(); // yazılmakta olan otomatik kayıt geride kalmasın
+    if (m_cleanExit) discardRecovery();
     m_liveLink.stop();
     cancelFinalRender();
     joinFinalRender();
@@ -344,7 +346,7 @@ void Application::processDrops() {
             }
             applyEnvironment(a);
         } else if (hasExt(fp, {".photon", ".photonpack"})) {
-            openProject(p);
+            confirmDiscard([this, p] { openProject(p); });
         } else if (hasExt(fp, {".png", ".jpg", ".jpeg", ".tga", ".bmp"})) {
             if (std::find(m_s.textures.begin(), m_s.textures.end(), p) == m_s.textures.end()) m_s.textures.push_back(p);
             SceneNode* n = selectedNode();
@@ -375,7 +377,7 @@ void Application::handleShortcuts() {
     if (ctrl && pressed(ImGuiKey_Y)) redo();
     if (ctrl && pressed(ImGuiKey_S)) { shift ? saveProjectAs() : saveProject(); }
     if (ctrl && pressed(ImGuiKey_O)) { shift ? openProjectDialog() : openModelDialog(); }
-    if (ctrl && pressed(ImGuiKey_N)) newScene();
+    if (ctrl && pressed(ImGuiKey_N)) confirmDiscard([this] { newScene(); });
     if (ctrl && pressed(ImGuiKey_P)) m_s.showRenderDialog = true;
     if (ctrl && pressed(ImGuiKey_E)) exportViewport();
     if (ctrl && pressed(ImGuiKey_D)) duplicateSelection();
@@ -476,6 +478,7 @@ void Application::frame(float dt) {
     processDrops();
     processLiveLink();
     pollAsync();
+    tickAutosave(dt);
     compileIfDirty();
 
     // Kamera ve ekran ayarlarını render thread'ine ilet (değişmediyse etkisiz).
@@ -504,6 +507,7 @@ void Application::frame(float dt) {
     drawRenderDialog();
     drawImportDialog();
     drawAboutWindows();
+    drawDocumentDialogs();
     ImGui::Render();
     renderRasterView();
 
@@ -640,6 +644,23 @@ int Application::run() {
         const Vec3f dropPoint(0.6f, 0.0f, 0.4f);
         requestImport({ui.substr(7)}, &dropPoint);
     }
+    else if (ui == "autosave") {
+        // Çökme denemesi (scripts/smoke_recovery.ps1): belge değişir, otomatik kayıt hemen düşer.
+        addPrimitive(PrimitiveKind::Torus);
+        m_autosaveTimer = kAutosaveSeconds;
+    }
+    else if (ui == "exitprompt") {
+        m_s.documentDirty = true;
+        confirmDiscard([] {});
+    }
+    // Ekran görüntüsü çalıştırmaları kullanıcının kurtarma dosyasına dokunmaz.
+    m_ownsRecovery = m_opts.screenshotPath.empty() || ui == "autosave" || ui == "recovery" || ui == "recovered";
+    std::error_code recoveryError;
+    m_recoveryPending = m_ownsRecovery && fs::exists(recoveryFile(), recoveryError);
+    if (ui == "recovered" && m_recoveryPending) {
+        m_recoveryPending = false;
+        openProject(pathToUtf8(recoveryFile()), true);
+    }
     if (!m_opts.saveProjectPath.empty()) {
         m_s.projectPath = m_opts.saveProjectPath;
         saveProject();
@@ -650,6 +671,14 @@ int Application::run() {
     int frames = 0;
     while (!glfwWindowShouldClose(m_window)) {
         glfwPollEvents();
+        // Kaydedilmemiş iş varken kapatma isteği: kapanmayı durdur, sor.
+        if (glfwWindowShouldClose(m_window) && m_s.documentDirty && !m_quitConfirmed && m_opts.screenshotPath.empty()) {
+            glfwSetWindowShouldClose(m_window, GLFW_FALSE);
+            confirmDiscard([this] {
+                m_quitConfirmed = true;
+                glfwSetWindowShouldClose(m_window, GLFW_TRUE);
+            });
+        }
         // Pencere küçültülmüşse CPU harcama.
         if (glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) {
             glfwWaitEventsTimeout(0.1);
@@ -662,6 +691,9 @@ int Application::run() {
         ++frames;
 
         if (!m_opts.screenshotPath.empty()) {
+            // Çökme benzetimi: otomatik kayıt diske inince süreç temizlik yapmadan ölür.
+            std::error_code autosaveError;
+            if (m_opts.uiState == "autosave" && !m_autosaveBusy && fs::exists(recoveryFile(), autosaveError)) std::_Exit(3);
             const float elapsed = std::chrono::duration<float>(now - started).count();
             const ViewportStats st = m_s.viewport.stats();
             const bool gpuView = isRasterMode(m_s.viewMode);
@@ -693,7 +725,8 @@ int Application::run() {
                 }
                 m_animSmokeStarted = true;
             }
-            const bool waitAnim = (m_opts.uiState == "animrender" && !m_animSmokeStarted) ||
+            const bool waitAnim = m_opts.uiState == "autosave" ||
+                                  (m_opts.uiState == "animrender" && !m_animSmokeStarted) ||
                                   (m_opts.uiState == "protools" && !m_animSmokeStarted) ||
                                   (m_opts.uiState == "livelink" && m_liveUpdates < 1); // bir yerinde güncelleme bekle
             const bool ready = frames > 30 && !st.interactive && (gpuView || st.converged || st.spp >= m_opts.screenshotSpp) &&
@@ -714,6 +747,7 @@ int Application::run() {
             lastTitle = title;
         }
     }
+    m_cleanExit = true;
     return 0;
 }
 

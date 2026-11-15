@@ -20,13 +20,7 @@ option(PHOTON_BUILD_TESTS  "Build unit tests"                    ON)
 option(PHOTON_BUILD_CLI    "Build photon_render command-line renderer" ON)
 option(PHOTON_ENABLE_SIMD  "Enable AVX2/FMA SIMD instructions"  ON)
 option(PHOTON_ENABLE_ASAN "AddressSanitizer on photon_* targets" OFF)
-# ponytail: MSVC /WX stays off until a clean /W4 build is seen on the owner's
-# machine (this tree is only verified with GCC/Clang). Flip the default then.
-if(MSVC)
-    option(PHOTON_WARNINGS_AS_ERRORS "Treat warnings in photon_* targets as errors" OFF)
-else()
-    option(PHOTON_WARNINGS_AS_ERRORS "Treat warnings in photon_* targets as errors" ON)
-endif()
+option(PHOTON_WARNINGS_AS_ERRORS "Treat warnings in photon_* targets as errors" ON)
 # OIDN (Intel Open Image Denoise, Apache-2.0). Not a vcpkg port: the official
 # prebuilt package goes into third_party/oidn (scripts/fetch_deps.ps1).
 # ON = use it when found; OFF = never link it.

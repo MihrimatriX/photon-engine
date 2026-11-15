@@ -15,6 +15,7 @@
 
 #include <imgui.h>
 
+#include <filesystem>
 #include <functional>
 #include <future>
 #include <string>
@@ -35,6 +36,8 @@ struct LaunchOptions {
     std::string uiState;         ///< Ekran görüntüsü için: "render", "material", ...
     std::string saveProjectPath; ///< Açılış sahnesini bu .photon dosyasına kaydet (test/ölçüm)
 };
+
+struct ProjectData;
 
 class Application {
 public:
@@ -188,7 +191,12 @@ public:
     void savePackageAs();
     void saveProject();
     void openProjectDialog();
-    bool openProject(const std::string& path);
+    /// @p recovery: otomatik kayıt dosyası açılıyor; belge asıl dosyasına bağlanır ve
+    /// kaydedilene kadar kaydedilmemiş sayılır, son dosyalara eklenmez.
+    bool openProject(const std::string& path, bool recovery = false);
+    /// Belgede kaydedilmemiş değişiklik varsa önce sorar (Kaydet / Kaydetme / Vazgeç), yoksa
+    /// @p action hemen çalışır. Çıkış, yeni sahne ve proje açma bundan geçer.
+    void confirmDiscard(std::function<void()> action);
     void openModelDialog();
     void openHdrDialog();
     void exportViewport();
@@ -243,6 +251,21 @@ private:
     void drawImageProps();
     void drawRenderDialog();
     void drawAboutWindows();
+    void drawDocumentDialogs();
+
+    // ── Otomatik kayıt ve kurtarma (scene_ops.cpp) ──
+    static constexpr float kAutosaveSeconds = 120.0f;
+    ProjectData currentProjectData() const;
+    std::filesystem::path recoveryFile() const;
+    void discardRecovery();
+    void tickAutosave(float dt);
+    float m_autosaveTimer = 0.0f;
+    bool m_autosaveBusy = false;
+    bool m_ownsRecovery = false;    ///< Ekran görüntüsü çalıştırmaları kullanıcının dosyasına dokunmaz
+    bool m_recoveryPending = false; ///< Soru cevaplanana dek dosya ne ezilir ne silinir
+    bool m_cleanExit = false;       ///< run() istisnayla düşerse kurtarma dosyası kalmalı
+    bool m_quitConfirmed = false;
+    std::function<void()> m_pendingDiscard;
     bool textureSlot(const char* label, std::string& path);
 };
 

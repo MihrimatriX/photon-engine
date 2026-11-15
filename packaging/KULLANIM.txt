@@ -38,6 +38,9 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
   - Ctrl+S: sahne, malzemeler, ışıklar, ortam ve kayıtlı kameralar .photon dosyasına yazılır.
   - .photon dosyasını çift tıklamak için "Birlikte aç > photon_app.exe" seçin.
   - Örnek: photon_app.exe ornekler\vitrin.photon
+  - Otomatik kayıt: kaydedilmemiş değişiklikler iki dakikada bir kullanıcı klasörüne yazılır.
+    Uygulama beklenmedik şekilde kapanırsa bir sonraki açılışta kurtarmak isteyip istemediğiniz
+    sorulur. Kaydedilmemiş sahneyi kapatırken, yeni sahnede ve proje açarken de onay istenir.
 
 4) KOMUT SATIRINDAN RENDER (otomasyon, toplu iş)
 ------------------------------------------------
@@ -106,6 +109,8 @@ Ayarlar ve küçük resim önbelleği: %APPDATA%\PhotonEngine
 7) GERÇEKÇİLİK ARAÇLARI (0.2)
 ----------------------------
   Malzeme sekmesi:
+    Opaklık (Temel) ve Opaklık dokusu (Dokular): yaprak, file ve etiket gibi kesik yüzeyler. Doku
+    dosyasının alfası kullanılır, alfası yoksa gri değer (beyaz = dolu). Cam değildir, ışık kırılmaz.
    - Yüzey altı saçılımı (SSS): mum, yeşim, ten, sabun, süt. "Ölçek" nesnenin boyutuna göre
      ayarlanır (metre); ışığın içeride ne kadar gittiğini belirler.
    - Cam > Hacim: "Renk" + "Mesafe" ile kalınlığa göre koyulaşan gerçek renkli cam/sıvı;
