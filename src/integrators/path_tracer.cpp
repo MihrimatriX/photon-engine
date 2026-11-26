@@ -24,7 +24,7 @@ namespace photon {
 namespace {
 
 float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sampler,
-               float strength, int samples) {
+               float strength, int samples, float rayTime) {
     if (strength <= 0.0f || samples <= 0) return 1.0f;
 
     Frame frame(isect.normal);
@@ -34,6 +34,8 @@ float approxAo(const Scene& scene, const SurfaceInteraction& isect, Sampler& sam
         Vec3f local = cosineSampleHemisphere(sampler.get2D());
         Vec3f dir = frame.toWorld(local).normalized();
         Ray aoRay(spawnOrigin(isect, dir), dir, 0.0f, maxDist);
+        aoRay.time = rayTime;
+        aoRay.visibilityMask = VisShadow;
         if (scene.intersectAny(aoRay)) occ += 1.0f;
     }
     float visibility = 1.0f - (occ / static_cast<float>(samples));
@@ -138,13 +140,19 @@ bool russianRoulette(Color3f& throughput, Sampler& sampler) {
 /// kesilebilir ve alan ışığının kendi dörtgeni kendi örneğini örter (yakın ışıkta tam karanlık).
 /// Bu yüzden sonlu uzaklıktaki ışıklarda ışın ofsetli başlangıçtan örnek noktasına yönelir ve
 /// göreli bir payla önce durur. false → ışın kurulamadı (örnek alıcıya fazla yakın).
-bool makeShadowRay(const SurfaceInteraction& isect, const LightSample& ls, bool /*pointOnSurface*/, Ray& out) {
+bool makeShadowRay(const SurfaceInteraction& isect, const LightSample& ls, bool /*pointOnSurface*/,
+                   float rayTime, Ray& out) {
     if (!(ls.distance < INFINITY_F) || ls.distance >= 1e29f) {
         out = Ray(shadowOrigin(isect, ls.wi), ls.wi, 0.0f, 1e30f);
+        out.time = rayTime;
+        out.visibilityMask = VisShadow;
         return true;
     }
     // ponytail: stop short of the sample; a contact occluder inside the slack is missed until shadow rays skip light prims
-    return spawnRayTo(isect, isect.point + ls.wi * ls.distance, out);
+    if (!spawnRayTo(isect, isect.point + ls.wi * ls.distance, out)) return false;
+    out.time = rayTime;
+    out.visibilityMask = VisShadow;
+    return true;
 }
 
 /// Yüzey noktası bu ışın için "yok" mu? (alfa kesiği, Material::opacity)
@@ -157,19 +165,30 @@ bool passesCutout(const SurfaceInteraction& isect, Sampler& sampler) {
     return sampler.get1D() >= alpha;
 }
 
-/// Gölge ışınının geçirgenliği: ince duvarlı camlar ve kesik yüzeyler (doğrultu değiştirmeyen
-/// yüzeyler) geçirgenlikle aşılır, başka her yüzey ışığı tamamen keser. Sahnede böyle bir
-/// malzeme yoksa hızlı "herhangi bir isabet" testi kullanılır.
-Color3f shadowTransmittance(const Scene& scene, const Ray& shadow) {
-    if (!scene.hasShadowTransmitters()) return scene.intersectAny(shadow) ? Color3f::black() : Color3f(1.0f);
+/// Gölge ışınının geçirgenliği: ince duvarlı camlar, kesik yüzeyler ve gölge bağlantısı dışında
+/// bırakılan engelleyiciler aşılır; başka her yüzey ışığı tamamen keser. Sahnede böyle bir
+/// malzeme ya da gölge bağlantısı yoksa hızlı "herhangi bir isabet" testi kullanılır.
+Color3f shadowTransmittance(const Scene& scene, const Ray& shadow, int lightIndex = -1) {
+    const bool needShadowLink = scene.hasShadowLinkFor(lightIndex);
+    if (!scene.hasShadowTransmitters() && !needShadowLink) {
+        return scene.intersectAny(shadow) ? Color3f::black() : Color3f(1.0f);
+    }
     Color3f T(1.0f);
     Vec3f origin = shadow.origin;
     const Vec3f dir = shadow.direction;
     float remaining = shadow.tMax;
     for (int i = 0; i < 64; ++i) {
         Ray r(origin, dir, 0.0f, remaining);
+        r.time = shadow.time;
+        r.visibilityMask = VisShadow;
         SurfaceInteraction hit;
         if (!scene.intersect(r, hit)) return T;
+        if (needShadowLink && !scene.isShadowLinked(lightIndex, scene.nodeUidOf(hit))) {
+            origin = offsetRayOrigin(hit.point, hit.pError, hit.ng.lengthSquared() > 0.0f ? hit.ng : hit.normal, dir);
+            remaining -= hit.t;
+            if (remaining <= 0.0f) return T;
+            continue;
+        }
         if (!hit.material || !hit.material->transmitsShadows()) return Color3f::black();
         T *= hit.material->shadowTransmittance(hit, dir);
         if (T.isBlack()) return T;
@@ -186,7 +205,8 @@ Color3f shadowTransmittance(const Scene& scene, const Ray& shadow) {
 /// boyunca (normal ya da iki teğet) 2R uzunluğunda kısa ışın atılır. Aynı nesneye R'nin
 /// içinde çarpan ışınların yüzey normalleri ortalanır: düz yüzde sonuç değişmez, kenarın
 /// R yakınında komşu yüzün normali karışır ve keskin kenar yumuşak bir pah gibi parlar.
-Vec3f roundedEdgeNormal(const Scene& scene, const SurfaceInteraction& isect, float radius, Sampler& sampler) {
+Vec3f roundedEdgeNormal(const Scene& scene, const SurfaceInteraction& isect, float radius, Sampler& sampler,
+                        float rayTime = 0.0f) {
     const Vec3f N = isect.normal;
     const Frame f(N);
     Vec3f sum = N * 0.25f; // hiç isabet yoksa (ince parça) orijinal normal kalır
@@ -202,6 +222,7 @@ Vec3f roundedEdgeNormal(const Scene& scene, const SurfaceInteraction& isect, flo
         for (float sign : {1.0f, -1.0f}) {
             const Vec3f origin = isect.point + s * d.x + t * d.y + axis * (sign * radius);
             Ray r(origin, axis * -sign, 0.0f, 2.0f * radius);
+            r.time = rayTime;
             SurfaceInteraction hit;
             if (!scene.intersect(r, hit) || hit.hitObject != isect.hitObject) continue;
             if ((hit.point - isect.point).lengthSquared() > 2.25f * radius * radius) continue;
@@ -240,13 +261,15 @@ Vec3f PathTracer::roundedEdgeNormalForTest(const Scene& scene, const SurfaceInte
 
 bool PathTracer::randomWalkSubsurface(const Scene& scene, const SurfaceInteraction& entry, const Vec3f& dir,
                                       const SubsurfaceCoeffs& coeffs, Sampler& sampler, Color3f& throughput,
-                                      SurfaceInteraction& exitSi) {
+                                      SurfaceInteraction& exitSi, float rayTime) {
     const Color3f sigmaS = coeffs.albedo * coeffs.sigmaT;
     Vec3f d = dir.normalized();
     // Giriş: yüzeyin hemen içinden başla (normal ışığın geldiği tarafa bakar).
     Vec3f origin = spawnOrigin(entry, d);
     for (int step = 0; step < kMaxWalkSteps; ++step) {
         Ray r(origin, d);
+        r.time = rayTime;
+        r.visibilityMask = VisAll;
         SurfaceInteraction hit;
         const bool h = scene.intersect(r, hit);
         const float tMax = h ? hit.t : INFINITY_F;
@@ -299,10 +322,12 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
     Color3f L = Color3f::black();
     Color3f throughput = Color3f::white();
     Ray currentRay = ray;
+    if (currentRay.visibilityMask == VisAll) currentRay.visibilityMask = VisCamera;
     bool specularBounce = true;
     float lastBsdfPdf = 0.0f;
     Vec3f lastNormal(0, 1, 0);
     Vec3f lastPoint = ray.origin;
+    uint64_t prevReceiverUid = 0;
     MediumStack media;
     float lambda = 0.0f;       // 0 = RGB; > 0 = dispersiyon nedeniyle tek dalga boylu yol
     int mediumEvents = 0;
@@ -376,8 +401,15 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             // Köşe sayılmaz: sekme, MIS durumu ve birincil isabet (AOV) ilk gerçek yüzeye aittir.
             for (int skip = 0; hit && skip < 64; ++skip) {
                 if (!(cameraRay && scene.cameraInvisible(isect)) && !passesCutout(isect, sampler)) break;
+                const float nextW = currentRay.coneWidth + currentRay.coneSpread * std::max(0.0f, isect.t);
+                const float prevSpread = currentRay.coneSpread;
+                const uint8_t prevMask = currentRay.visibilityMask;
                 currentRay = Ray(offsetRayOrigin(isect.point, isect.pError, isect.ng, currentRay.direction),
                                  currentRay.direction, 0.0f, 1e30f);
+                currentRay.time = ray.time;
+                currentRay.coneWidth = nextW;
+                currentRay.coneSpread = prevSpread;
+                currentRay.visibilityMask = prevMask;
                 isect = SurfaceInteraction{};
                 hit = scene.intersect(currentRay, isect);
             }
@@ -407,6 +439,8 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                         if (++mediumEvents > kMaxMediumEvents || !throughput.isFinite()) break;
                         const Vec3f d = currentRay.direction / dirLen;
                         currentRay = Ray(segmentStart + d * t, sampleHenyeyGreenstein(d, med->g, sampler.get2D()));
+                        currentRay.time = ray.time;
+                        currentRay.visibilityMask = VisDiffuse;
                         cameraRay = false;
                         specularBounce = true; // içeride NEE yok → bulunan yayım tam ağırlık
                         if (mediumEvents > 8 && !russianRoulette(throughput, sampler)) break;
@@ -468,6 +502,11 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                             sampler.get2D();
                             continue;
                         }
+                        if (li < explicitLights && scene.hasLightLinks() &&
+                            !scene.isLightLinked(li, scene.nodeUidOf(isect))) {
+                            sampler.get2D();
+                            continue;
+                        }
                         const LightSample ls = li < explicitLights ? lights[static_cast<size_t>(li)]->sampleLi(isect, sampler.get2D())
                                                                    : env->sampleLiFull(sampler.get2D());
                         const float cosT = ls.wi.dot(isect.normal);
@@ -477,8 +516,8 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                         total += c;
                         const bool onSurface = li < explicitLights && !lights[static_cast<size_t>(li)]->isDelta();
                         Ray shadow;
-                        if (makeShadowRay(isect, ls, onSurface, shadow))
-                            visible += c * shadowTransmittance(scene, shadow).luminance();
+                        if (makeShadowRay(isect, ls, onSurface, ray.time, shadow))
+                            visible += c * shadowTransmittance(scene, shadow, li < explicitLights ? li : -1).luminance();
                     }
                 }
                 const float ratio = total > 0.0f ? std::clamp(visible / total, 0.0f, 1.0f) : 1.0f;
@@ -493,21 +532,27 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             if (isect.material) {
                 Color3f emitted = isect.material->emitted(isect);
                 if (!emitted.isBlack()) {
-                    float weight = 1.0f;
-                    if (!specularBounce) {
-                        // Diffuse/glossy hit of an emissive quad: complement of NEE's weight.
-                        // Kayıtlı ışık değilse (lightPdf = 0) NEE onu bulamaz → ağırlık 1.
-                        const int li = scene.emitterIndex(isect);
-                        float lightPdf = li >= 0 ? picker.pmf(li) * lights[static_cast<size_t>(li)]->pdfLiHit(lastPoint, isect)
-                                                 : 0.0f;
-                        if (lightPdf > 0.0f && lastBsdfPdf > 0.0f) {
-                            weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
+                    const int li = scene.emitterIndex(isect);
+                    // Light Linking MIS tutarlılığı: bir önceki alıcı düğüm bu ışığa bağlı değilse
+                    // BSDF çarpması da sıfırlanır (kamera ışınları depth==0 her zaman görür).
+                    const bool linked = (depth == 0) || (li < 0) || !scene.hasLightLinks() ||
+                                        scene.isLightLinked(li, prevReceiverUid);
+                    if (linked) {
+                        float weight = 1.0f;
+                        if (!specularBounce) {
+                            // Diffuse/glossy hit of an emissive quad: complement of NEE's weight.
+                            // Kayıtlı ışık değilse (lightPdf = 0) NEE onu bulamaz → ağırlık 1.
+                            float lightPdf = li >= 0 ? picker.pmf(li) * lights[static_cast<size_t>(li)]->pdfLiHit(lastPoint, isect)
+                                                     : 0.0f;
+                            if (lightPdf > 0.0f && lastBsdfPdf > 0.0f) {
+                                weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
+                            }
                         }
+                        const Color3f added = diffuseBounces >= 2 ? accumulateIndirect(throughput * emitted * weight)
+                                                                  : accumulate(throughput * emitted * weight);
+                        if (depth == 0) credit(LightPass::Emission, added);
+                        else creditPath(added, depth == 1);
                     }
-                    const Color3f added = diffuseBounces >= 2 ? accumulateIndirect(throughput * emitted * weight)
-                                                              : accumulate(throughput * emitted * weight);
-                    if (depth == 0) credit(LightPass::Emission, added);
-                    else creditPath(added, depth == 1);
                 }
             }
         }
@@ -528,16 +573,17 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
         // köşede; daha derin sekmelerde görünmez, maliyete değmez). wo'yu arkada bırakan bir
         // eğim siyah kenar yapacağından o durumda orijinal normal korunur.
         if (depth <= 2 && isect.material->roundEdgeRadius() > 0.0f && !pendingExitVertex) {
-            const Vec3f n = roundedEdgeNormal(scene, isect, isect.material->roundEdgeRadius(), sampler);
+            const Vec3f n = roundedEdgeNormal(scene, isect, isect.material->roundEdgeRadius(), sampler, ray.time);
             if (n.dot(wo) > 0.02f) isect.normal = n;
         }
 
         // Approximate contact AO (multiplies remaining path; cheap studio polish).
         // m_aoStrength = 0 iken tamamen etkisizdir (örnek de tüketmez).
         if (m_aoStrength > 0.0f && depth == 0) {
-            throughput *= approxAo(scene, isect, sampler, m_aoStrength, m_shadowQuality);
+            throughput *= approxAo(scene, isect, sampler, m_aoStrength, m_shadowQuality, ray.time);
         }
 
+        const uint64_t receiverUid = scene.nodeUidOf(isect);
         const bool isSpecular = isect.material->isDelta();
         if (lightCount > 0 && !isSpecular) {
             picker = lightSampler.prepare(isect.point, isect.normal);
@@ -548,30 +594,27 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                     sampler.get2D(); // boyut düzeni sabit kalsın
                     continue;
                 }
+                const bool fromEnv = lightIndex >= explicitLights;
+                if (!fromEnv && scene.hasLightLinks() && !scene.isLightLinked(lightIndex, receiverUid)) {
+                    sampler.get2D();
+                    continue;
+                }
                 LightSample ls;
-                bool fromEnv = false;
-
-                if (lightIndex < explicitLights) {
+                if (!fromEnv) {
                     ls = lights[lightIndex]->sampleLi(isect, sampler.get2D());
                     if (!ls.isValid()) continue;
                 } else {
-                    fromEnv = true;
                     ls = env->sampleLi(isect, sampler.get2D());
                     if (!ls.isValid()) continue;
                 }
 
                 Ray shadowRay;
-                if (!makeShadowRay(isect, ls, !fromEnv && !lights[lightIndex]->isDelta(), shadowRay)) continue;
-                const Color3f vis = shadowTransmittance(scene, shadowRay);
+                if (!makeShadowRay(isect, ls, !fromEnv && !lights[lightIndex]->isDelta(), ray.time, shadowRay)) continue;
+                const Color3f vis = shadowTransmittance(scene, shadowRay, fromEnv ? -1 : lightIndex);
 
                 if (!vis.isBlack()) {
                     float bsdfPdf = 0.0f;
                     Color3f f = isect.material->evalPdf(wo, ls.wi, isect, bsdfPdf);
-                    // |cos|: ışık yüzeyin arkasında olabilir; BSDF geçirgense (kaba cam,
-                    // difüz geçirgenlik) f ≠ 0 döner ve bu ışık da sayılmalıdır. Saf yansıtıcı
-                    // malzemede arka yarıküre için f = 0 olduğundan |cos| zararsızdır.
-                    // (lighting-3 / materials-6: eskiden max(0, cos) ile atılıyordu, ama BSDF
-                    // tarafındaki MIS yine de ağırlığı düşürüyordu → enerji kaybı.)
                     float cosTheta = std::abs(ls.wi.dot(isect.normal));
 
                     if (!f.isBlack() && cosTheta > 0.0f) {
@@ -618,7 +661,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             if (!isect.material->subsurfaceCoeffs(isect, coeffs)) break;
             throughput *= bs.weight; // yüzey altı ışığı "doğrudan" sayılır: kırpılmaz
             SurfaceInteraction exitSi;
-            if (!randomWalkSubsurface(scene, isect, bs.wi, coeffs, sampler, throughput, exitSi)) break;
+            if (!randomWalkSubsurface(scene, isect, bs.wi, coeffs, sampler, throughput, exitSi, ray.time)) break;
             // Çıkış köşesi: normal dışa, malzeme beyaz Lambert. Derinlik artmaz.
             exitSi.normal = -exitSi.normal;
             exitSi.material = &subsurfaceExitMaterial();
@@ -638,27 +681,40 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             // bulunduğu için iki strateji böylece tutarlı tartılır.
             throughput *= bs.f * (std::abs(bs.wi.dot(isect.normal)) / bs.pdf);
             if (!throughput.isFinite()) break;
+            const float nextW = currentRay.coneWidth + currentRay.coneSpread * std::max(0.0f, isect.t);
+            const float prevSpread = currentRay.coneSpread;
+            const uint8_t prevMask = currentRay.visibilityMask;
             currentRay = spawnRay(isect, bs.wi);
+            currentRay.time = ray.time;
+            currentRay.coneWidth = nextW;
+            currentRay.coneSpread = prevSpread;
+            currentRay.visibilityMask = prevMask;
             if (++passThroughs > 64) break; // sonsuz cam yığınına karşı sigorta (sekme sayılmaz)
             continue;
         }
 
         const Vec3f wi = bs.wi;
+        const bool refracted = wo.dot(isect.ng) * wi.dot(isect.ng) < 0.0f;
+        LobeSplit bounceSplit;
+        bool hasBounceSplit = false;
+        if (!bs.delta) {
+            bounceSplit = isect.material->evalSplit(wo, wi, isect);
+            hasBounceSplit = true;
+        }
+
         if (passes && depth == 0) {
             // İlk yüzeyin lob payları: bu yönden gelecek tüm ışık bunlarla geçişlere dağılır.
             if (bs.delta) {
-                const bool refracted = wo.dot(isect.ng) * wi.dot(isect.ng) < 0.0f;
                 firstLobe[0] = Color3f(0.0f);
                 firstLobe[1] = refracted ? Color3f(0.0f) : Color3f(1.0f);
                 firstLobe[2] = refracted ? Color3f(1.0f) : Color3f(0.0f);
             } else {
-                const LobeSplit sp = isect.material->evalSplit(wo, wi, isect);
-                const Color3f sum = sp.diffuse + sp.glossy + sp.transmission;
+                const Color3f sum = bounceSplit.diffuse + bounceSplit.glossy + bounceSplit.transmission;
                 for (int ch = 0; ch < 3; ++ch) {
                     const bool ok = sum[ch] > 0.0f;
-                    firstLobe[0][ch] = ok ? sp.diffuse[ch] / sum[ch] : 1.0f;
-                    firstLobe[1][ch] = ok ? sp.glossy[ch] / sum[ch] : 0.0f;
-                    firstLobe[2][ch] = ok ? sp.transmission[ch] / sum[ch] : 0.0f;
+                    firstLobe[0][ch] = ok ? bounceSplit.diffuse[ch] / sum[ch] : 1.0f;
+                    firstLobe[1][ch] = ok ? bounceSplit.glossy[ch] / sum[ch] : 0.0f;
+                    firstLobe[2][ch] = ok ? bounceSplit.transmission[ch] / sum[ch] : 0.0f;
                 }
             }
         }
@@ -668,6 +724,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
         lastBsdfPdf = bs.pdf;
         lastNormal = isect.normal;
         lastPoint = isect.point;
+        prevReceiverUid = receiverUid;
         specularBounce = bs.delta;
         if (!bs.delta) ++diffuseBounces;
         cameraRay = cameraRay && bs.delta && wi.dot(isect.normal) < 0.0f; // yalnız delta kırılma
@@ -683,18 +740,20 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             }
         }
 
+        uint8_t nextMask = VisDiffuse;
+        if (refracted) nextMask = VisTransmission;
+        else if (bs.delta) nextMask = VisGlossy;
+        else if (hasBounceSplit && bounceSplit.glossy.luminance() > bounceSplit.diffuse.luminance()) nextMask = VisGlossy;
+
         const float nextConeWidth = currentRay.coneWidth + currentRay.coneSpread * std::max(0.0f, isect.t);
         const float nextConeSpread = currentRay.coneSpread + (bs.delta ? 0.0f : 0.12f);
         currentRay = spawnRay(isect, wi);
         currentRay.coneWidth = nextConeWidth;
         currentRay.coneSpread = nextConeSpread;
         currentRay.time = ray.time;
+        currentRay.visibilityMask = nextMask;
         ++depth;
 
-        // Rus ruleti (PBRT-v4): hayatta kalma olasılığı = throughput'un EN BÜYÜK bileşeni.
-        // q = 1 - max; q > 0 ise ölçek 1/(1-q) ile tahminci yansız kalır. max ≥ 1 ise
-        // yol hiç kesilmez (q ≤ 0) ve rastgele sayı da tüketilmez. Eskiden luminans
-        // kullanılıyordu: doygun renkli (ör. saf mavi) yollar haksız yere öldürülüyordu.
         if (depth > m_russianRouletteDepth && !russianRoulette(throughput, sampler)) {
             break;
         }

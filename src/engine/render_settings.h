@@ -8,7 +8,12 @@
 #include "core/image/pixel_filter.h"
 #include "core/image/tone_mapping.h"
 
+#include <cstdint>
+
 namespace photon {
+
+/// GPU yürütme kipi: Auto donanıma göre en hızlı yolu seçer (RayQuery → Wavefront → Megakernel).
+enum class GpuMode : uint8_t { Auto = 0, Megakernel = 1, Wavefront = 2, RayQuery = 3 };
 
 /// @brief Settings controlling the render quality and output processing.
 struct RenderSettings {
@@ -33,6 +38,12 @@ struct RenderSettings {
     int shadowQuality = 1;             ///< NEE / AO sample multiplier (1–4)
     /// Piksel yeniden yapılandırma filtresi (filtre önem örneklemesi). Kutu/1 = eski davranış.
     PixelFilter filter;
+
+    // ── Prodüksiyon özellikleri (v0.4 / v0.5) ──
+    bool motionBlur = false;           ///< Kamera ve nesne hareket bulanıklığı (t ∈ [0, 1])
+    float shutterAngle = 180.0f;       ///< Enstantane açısı (derece, 180° = kare süresinin yarısı)
+    bool pathGuiding = false;          ///< SD-Tree yol kılavuzluğu (Müller 2017)
+    GpuMode gpuMode = GpuMode::Auto;   ///< GPU shader yürütme stratejisi
 };
 
 } // namespace photon

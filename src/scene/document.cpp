@@ -68,6 +68,7 @@ std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& de
     for (const LightDesc& d : descs) {
         if (!d.enabled || d.intensity <= 0.0f) continue;
         const Color3f L = lightEmission(d);
+        std::shared_ptr<Light> created;
         switch (d.type) {
             case LightDesc::Type::Area: {
                 Vec3f n = d.target - d.position;
@@ -81,7 +82,7 @@ std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& de
                 const Vec3f corner = d.position - u * 0.5f - v * 0.5f;
                 auto area = std::make_shared<AreaLight>(corner, u, v, L);
                 area->setVisibleToCamera(d.visibleToCamera);
-                out.push_back(std::move(area));
+                created = std::move(area);
                 break;
             }
             case LightDesc::Type::Spot: {
@@ -91,16 +92,21 @@ std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& de
                     ies = loadIes(d.iesPath, &err);
                     if (!ies) std::cerr << err << std::endl;
                 }
-                out.push_back(std::make_shared<SpotLight>(d.position, d.target - d.position, L, d.coneAngleDeg,
-                                                          d.coneBlend, std::move(ies)));
+                created = std::make_shared<SpotLight>(d.position, d.target - d.position, L, d.coneAngleDeg,
+                                                      d.coneBlend, std::move(ies));
                 break;
             }
             case LightDesc::Type::Directional:
-                out.push_back(std::make_shared<DirectionalLight>(directionalTravelDir(d), L));
+                created = std::make_shared<DirectionalLight>(directionalTravelDir(d), L);
                 break;
             case LightDesc::Type::Point:
-                out.push_back(std::make_shared<PointLight>(d.position, L));
+                created = std::make_shared<PointLight>(d.position, L);
                 break;
+        }
+        if (created) {
+            if (!d.lightGroup.empty()) created->setLightGroup(d.lightGroup);
+            if (!d.lightLink.isDefault()) created->setLightLink(d.lightLink);
+            out.push_back(std::move(created));
         }
     }
     return out;
@@ -303,7 +309,7 @@ namespace photon {
 
 std::shared_ptr<Scene> buildRenderScene(const SceneGraph& graph, const std::vector<LightDesc>& lights,
                                         const EnvironmentDesc& env, EnvironmentCache& cache, bool isolate,
-                                        bool clay) {
+                                        bool clay, bool hasShutter, float shutterT0, float shutterT1) {
     auto scene = std::make_shared<Scene>();
     // Kil: %60 yansıtan mat açık gri — gölgeler ve yüzey eğrilikleri okunur,
     // renkler/yansımalar dikkati dağıtmaz (stüdyo "clay render" alışkanlığı).
@@ -312,7 +318,7 @@ std::shared_ptr<Scene> buildRenderScene(const SceneGraph& graph, const std::vect
         clayMat = std::make_shared<DisneyMaterial>(Color3f(0.6f), 0.0f, 0.6f, 0.5f);
         scene->retainMaterial(clayMat);
     }
-    graph.compileInto(*scene, isolate, clayMat);
+    graph.compileInto(*scene, isolate, clayMat, hasShutter, shutterT0, shutterT1);
     // Otomatik zemin: modellerin altına, sahne boyutunun çok katı genişlikte bir dörtgen.
     if (env.groundEnabled && !graph.empty()) {
         const AABB box = graph.worldBounds();
@@ -325,6 +331,7 @@ std::shared_ptr<Scene> buildRenderScene(const SceneGraph& graph, const std::vect
                 std::vector<uint32_t>{0, 2, 1, 0, 3, 2}, mat.get());
             scene->retainMaterial(mat);
             scene->tagShape(mesh.get(), kGroundNodeUid);
+            scene->setShapeName(mesh.get(), "Zemin");
             if (env.groundShadowOnly) scene->setShadowCatcher(mesh.get());
             scene->addShape(mesh);
         }

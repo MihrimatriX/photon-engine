@@ -69,7 +69,7 @@ public:
     /// ağırlığıyla çarpılmıştır. Kaçış (açık mesh) ya da soğrulma → false.
     static bool randomWalkSubsurface(const Scene& scene, const SurfaceInteraction& entry, const Vec3f& dir,
                                      const SubsurfaceCoeffs& coeffs, Sampler& sampler, Color3f& throughput,
-                                     SurfaceInteraction& exitSi);
+                                     SurfaceInteraction& exitSi, float rayTime = 0.0f);
 
     /// Test kancası: yuvarlatılmış kenar normali (integratörün ilk köşelerde kullandığı hesap).
     static Vec3f roundedEdgeNormalForTest(const Scene& scene, const SurfaceInteraction& isect, float radius,

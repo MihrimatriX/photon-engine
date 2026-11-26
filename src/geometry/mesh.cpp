@@ -1,16 +1,24 @@
 // mesh.cpp — TriangleMesh: sınırlar, eksik normallerin hesaplanması, tek üçgen kesişimi
 // ve dışarıda (Embree) bulunan isabet için yüzey verisinin doldurulması.
 #include "geometry/mesh.h"
+#include "geometry/bvh.h"
 #include <iostream>
+#include <mutex>
 
 namespace photon {
+
+struct TriangleMesh::BlasCache {
+    std::once_flag once;
+    BVH bvh;
+};
 
 TriangleMesh::TriangleMesh(const std::vector<Vec3f>& positions,
                            const std::vector<Vec3f>& normals,
                            const std::vector<Vec2f>& uvs,
                            const std::vector<uint32_t>& indices,
                            const Material* material)
-    : m_positions(positions), m_normals(normals), m_uvs(uvs), m_indices(indices), m_material(material) {
+    : m_positions(positions), m_normals(normals), m_uvs(uvs), m_indices(indices), m_material(material),
+      m_blas(std::make_shared<BlasCache>()) {
     
     if (m_normals.empty() && !m_positions.empty() && !m_indices.empty()) {
         calculateNormals();
@@ -138,6 +146,22 @@ bool TriangleMesh::intersect(Ray& ray, SurfaceInteraction& isect) const {
         if (intersectTriangle(i, ray, isect)) hit = true;
     }
     return hit;
+}
+
+bool TriangleMesh::intersectAccelerated(Ray& ray, SurfaceInteraction& isect) const {
+    if (numTriangles() <= 16) return intersect(ray, isect);
+    std::call_once(m_blas->once, [this] { m_blas->bvh.buildMesh(*this); });
+    return m_blas->bvh.intersect(ray, isect);
+}
+
+bool TriangleMesh::intersectAnyAccelerated(const Ray& ray) const {
+    if (numTriangles() <= 16) {
+        Ray r = ray;
+        SurfaceInteraction tmp;
+        return intersect(r, tmp);
+    }
+    std::call_once(m_blas->once, [this] { m_blas->bvh.buildMesh(*this); });
+    return m_blas->bvh.intersectAny(ray);
 }
 
 AABB TriangleMesh::bounds() const {

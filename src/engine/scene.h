@@ -98,6 +98,8 @@ public:
     }
     const EnvironmentLight* environment() const { return m_environment.get(); }
     size_t shapeCount() const { return m_shapes.size(); }
+    const std::vector<std::shared_ptr<Shape>>& shapes() const { return m_shapes; }
+    const void* shadowCatcherShape() const { return m_shadowCatcher; }
 
     /// Tüm geometrinin dünya uzayındaki sınırlayıcı kutusu.
     AABB bounds() const;
@@ -109,8 +111,36 @@ public:
         auto it = m_shapeOwner.find(isect.hitObject);
         return it == m_shapeOwner.end() ? 0 : it->second;
     }
+    const std::unordered_map<const void*, uint64_t>& shapeOwners() const { return m_shapeOwner; }
+
+    /// Cryptomatte ve GPU dışa aktarımı için nesne/malzeme adları.
+    void setShapeName(const void* shape, std::string name) { m_shapeNames[shape] = std::move(name); }
+    const std::string& shapeNameOf(const SurfaceInteraction& isect) const;
+    const std::unordered_map<const void*, std::string>& shapeNames() const { return m_shapeNames; }
+    void setMaterialName(const Material* mat, std::string name) { m_materialNames[mat] = std::move(name); }
+    const std::string& materialNameOf(const Material* mat) const;
+    const std::unordered_map<const Material*, std::string>& materialNames() const { return m_materialNames; }
+
+    // ── Light Linking & Shadow Linking (O(1) arama, buildAccelerator kurar) ──
+    bool hasLightLinks() const { return m_hasLightLinks; }
+    bool hasShadowLinks() const { return m_hasShadowLinks; }
+    bool hasShadowLinkFor(int lightIdx) const;
+    bool isLightLinked(int lightIdx, uint64_t receiverUid) const;
+    bool isShadowLinked(int lightIdx, uint64_t blockerUid) const;
+
+    // ── Light Groups (EXR LG_* katmanları, buildAccelerator kurar) ──
+    const std::vector<std::string>& lightGroupNames() const { return m_lightGroupNames; }
+    int lightGroupIndex(int lightIdx) const;
+    int envLightGroupIndex() const { return m_envLightGroupIndex; }
 
 private:
+    struct CompiledLightLink {
+        LightLinkSet::Mode mode = LightLinkSet::Mode::All;
+        std::unordered_set<uint64_t> uids;
+        LightLinkSet::Mode shadowMode = LightLinkSet::Mode::All;
+        std::unordered_set<uint64_t> shadowUids;
+    };
+
     // İlk bildirilen son yok edilir: malzemeler, onlara işaret eden üçgenlerden uzun yaşar.
     std::vector<std::shared_ptr<const Material>> m_materials;
     std::vector<std::shared_ptr<Material>> m_emissiveMaterials;
@@ -125,6 +155,8 @@ private:
     // Integrator'ün hızlı erişimi için ham işaretçi önbelleği.
     std::vector<const Light*> m_lightPtrs;
     std::unordered_map<const void*, uint64_t> m_shapeOwner;
+    std::unordered_map<const void*, std::string> m_shapeNames;
+    std::unordered_map<const Material*, std::string> m_materialNames;
     std::unordered_map<const void*, int> m_emitterOfShape;
     std::unordered_map<const void*, int> m_meshEmitterBase; ///< yayıcı mesh → ilk üçgen ışığının sırası
     LightSampler m_lightSampler;
@@ -132,6 +164,14 @@ private:
     std::unordered_set<const void*> m_cameraInvisible;
     const void* m_shadowCatcher = nullptr;
     bool m_shadowTransmitters = false;
+
+    std::vector<CompiledLightLink> m_lightLinks;
+    bool m_hasLightLinks = false;
+    bool m_hasShadowLinks = false;
+
+    std::vector<std::string> m_lightGroupNames;
+    std::vector<int> m_lightToGroup;
+    int m_envLightGroupIndex = -1;
 };
 
 } // namespace photon

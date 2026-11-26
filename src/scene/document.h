@@ -46,6 +46,8 @@ struct LightDesc {
     float coneAngleDeg = 45.0f;        ///< Spot: koninin tam açısı (≥ 180 = yalnız IES)
     float coneBlend = 0.15f;           ///< Spot: kenar yumuşaklığı (0 keskin, 1 tam yumuşak)
     std::string iesPath;               ///< Spot: IES fotometrik profili (boş = yok)
+    std::string lightGroup;            ///< EXR ışık grubu adı (boş = varsayılan; LG_<ad>)
+    LightLinkSet lightLink;            ///< Işık bağlama ve gölge bağlama kuralları
 };
 
 struct EnvironmentDesc {
@@ -157,7 +159,8 @@ constexpr uint64_t kGroundNodeUid = ~0ull;
 /// @param clay    Kil modu: tüm parçalar aynı nötr mat griyle (ışık ve formu görmek için).
 std::shared_ptr<Scene> buildRenderScene(const SceneGraph& graph, const std::vector<LightDesc>& lights,
                                         const EnvironmentDesc& env, EnvironmentCache& cache, bool isolate,
-                                        bool clay = false);
+                                        bool clay = false, bool hasShutter = false, float shutterT0 = 0.0f,
+                                        float shutterT1 = 0.0f);
 
 /// assets/studios/*.json dosyalarını oku.
 std::vector<StudioPreset> loadStudioPresets(const std::string& dir);

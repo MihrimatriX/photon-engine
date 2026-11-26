@@ -44,6 +44,9 @@ public:
     /// Build BVH on a list of shape primitives.
     void build(std::vector<std::shared_ptr<Shape>> primitives);
 
+    /// Tek bir TriangleMesh için sahiplik almadan yerel uzay BLAS BVH'si kurar (MeshInstance için).
+    void buildMesh(const TriangleMesh& mesh);
+
     bool intersect(Ray& ray, SurfaceInteraction& isect) const override;
     
     /// Shadow ray intersection (fast early exit, returns true on any hit)

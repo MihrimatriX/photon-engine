@@ -5,9 +5,11 @@
 // düğümlerde sarkık (dangling) kalacağı için saklanmaz.
 #pragma once
 
+#include "core/math/ray.h"
 #include "core/math/transform.h"
 #include "geometry/mesh.h"
 #include "materials/material.h"
+#include "scene/transform_animation.h"
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -33,6 +35,8 @@ struct SceneNode {
     std::shared_ptr<Material> material;
     float sphereRadius = 0.0f;
     bool visible = true;
+    uint8_t visibilityMask = VisAll;         ///< Işın türü görünürlük maskesi (Kamera/Difüz/Parlak/Geçirgen/Gölge)
+    TransformTrack transformTrack;           ///< Nesne hareket bulanıklığı ve dönüşüm animasyonu anahtarları
     uint32_t pickId = 0;                     ///< Eski GL seçim geçişi için
     uint64_t uid = allocateNodeUid();
     std::string sourcePath;                  ///< İçe aktarılan dosya (.obj/.gltf), grup düğümünde

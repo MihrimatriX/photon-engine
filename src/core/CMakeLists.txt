@@ -9,6 +9,7 @@ add_library(photon_core STATIC)
 target_sources(photon_core PRIVATE
     math/vec.cpp
     math/transform.cpp
+    math/quat.cpp
     color/transfer.cpp
     color/spectral.cpp
     image/film.cpp

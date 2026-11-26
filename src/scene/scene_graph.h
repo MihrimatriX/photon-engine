@@ -39,7 +39,11 @@ public:
     /// (ör. zemin) ekleyip buildAccelerator() ile bitirir.
     /// @p overrideMaterial doluysa her parça bu malzemeyle derlenir (viewport "kil" modu).
     void compileInto(Scene& outScene, bool isolateMaterials = false,
-                     const std::shared_ptr<Material>& overrideMaterial = nullptr) const;
+                     const std::shared_ptr<Material>& overrideMaterial = nullptr,
+                     bool hasShutter = false, float shutterT0 = 0.0f, float shutterT1 = 0.0f) const;
+
+    /// Herhangi bir düğümde dönüşüm animasyon anahtarı (TransformTrack) var mı?
+    bool hasTransformAnimation() const;
 
     /// Ağacın derin kopyası. Geometri (değişmez) paylaşılır; cloneMaterials true ise
     /// malzemeler de kopyalanır (aynı malzemeyi paylaşan düğümler kopyada da paylaşır).
@@ -93,8 +97,10 @@ private:
     uint32_t m_nextPickId = 1;
     uint32_t m_revision = 1;
 
-    void compileNode(const SceneNode& node, Scene& outScene, const Transform& parentXform,
-                     bool isolateMaterials, const std::shared_ptr<Material>& overrideMaterial = nullptr) const;
+    void compileNode(const SceneNode& node, Scene& outScene, const Transform& parentXform0,
+                     const Transform& parentXform1, bool isolateMaterials,
+                     const std::shared_ptr<Material>& overrideMaterial,
+                     bool hasShutter, float shutterT0, float shutterT1) const;
     std::shared_ptr<TriangleMesh> bakeMesh(const TriangleMesh& mesh, const Transform& xform,
                                            const Material* material) const;
 };

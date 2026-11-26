@@ -68,7 +68,12 @@ Vec3f Transform::transformNormal(const Vec3f& n) const {
 Ray Transform::transformRay(const Ray& r) const {
     Vec3f newOrigin    = transformPoint(r.origin);
     Vec3f newDirection = transformVector(r.direction);
-    return Ray(newOrigin, newDirection, r.tMin, r.tMax);
+    Ray out(newOrigin, newDirection, r.tMin, r.tMax);
+    out.time = r.time;
+    out.coneWidth = r.coneWidth;
+    out.coneSpread = r.coneSpread;
+    out.visibilityMask = r.visibilityMask;
+    return out;
 }
 
 // ─────────────────────────────────────────────────────────────

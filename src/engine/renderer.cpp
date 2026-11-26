@@ -68,7 +68,7 @@ struct PixelSample {
 // kamera ışınına arka plan rengi/şeffaflık uygulanır, çarpanda albedo ve normal alınır.
 PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& integrator,
                        const PixelFilterSampler& filter, Sampler& sampler, int x, int y, int sampleIndex,
-                       int width, int height, bool wantAovs, bool wantPasses = false) {
+                       int width, int height, bool wantAovs, bool wantPasses = false, bool motionBlur = false) {
     sampler.startPixel(x, y);
     sampler.startSample(sampleIndex);
 
@@ -78,7 +78,8 @@ PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& int
     Vec2f screen = rasterToScreen(static_cast<float>(x) + 0.5f + offset.x, static_cast<float>(y) + 0.5f + offset.y,
                                   width, height);
     Vec2f lensSample = sampler.get2D();
-    Ray ray = camera.generateRay(screen.x, screen.y, lensSample);
+    Ray ray = motionBlur ? camera.generateRay(screen.x, screen.y, lensSample, sampler.get1D())
+                         : camera.generateRay(screen.x, screen.y, lensSample);
     ray.coneWidth = camera.pixelConeWidth(height);
     ray.coneSpread = camera.pixelConeSpread(height);
 
@@ -331,7 +332,7 @@ SampleBatchResult Renderer::renderSamples(const Scene& scene, const Camera& came
                     continue;
                 for (int s = firstSample; s < lastSample; ++s) {
                     PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h,
-                                                wantAovs, wantPasses);
+                                                wantAovs, wantPasses, settings.motionBlur);
                     accum.addSample(x, y, ps.L);
                     if (wantAovs) addAovs(aovs, x, y, ps);
                     if (wantPasses) addPasses(passes, x, y, ps);

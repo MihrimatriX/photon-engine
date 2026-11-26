@@ -298,7 +298,14 @@ void Application::startAnimationRender() {
             for (int i = 0; i < frames && !j.cancel; ++i) {
                 const float t = static_cast<float>(i) / std::max(1.0f, track.fps);
                 const OrbitCamera cam = orbitFromKey(track.evaluate(t), baseCam);
-                session.begin(makeCamera(cameraParamsFor(cam), aspect), rs, sc);
+                auto frameCam = makeCamera(cameraParamsFor(cam), aspect);
+                if (rs.motionBlur && rs.shutterAngle > 0.0f) {
+                    const float shutterDt = (rs.shutterAngle / 360.0f) / std::max(1.0f, track.fps);
+                    const OrbitCamera camEnd = orbitFromKey(track.evaluate(t + shutterDt), baseCam);
+                    auto endCam = makeCamera(cameraParamsFor(camEnd), aspect);
+                    if (frameCam && endCam) frameCam->setShutterEnd(endCam->describeGpu());
+                }
+                session.begin(std::move(frameCam), rs, sc);
                 while (session.advance(&j.cancel)) {
                 }
                 if (j.cancel) break;
