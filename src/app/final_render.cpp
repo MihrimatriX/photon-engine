@@ -169,9 +169,12 @@ void Application::startFinalRender() {
                 applyImager(shown, imager, ev);
                 bool ok;
                 if (session.passes()) {
-                    // Çok katmanlı EXR: beauty (gürültüsü giderilmiş) + ham ışık/veri geçişleri.
+                    // Çok katmanlı EXR: beauty (gürültüsü giderilmiş) + ham ışık/veri geçişleri + Cryptomatte.
                     std::vector<Image> storage;
-                    ok = saveMultiLayerEXR(out.path, img, &alpha, makeExrLayers(session.passes(), session.aovs(), storage));
+                    std::vector<CryptoRankImage> cryptoStorage;
+                    const auto layers = makeExrLayers(session.passes(), session.aovs(), storage, &cryptoStorage);
+                    const auto cryptoMeta = makeExrCryptoMetadata(session.passes());
+                    ok = saveMultiLayerEXR(out.path, img, &alpha, layers, cryptoMeta);
                 } else {
                     ok = saveByFormat(out.format == 2 ? img : shown, &alpha, out.path, out.format, tmo, ev, transparent);
                 }

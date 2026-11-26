@@ -32,6 +32,13 @@ public:
     const Vec3f& v0() const { return m_v0; }
     const Vec3f& v1() const { return m_v1; }
     const Vec3f& v2() const { return m_v2; }
+    const Vec3f& n0() const { return m_n0; }
+    const Vec3f& n1() const { return m_n1; }
+    const Vec3f& n2() const { return m_n2; }
+    const Vec2f& uv0() const { return m_uv0; }
+    const Vec2f& uv1() const { return m_uv1; }
+    const Vec2f& uv2() const { return m_uv2; }
+    const Material* material() const { return m_material; }
 
 private:
     Vec3f m_v0, m_v1, m_v2;

@@ -46,6 +46,7 @@ add_executable(photon_tests
     test_texture_lod.cpp
     test_visibility_lightlink.cpp
     test_motion_blur.cpp
+    test_v04_production.cpp
     ${CMAKE_SOURCE_DIR}/src/app/live_link.cpp
 )
 

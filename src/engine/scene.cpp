@@ -145,7 +145,7 @@ void Scene::buildAccelerator() {
     m_lightGroupNames.clear();
     m_lightToGroup.assign(m_lightPtrs.size(), -1);
     m_envLightGroupIndex = -1;
-    bool anyExplicitGroup = false;
+    bool anyExplicitGroup = (m_environment && !m_environment->lightGroup().empty());
     for (const Light* l : m_lightPtrs) {
         if (!l->lightGroup().empty()) {
             anyExplicitGroup = true;

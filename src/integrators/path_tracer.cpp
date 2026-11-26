@@ -3,6 +3,7 @@
 // Rus ruleti, NaN/Inf koruması ve isteğe bağlı kontak AO da burada.
 
 #include "integrators/path_tracer.h"
+#include "integrators/path_guiding.h"
 #include "materials/material.h"
 #include "materials/lambertian.h"
 #include "lights/light.h"
@@ -369,9 +370,11 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
         return accumulate(c);
     };
 
-    // ── Render geçişleri ──
+    // ── Render geçişleri & Light Groups (LG_*) ──
     // İlk yüzeyde örneklenen yönün lob payları (difüz, parlak, geçirgen; kanal başına, toplam 1).
     Color3f firstLobe[3] = {Color3f(1.0f), Color3f(0.0f), Color3f(0.0f)};
+    const int numLightGroups = static_cast<int>(scene.lightGroupNames().size());
+    const int envGroupIdx = scene.envLightGroupIndex();
     auto passAt = [](int lobe, bool direct) {
         return static_cast<int>(lobe == 0 ? (direct ? LightPass::DiffuseDirect : LightPass::DiffuseIndirect)
                                 : lobe == 1 ? (direct ? LightPass::GlossyDirect : LightPass::GlossyIndirect)
@@ -380,15 +383,36 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
     auto credit = [&](LightPass p, const Color3f& added) {
         if (passes) passes->c[static_cast<int>(p)] += added;
     };
+    auto creditGroup = [&](int groupIdx, const Color3f& added) {
+        if (!passes || numLightGroups <= 0 || added.isBlack()) return;
+        const int g = (groupIdx >= 0 && groupIdx < numLightGroups) ? groupIdx : 0;
+        if (g < LightPasses::kMaxLightGroups) passes->lightGroups[g] += added;
+    };
     // İlk yüzeyden sonra bulunan ışık: ilk yüzeyin lob paylarıyla; ilk sekmede doğrudan.
     auto creditPath = [&](const Color3f& added, bool direct) {
         if (!passes) return;
         for (int k = 0; k < 3; ++k) passes->c[passAt(k, direct)] += added * firstLobe[k];
     };
 
+    // ── SD-Tree Path Guiding eğitim kaydı (bölmesiz geriye dönük sonek radyansı) ──
+    struct GuideVertex {
+        Vec3f p;
+        Vec3f wi;
+        Color3f bsdfWeight;
+        Color3f localEmit;
+        Color3f localNee;
+        float pdf = 1.0f;
+        bool recordable = false;
+    };
+    GuideVertex gVerts[32];
+    int gCount = 0;
+    Color3f gTerminalEmit = Color3f::black();
+
     for (;;) {
         bool hit = true;
         Vec3f wo;
+        Color3f stepEmit = Color3f::black();
+        Color3f stepNee = Color3f::black();
         const bool pendingExitVertex = pendingExit;
         if (pendingExit) {
             pendingExit = false;
@@ -461,9 +485,13 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                 // throughput'ta olduğu için arka plan onunla çarpılır. Şeffafta renk katkısı 0;
                 // kapsama, camın geçirmediği orandır (yalnız düz geçiş varsa ≠ 1).
                 if (depth == 0 && primary && scene.background().mode != Background::Mode::Environment) {
-                    if (scene.background().mode == Background::Mode::Color)
-                        credit(LightPass::Background, accumulate(throughput * scene.background().color));
-                    else if (passThroughs > 0) primary->coverage = std::max(0.0f, 1.0f - throughput.luminance());
+                    if (scene.background().mode == Background::Mode::Color) {
+                        const Color3f added = accumulate(throughput * scene.background().color);
+                        credit(LightPass::Background, added);
+                        creditGroup(envGroupIdx, added);
+                    } else if (passThroughs > 0) {
+                        primary->coverage = std::max(0.0f, 1.0f - throughput.luminance());
+                    }
                     break;
                 }
                 if (env) {
@@ -474,10 +502,13 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                         float lightPdf = picker.pmf(explicitLights) * env->pdfLi(currentRay.direction, lastNormal);
                         weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                     }
-                    const Color3f added = diffuseBounces >= 2 ? accumulateIndirect(throughput * Le * weight)
-                                                              : accumulate(throughput * Le * weight);
+                    const Color3f envLocal = Le * weight;
+                    if (m_trainGuiding && envLocal.isFinite()) gTerminalEmit = envLocal;
+                    const Color3f added = diffuseBounces >= 2 ? accumulateIndirect(throughput * envLocal)
+                                                              : accumulate(throughput * envLocal);
                     if (depth == 0) credit(LightPass::Background, added);
                     else creditPath(added, depth == 1);
+                    creditGroup(envGroupIdx, added);
                 }
                 break;
             }
@@ -525,7 +556,9 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                     primary->catcherAlpha = 1.0f - ratio;
                     primary->catcherBackground = bg;
                 }
-                credit(LightPass::Background, accumulate(throughput * bg * ratio));
+                const Color3f added = accumulate(throughput * bg * ratio);
+                credit(LightPass::Background, added);
+                creditGroup(envGroupIdx, added);
                 break;
             }
 
@@ -548,16 +581,20 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                                 weight = powerHeuristic(1, lastBsdfPdf, shadowSamples, lightPdf);
                             }
                         }
-                        const Color3f added = diffuseBounces >= 2 ? accumulateIndirect(throughput * emitted * weight)
-                                                                  : accumulate(throughput * emitted * weight);
+                        const Color3f emitLocal = emitted * weight;
+                        if (m_trainGuiding && emitLocal.isFinite()) stepEmit += emitLocal;
+                        const Color3f added = diffuseBounces >= 2 ? accumulateIndirect(throughput * emitLocal)
+                                                                  : accumulate(throughput * emitLocal);
                         if (depth == 0) credit(LightPass::Emission, added);
                         else creditPath(added, depth == 1);
+                        creditGroup(li >= 0 ? scene.lightGroupIndex(li) : 0, added);
                     }
                 }
             }
         }
 
         if (!isect.material || depth >= m_maxDepth) {
+            if (m_trainGuiding) gTerminalEmit = stepEmit;
             break;
         }
 
@@ -585,6 +622,12 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
 
         const uint64_t receiverUid = scene.nodeUidOf(isect);
         const bool isSpecular = isect.material->isDelta();
+        // SD-Tree Path Guiding etkin mi? NEE'deki devam-ışını PDF'i ile BSDF+Guiding karışım
+        // PDF'inin birebir tutması yansızlık için şarttır.
+        const bool useGuiding = m_sampleGuiding && m_sampleGuiding->ready() && !isSpecular &&
+                                !isect.material->isVolumeBoundary() && !isect.material->transmitsShadows() &&
+                                m_sampleGuiding->hasLeafData(isect.point);
+
         if (lightCount > 0 && !isSpecular) {
             picker = lightSampler.prepare(isect.point, isect.normal);
             for (int s = 0; s < shadowSamples; ++s) {
@@ -622,13 +665,19 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                         float weight = 1.0f;
                         bool delta = !fromEnv && lights[lightIndex]->isDelta();
                         if (!delta) {
-                            weight = powerHeuristic(shadowSamples, lightPdf, 1, bsdfPdf);
+                            const float contPdf =
+                                useGuiding ? (0.5f * bsdfPdf + 0.5f * m_sampleGuiding->pdf(isect.point, ls.wi))
+                                           : bsdfPdf;
+                            weight = powerHeuristic(shadowSamples, lightPdf, 1, contPdf);
                         }
                         // Tahminci: f·Li·|cos| / (n_l · pdf_l), MIS ağırlığıyla.
-                        const Color3f c = throughput * f * ls.Li * vis
-                                          * (cosTheta * weight / (lightPdf * static_cast<float>(shadowSamples)));
+                        const Color3f neeLocal =
+                            f * ls.Li * vis * (cosTheta * weight / (lightPdf * static_cast<float>(shadowSamples)));
+                        if (m_trainGuiding && neeLocal.isFinite()) stepNee += neeLocal;
+                        const Color3f c = throughput * neeLocal;
                         const Color3f added = diffuseBounces >= 1 ? accumulateIndirect(c) : accumulate(c);
                         if (passes && !added.isBlack()) {
+                            creditGroup(fromEnv ? envGroupIdx : scene.lightGroupIndex(lightIndex), added);
                             if (depth == 0) {
                                 // İlk yüzey: bu ışık örneğinin değeri lob gruplarına bölünür.
                                 const LobeSplit sp = isect.material->evalSplit(wo, ls.wi, isect);
@@ -648,20 +697,63 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             }
         }
 
-        // BSDF örneklemesi: uc lob seçimi (yansıma/kırılma/yüzey altı), u yön için.
+        // BSDF (ve etkinse %50/%50 1-örnekli MIS SD-Tree kılavuzlama) örneklemesi.
         BSDFSample bs;
-        const float uc = sampler.get1D();
-        const Vec2f u = sampler.get2D();
-        if (!isect.material->sampleFull(wo, isect, uc, u, bs)) {
+        bool sampled = false;
+        if (useGuiding) {
+            const float uBranch = sampler.get1D();
+            if (uBranch < 0.5f) {
+                Vec3f gWi;
+                float gPdf = 0.0f;
+                if (m_sampleGuiding->sample(isect.point, sampler.get2D(), gWi, gPdf) && gPdf > 0.0f) {
+                    float bPdf = 0.0f;
+                    const Color3f f = isect.material->evalPdf(wo, gWi, isect, bPdf);
+                    const float mixPdf = 0.5f * gPdf + 0.5f * bPdf;
+                    if (!f.isBlack() && mixPdf > 0.0f) {
+                        bs.wi = gWi;
+                        bs.f = f;
+                        bs.pdf = mixPdf;
+                        bs.delta = false;
+                        sampled = true;
+                    }
+                }
+            } else {
+                const float uc = sampler.get1D();
+                const Vec2f u = sampler.get2D();
+                if (isect.material->sampleFull(wo, isect, uc, u, bs)) {
+                    sampled = true;
+                    if (bs.subsurface) {
+                        bs.weight *= 2.0f;
+                    } else if (bs.delta || bs.passThrough) {
+                        bs.pdf *= 0.5f;
+                    } else if (bs.pdf > 0.0f) {
+                        const float gPdf = m_sampleGuiding->pdf(isect.point, bs.wi);
+                        bs.pdf = 0.5f * bs.pdf + 0.5f * gPdf;
+                    }
+                }
+            }
+        } else {
+            const float uc = sampler.get1D();
+            const Vec2f u = sampler.get2D();
+            sampled = isect.material->sampleFull(wo, isect, uc, u, bs);
+        }
+        if (!sampled) {
+            if (m_trainGuiding) gTerminalEmit = stepEmit + stepNee;
             break;
         }
 
         if (bs.subsurface) {
             SubsurfaceCoeffs coeffs;
-            if (!isect.material->subsurfaceCoeffs(isect, coeffs)) break;
+            if (!isect.material->subsurfaceCoeffs(isect, coeffs)) {
+                if (m_trainGuiding) gTerminalEmit = stepEmit + stepNee;
+                break;
+            }
             throughput *= bs.weight; // yüzey altı ışığı "doğrudan" sayılır: kırpılmaz
             SurfaceInteraction exitSi;
-            if (!randomWalkSubsurface(scene, isect, bs.wi, coeffs, sampler, throughput, exitSi, ray.time)) break;
+            if (!randomWalkSubsurface(scene, isect, bs.wi, coeffs, sampler, throughput, exitSi, ray.time)) {
+                if (m_trainGuiding) gTerminalEmit = stepEmit + stepNee;
+                break;
+            }
             // Çıkış köşesi: normal dışa, malzeme beyaz Lambert. Derinlik artmaz.
             exitSi.normal = -exitSi.normal;
             exitSi.material = &subsurfaceExitMaterial();
@@ -672,6 +764,7 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
         }
 
         if (bs.pdf <= 0.0f || bs.f.isBlack()) {
+            if (m_trainGuiding) gTerminalEmit = stepEmit + stepNee;
             break;
         }
 
@@ -718,9 +811,21 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                 }
             }
         }
-        float cosTheta = std::abs(wi.dot(isect.normal));
-        throughput *= bs.f * (cosTheta / bs.pdf);
-        if (!throughput.isFinite()) break;
+        const float cosTheta = std::abs(wi.dot(isect.normal));
+        const Color3f bounceWeight = bs.f * (cosTheta / bs.pdf);
+        throughput *= bounceWeight;
+        if (!throughput.isFinite()) {
+            if (m_trainGuiding) gTerminalEmit = stepEmit + stepNee;
+            break;
+        }
+
+        int recordedIdx = -1;
+        if (m_trainGuiding && gCount < 32) {
+            recordedIdx = gCount++;
+            gVerts[recordedIdx] = {isect.point, wi, bounceWeight, stepEmit, stepNee,
+                                   bs.pdf, !bs.delta && !isect.material->isVolumeBoundary()};
+        }
+
         lastBsdfPdf = bs.pdf;
         lastNormal = isect.normal;
         lastPoint = isect.point;
@@ -754,8 +859,30 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
         currentRay.visibilityMask = nextMask;
         ++depth;
 
-        if (depth > m_russianRouletteDepth && !russianRoulette(throughput, sampler)) {
-            break;
+        if (depth > m_russianRouletteDepth) {
+            const float rrMax = std::max({throughput.r, throughput.g, throughput.b});
+            if (!russianRoulette(throughput, sampler)) {
+                break;
+            }
+            if (recordedIdx >= 0 && rrMax > 0.0f && rrMax < 1.0f) {
+                gVerts[recordedIdx].bsdfWeight /= rrMax;
+            }
+        }
+    }
+
+    if (m_trainGuiding && gCount > 0) {
+        Color3f suffix = gTerminalEmit;
+        for (int i = gCount - 1; i >= 0; --i) {
+            const GuideVertex& v = gVerts[i];
+            if (v.recordable) {
+                const float lum = suffix.luminance();
+                if (lum > 0.0f && std::isfinite(lum)) {
+                    // Müller 2017: yansız yönlü akı tahmini L_i(p, ω) / p(ω)
+                    m_trainGuiding->record(v.p, v.wi, lum / std::max(v.pdf, 1e-4f));
+                }
+            }
+            suffix = v.localEmit + v.localNee + v.bsdfWeight * suffix;
+            if (!suffix.isFinite()) suffix = Color3f::black();
         }
     }
 

@@ -290,9 +290,11 @@ int main(int argc, char** argv) {
     bool ok;
     if (ext == ".exr" && o.passes) {
         std::vector<Image> storage;
-        const std::vector<ExrLayer> layers = makeExrLayers(session.passes(), session.aovs(), storage);
+        std::vector<CryptoRankImage> cryptoStorage;
+        const std::vector<ExrLayer> layers = makeExrLayers(session.passes(), session.aovs(), storage, &cryptoStorage);
+        const auto cryptoMeta = makeExrCryptoMetadata(session.passes());
         const Image alpha = session.resolveAlpha();
-        ok = saveMultiLayerEXR(o.out, img, &alpha, layers);
+        ok = saveMultiLayerEXR(o.out, img, &alpha, layers, cryptoMeta);
     } else if (ext == ".exr") ok = saveImageEXR(img, o.out);
     else if (ext == ".jpg" || ext == ".jpeg") ok = saveImageJPG(img, o.out, rs.tmo, rs.exposure);
     else ok = saveImagePNG(img, o.out, rs.tmo, rs.exposure);

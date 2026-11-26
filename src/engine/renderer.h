@@ -15,6 +15,7 @@
 #include "engine/scene.h"
 #include "engine/render_settings.h"
 #include "camera/camera.h"
+#include "core/image/cryptomatte.h"
 #include "core/image/film.h"
 #include "core/image/image.h"
 #include "core/image/image_io.h"
@@ -23,10 +24,14 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace photon {
 
 class Sampler;
+class GuidingField;
 
 /// Üretim örnekleyicisi. Testler IndependentSampler kullanmaya devam eder.
 std::unique_ptr<Sampler> createRenderSampler(int samplesPerPixel, uint64_t seed = 12345);
@@ -40,6 +45,11 @@ struct AovFilms {
     Film alpha;   ///< Kapsama: ışın geometriye çarptıysa 1, ıskaladıysa 0 (r kanalında).
 
     void resize(int w, int h) { albedo.resize(w, h); normal.resize(w, h); alpha.resize(w, h); }
+    void merge(const AovFilms& other) {
+        albedo.merge(other.albedo);
+        normal.merge(other.normal);
+        alpha.merge(other.alpha);
+    }
 };
 
 /// Render geçişleri (çok katmanlı EXR, compositing). Işık geçişleri toplanınca beauty'yi verir
@@ -52,6 +62,15 @@ struct RenderPassFilms {
     Film position;
     Film objectId;
     Film materialId;
+    std::vector<std::pair<std::string, Film>> lightGroups; ///< Işık grupları (EXR LG_<ad>)
+    CryptoFilm cryptoObject;                               ///< Psyop Cryptomatte 1.2.0 (CryptoObject)
+    CryptoFilm cryptoMaterial;                             ///< Psyop Cryptomatte 1.2.0 (CryptoMaterial)
+
+    void initLightGroups(int w, int h, const std::vector<std::string>& names) {
+        lightGroups.clear();
+        lightGroups.reserve(names.size());
+        for (const std::string& n : names) lightGroups.emplace_back(n, Film(w, h));
+    }
 
     void resize(int w, int h) {
         for (Film& f : light) f.resize(w, h);
@@ -59,6 +78,22 @@ struct RenderPassFilms {
         position.resize(w, h);
         objectId.resize(w, h);
         materialId.resize(w, h);
+        for (auto& [name, f] : lightGroups) f.resize(w, h);
+        cryptoObject.resize(w, h);
+        cryptoMaterial.resize(w, h);
+    }
+
+    void merge(const RenderPassFilms& other) {
+        for (int k = 0; k < static_cast<int>(LightPass::Count); ++k) light[k].merge(other.light[k]);
+        depth.merge(other.depth);
+        position.merge(other.position);
+        objectId.merge(other.objectId);
+        materialId.merge(other.materialId);
+        if (lightGroups.size() == other.lightGroups.size()) {
+            for (size_t i = 0; i < lightGroups.size(); ++i) lightGroups[i].second.merge(other.lightGroups[i].second);
+        }
+        cryptoObject.merge(other.cryptoObject);
+        cryptoMaterial.merge(other.cryptoMaterial);
     }
 };
 
@@ -66,9 +101,14 @@ struct RenderPassFilms {
 Color3f idColor(uint64_t id);
 
 /// Geçişleri ve AOV'leri çözüp çok katmanlı EXR katmanlarına çevirir (Cycles/Blender adları:
-/// DiffDir, GlossInd, Emit, Env, Depth, Normal, DiffCol...). Görüntüler @p storage'da tutulur;
-/// katmanlar onlara işaret eder, storage katmanlardan uzun yaşamalıdır.
-std::vector<ExrLayer> makeExrLayers(const RenderPassFilms* passes, const AovFilms* aovs, std::vector<Image>& storage);
+/// DiffDir, GlossInd, Emit, Env, Depth, Normal, DiffCol, LG_*, CryptoObject00..02, CryptoMaterial00..02).
+/// Görüntüler @p storage ve (verilirse) @p cryptoStorage içinde tutulur; katmanlardan uzun yaşamalıdır.
+std::vector<ExrLayer> makeExrLayers(const RenderPassFilms* passes, const AovFilms* aovs,
+                                    std::vector<Image>& storage,
+                                    std::vector<CryptoRankImage>* cryptoStorage = nullptr);
+
+/// Cryptomatte OpenEXR metin üstverisini (cryptomatte/<7hex>/{name,hash,conversion,manifest}) üretir.
+std::vector<std::pair<std::string, std::string>> makeExrCryptoMetadata(const RenderPassFilms* passes);
 
 /// Bir partinin sonucu.
 struct SampleBatchResult {
@@ -78,7 +118,10 @@ struct SampleBatchResult {
 
 class Renderer {
 public:
-    Renderer() = default;
+    Renderer();
+    ~Renderer();
+    Renderer(const Renderer&) = delete;
+    Renderer& operator=(const Renderer&) = delete;
 
     /// Her piksele [firstSample, firstSample + count) örnekleri ekler. Uyarlamalı örneklemede
     /// komşuluğuyla birlikte eşiğin altına inen piksel atlanır, parti içinde de 8 örnekte bir
@@ -108,6 +151,16 @@ public:
     bool renderSamplePass(const Scene& scene, const Camera& camera, const RenderSettings& settings,
                           Film& accum, int passIndex, const std::atomic<bool>* cancel = nullptr,
                           AovFilms* aovs = nullptr, RenderPassFilms* passes = nullptr);
+
+    /// Etkin SD-Tree Path Guiding alanı (test ve tanılama için).
+    const GuidingField* guidingField() const { return m_guiding.get(); }
+
+private:
+    std::unique_ptr<GuidingField> m_guiding;
+    const Scene* m_guidingScene = nullptr;
+    int m_guidingSamples = 0;
+    int m_guidingNextRefine = 2;
+    int m_guidingIter = 0;
 };
 
 } // namespace photon

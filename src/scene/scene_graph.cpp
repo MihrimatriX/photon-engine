@@ -194,6 +194,9 @@ void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Trans
         outScene.retainMaterial(mat);
         outScene.tagShape(inst.get(), node.uid);
         outScene.setShapeName(inst.get(), node.name);
+        if (mat && outScene.materialNames().find(mat.get()) == outScene.materialNames().end()) {
+            outScene.setMaterialName(mat.get(), node.name + "_Mat");
+        }
         outScene.addShape(inst);
     } else if (node.type == SceneNodeType::Sphere && mat && node.sphereRadius > 0) {
         Vec3f center = world0.transformPoint(Vec3f(0, 0, 0));
@@ -207,6 +210,9 @@ void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Trans
         sphere->setVisibilityMask(node.visibilityMask);
         outScene.tagShape(sphere.get(), node.uid);
         outScene.setShapeName(sphere.get(), node.name);
+        if (outScene.materialNames().find(mat.get()) == outScene.materialNames().end()) {
+            outScene.setMaterialName(mat.get(), node.name + "_Mat");
+        }
         outScene.addShape(sphere);
     }
 
