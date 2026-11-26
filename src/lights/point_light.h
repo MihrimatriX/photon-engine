@@ -20,6 +20,8 @@ public:
     Color3f power() const override;
     float importance(const Vec3f& p, const Vec3f& n) const override;
     bool bounds(LightBounds& out) const override;
+    const Vec3f& position() const { return m_position; }
+    const Color3f& intensity() const { return m_intensity; }
 
 private:
     Vec3f m_position;

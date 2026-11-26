@@ -52,6 +52,9 @@ public:
     /// Başka bir Film'in birikimini (ör. Hibrit GPU+CPU) bu filme ekler.
     void merge(const Film& other);
 
+    /// Toplu örnek ekleme (GPU geri okuma: sumRadiance, sampleCount örnek toplamı).
+    void addBatch(int x, int y, const Color3f& sumRadiance, uint32_t sampleCount, bool allowSigned = false);
+
     /// The averaged image.
     Image resolve() const;
 

@@ -4,6 +4,8 @@ add_library(photon_engine STATIC
     render_device.cpp
     render_session.cpp
     gpu_probe.cpp
+    vulkan_device.cpp
+    hybrid_device.cpp
     denoiser.cpp
     embree_accel.cpp
 )

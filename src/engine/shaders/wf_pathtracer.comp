@@ -1,0 +1,417 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#ifdef PHOTON_USE_RAY_QUERY
+#extension GL_EXT_ray_query : require
+#endif
+
+#include "pathtracer_common.glsl"
+
+// 4 aşamalı Wavefront Path Tracer (Laine, Karras, Aila 2013 / PBRT-v4 Wavefront):
+//   WF_STAGE == 0 : wf_gen       — birincil kamera ışını üretimi
+//   WF_STAGE == 1 : wf_intersect — sıkışık ışın kuyruğu kesişimi (SAH BVH2 veya RT)
+//   WF_STAGE == 2 : wf_shade     — BSDF/emisyon/AOV/Cryptomatte + NEE gölge ve sonraki sekme üretimi
+//   WF_STAGE == 3 : wf_shadow    — ertelenmiş gölge geçirgenliği ve doğrudan ışık/LG_* biriktirme
+
+struct GpuPathState {
+    vec4 throughput_t;
+    vec4 radiance_pdf;
+    vec4 lastPos_spec;
+    vec4 lastNorm_rng;
+    vec4 firstLobe0;
+    vec4 firstLobe1;
+    vec4 firstLobe2;
+    vec4 pad;
+};
+
+struct GpuRayWork {
+    vec4 origin_tMin;
+    vec4 dir_tMax;
+    uvec4 meta; // x=pathIdx, y=visMask, z=floatBitsToUint(rayTime), w=0
+};
+
+struct GpuHitWork {
+    vec4 tuv_prim; // x=t, y=u, z=v, w=uintBitsToFloat(primIdx)
+    uvec4 meta;    // x=pathIdx, y=hitFlag, z=0, w=0
+};
+
+struct GpuShadowWork {
+    vec4 origin_tMin;
+    vec4 dir_tMax;
+    vec4 contrib_group; // rgb=contrib, w=uintBitsToFloat(groupIdx | (lightIdxPlus1 << 8) | (lobeIdx << 24))
+    uvec4 meta;         // x=pathIdx, y=isDepth0, z=floatBitsToUint(rayTime), w=0
+};
+
+layout(set = 0, binding = 14, std430) buffer WfPathBuf { GpuPathState wfPaths[]; };
+layout(set = 0, binding = 15, std430) buffer WfRayABuf { GpuRayWork wfRaysA[]; };
+layout(set = 0, binding = 16, std430) buffer WfRayBBuf { GpuRayWork wfRaysB[]; };
+layout(set = 0, binding = 17, std430) buffer WfHitBuf  { GpuHitWork wfHits[]; };
+layout(set = 0, binding = 18, std430) buffer WfShadBuf { GpuShadowWork wfShadows[]; };
+layout(set = 0, binding = 19, std430) buffer WfCntBuf  { uint wfCounters[]; };
+
+layout(push_constant) uniform WfPush {
+    uint bounce;
+    uint sampleIdx;
+    uint pingPong;
+    uint isFirstInBatch;
+} pc;
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+#if WF_STAGE == 0
+// ── Stage 0: wf_gen ──
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    uint totalPix = u.dims.x * u.dims.y;
+    if (idx >= totalPix) return;
+
+    uint px = idx % u.dims.x;
+    uint py = idx / u.dims.x;
+    uint rng = initRng(px, py, pc.sampleIdx);
+    vec3 ro, rd;
+    float rayTime;
+    generateCameraRay(px, py, rng, ro, rd, rayTime);
+
+    GpuPathState st;
+    st.throughput_t = vec4(1.0, 1.0, 1.0, rayTime);
+    st.radiance_pdf = vec4(0.0, 0.0, 0.0, 0.0);
+    // bit0=specBounce(1), bit1=camRay(1), bit2=firstSeg(1)
+    uint flags = 1u | 2u | 4u;
+    st.lastPos_spec = vec4(ro, uintBitsToFloat(flags));
+    st.lastNorm_rng = vec4(0.0, 1.0, 0.0, uintBitsToFloat(rng));
+    st.firstLobe0 = vec4(1.0, 1.0, 1.0, uintBitsToFloat(idx));
+    st.firstLobe1 = vec4(0.0, 0.0, 0.0, uintBitsToFloat(pc.sampleIdx));
+    st.firstLobe2 = vec4(0.0, 0.0, 0.0, 0.0);
+    st.pad = vec4(0.0);
+    wfPaths[idx] = st;
+
+    GpuRayWork rw;
+    rw.origin_tMin = vec4(ro, 1e-4);
+    rw.dir_tMax = vec4(rd, INF_T);
+    rw.meta = uvec4(idx, VIS_CAMERA, floatBitsToUint(rayTime), 0u);
+    wfRaysA[idx] = rw;
+
+    if (idx == 0u) {
+        wfCounters[0] = totalPix;
+        wfCounters[1] = 0u;
+        wfCounters[2] = 0u;
+    }
+    if (pc.isFirstInBatch != 0u) {
+        outBeauty[idx] = vec4(0.0);
+        if (u.flags.x != 0u) {
+            outAovs[idx * 3u + 0u] = vec4(0.0);
+            outAovs[idx * 3u + 1u] = vec4(0.0);
+            outAovs[idx * 3u + 2u] = vec4(0.0);
+        }
+        if (u.flags.y != 0u) {
+            uint base = idx * PASS_STRIDE;
+            for (uint k = 0u; k < PASS_STRIDE; ++k) outPasses[base + k] = vec4(0.0);
+        }
+    }
+}
+
+#elif WF_STAGE == 1
+// ── Stage 1: wf_intersect ──
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint activeCount = wfCounters[pc.pingPong];
+    if (i >= activeCount) return;
+
+    GpuRayWork rw = (pc.pingPong == 0u) ? wfRaysA[i] : wfRaysB[i];
+    uint pIdx = rw.meta.x;
+    uint visMask = rw.meta.y;
+    float rayTime = uintBitsToFloat(rw.meta.z);
+    uint stFlags = floatBitsToUint(wfPaths[pIdx].lastPos_spec.w);
+    bool camRay = (stFlags & 2u) != 0u;
+
+    HitInfo hi = traceScene(rw.origin_tMin.xyz, rw.dir_tMax.xyz, rw.origin_tMin.w, rw.dir_tMax.w,
+                            rayTime, visMask, camRay);
+
+    GpuHitWork hw;
+    hw.tuv_prim = vec4(hi.t, hi.u, hi.v, uintBitsToFloat(hi.primIdx));
+    hw.meta = uvec4(pIdx, hi.hit ? 1u : 0u, i, 0u);
+    wfHits[i] = hw;
+}
+
+#elif WF_STAGE == 2
+// ── Stage 2: wf_shade ──
+void insertCryptoGlobal(uint baseSlot, float h) {
+    if (h == 0.0) return;
+    vec4 v0 = outPasses[baseSlot];
+    vec4 v1 = outPasses[baseSlot + 1u];
+    if (v0.x == h) { v0.y += 1.0; outPasses[baseSlot] = v0; return; }
+    if (v0.y == 0.0) { v0.x = h; v0.y = 1.0; outPasses[baseSlot] = v0; return; }
+    if (v0.z == h) { v0.w += 1.0; outPasses[baseSlot] = v0; return; }
+    if (v0.w == 0.0) { v0.z = h; v0.w = 1.0; outPasses[baseSlot] = v0; return; }
+    if (v1.x == h) { v1.y += 1.0; outPasses[baseSlot + 1u] = v1; return; }
+    if (v1.y == 0.0) { v1.x = h; v1.y = 1.0; outPasses[baseSlot + 1u] = v1; return; }
+    if (v1.z == h) { v1.w += 1.0; outPasses[baseSlot + 1u] = v1; return; }
+    if (v1.w == 0.0) { v1.z = h; v1.w = 1.0; outPasses[baseSlot + 1u] = v1; return; }
+}
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint activeCount = wfCounters[pc.pingPong];
+    if (i >= activeCount) return;
+
+    GpuHitWork hw = wfHits[i];
+    GpuRayWork rw = (pc.pingPong == 0u) ? wfRaysA[i] : wfRaysB[i];
+    uint pixIdx = hw.meta.x;
+    GpuPathState st = wfPaths[pixIdx];
+
+    vec3 ro = rw.origin_tMin.xyz;
+    vec3 rd = rw.dir_tMax.xyz;
+    vec3 throughput = st.throughput_t.rgb;
+    float rayTime = st.throughput_t.w;
+    float lastBsdfPdf = st.radiance_pdf.w;
+    vec3 lastPoint = st.lastPos_spec.xyz;
+    uint stFlags = floatBitsToUint(st.lastPos_spec.w);
+    bool specBounce = (stFlags & 1u) != 0u;
+    bool camRay = (stFlags & 2u) != 0u;
+    bool firstSeg = (stFlags & 4u) != 0u;
+    uint diffBounces = (stFlags >> 16u) & 0xFFu;
+    uint prevSlot = (stFlags >> 24u) & 0xFFu;
+    vec3 lastNormal = st.lastNorm_rng.xyz;
+    uint rng = floatBitsToUint(st.lastNorm_rng.w);
+
+    bool wantAovs = u.flags.x != 0u;
+    bool wantPasses = u.flags.y != 0u;
+    uint nGroups = min(u.flags.z, 16u);
+    uint bgMode = u.envInfo.z;
+    float clampInd = u.camVert_clamp.w;
+    uint nExplicit = u.counts.z;
+    bool hasEnv = (u.flags.w & 2u) != 0u;
+    uint totalLights = nExplicit + (hasEnv ? 1u : 0u);
+    float lightPmfAll = totalLights > 0u ? (1.0 / float(totalLights)) : 0.0;
+    uint passBase = pixIdx * PASS_STRIDE;
+
+    if (hw.meta.y == 0u) {
+        if (firstSeg && wantAovs) {
+            vec3 bg = bgMode == 1u ? u.bgColor_filter.rgb : evalEnvironment(rd);
+            outAovs[pixIdx * 3u + 0u].rgb += clamp(bg, vec3(0.0), vec3(1.0));
+        }
+        if (pc.bounce == 0u && bgMode != 0u) {
+            if (bgMode == 1u) {
+                vec3 c = throughput * u.bgColor_filter.rgb;
+                if (isFiniteVec3(c)) {
+                    outBeauty[pixIdx].rgb += c;
+                    if (wantPasses) {
+                        outPasses[passBase + 7u].rgb += c;
+                        if (nGroups > 0u) outPasses[passBase + 8u + min(u.envInfo.w, nGroups - 1u)].rgb += c;
+                    }
+                }
+            }
+        } else if (hasEnv) {
+            vec3 Le = evalEnvironment(rd);
+            float w = 1.0;
+            if (!specBounce) {
+                float lPdf = envNeePdf(rd, lastNormal);
+                w = powerHeuristic(1.0, lastBsdfPdf, 1.0, lPdf);
+            }
+            vec3 c = throughput * Le * w;
+            if (diffBounces >= 2u && clampInd > 0.0) {
+                float mx = max(c.r, max(c.g, c.b));
+                if (mx > clampInd) c *= clampInd / mx;
+            }
+            if (isFiniteVec3(c)) {
+                outBeauty[pixIdx].rgb += c;
+                if (wantPasses) {
+                    if (pc.bounce == 0u) outPasses[passBase + 7u].rgb += c;
+                    else {
+                        bool dir = (pc.bounce == 1u);
+                        outPasses[passBase + (dir ? 0u : 1u)].rgb += c * st.firstLobe0.rgb;
+                        outPasses[passBase + (dir ? 2u : 3u)].rgb += c * st.firstLobe1.rgb;
+                        outPasses[passBase + (dir ? 4u : 5u)].rgb += c * st.firstLobe2.rgb;
+                    }
+                    if (nGroups > 0u) outPasses[passBase + 8u + min(u.envInfo.w, nGroups - 1u)].rgb += c;
+                }
+            }
+        }
+        if (pc.bounce == 0u) outBeauty[pixIdx].w += 1.0;
+        return;
+    }
+
+    if (pc.bounce == 0u) outBeauty[pixIdx].w += 1.0;
+
+    HitInfo hi;
+    hi.hit = true;
+    hi.t = hw.tuv_prim.x;
+    hi.u = hw.tuv_prim.y;
+    hi.v = hw.tuv_prim.z;
+    hi.primIdx = floatBitsToUint(hw.tuv_prim.w);
+    SurfHit sh = resolveHit(hi, ro, rd, rayTime);
+    ResolvedMat rm = resolveMaterial(sh.matIdx, sh);
+    vec3 wo = -rd;
+
+    if (firstSeg) {
+        firstSeg = false;
+        if (wantAovs) {
+            outAovs[pixIdx * 3u + 0u] += vec4(clamp(rm.baseColor, vec3(0.0), vec3(1.0)), 1.0);
+            outAovs[pixIdx * 3u + 1u] += vec4(sh.n, hi.t);
+            outAovs[pixIdx * 3u + 2u] += vec4(sh.p, 0.0);
+        }
+        if (wantPasses) {
+            outPasses[passBase + 24u].rgb += sh.objColor;
+            outPasses[passBase + 24u].w = uintBitsToFloat(sh.matIdHash);
+            insertCryptoGlobal(passBase + 25u, sh.cryptoObj);
+            insertCryptoGlobal(passBase + 27u, sh.cryptoMat);
+        }
+    }
+
+    // Yayıcı isabeti
+    if (max(rm.emission.r, max(rm.emission.g, rm.emission.b)) > 0.0) {
+        bool linked = (pc.bounce == 0u) || (sh.emitterIdx < 0) || isLightLinked(uint(sh.emitterIdx), prevSlot);
+        if (linked) {
+            float w = 1.0;
+            if (!specBounce && sh.emitterIdx >= 0) {
+                float lPdf = lightPmfAll * lightPdfHit(uint(sh.emitterIdx), lastPoint, sh.p);
+                if (lPdf > 0.0 && lastBsdfPdf > 0.0) w = powerHeuristic(1.0, lastBsdfPdf, 1.0, lPdf);
+            }
+            vec3 c = throughput * rm.emission * w;
+            if (diffBounces >= 2u && clampInd > 0.0) {
+                float mx = max(c.r, max(c.g, c.b));
+                if (mx > clampInd) c *= clampInd / mx;
+            }
+            if (isFiniteVec3(c)) {
+                outBeauty[pixIdx].rgb += c;
+                if (wantPasses) {
+                    if (pc.bounce == 0u) outPasses[passBase + 6u].rgb += c;
+                    else {
+                        bool dir = (pc.bounce == 1u);
+                        outPasses[passBase + (dir ? 0u : 1u)].rgb += c * st.firstLobe0.rgb;
+                        outPasses[passBase + (dir ? 2u : 3u)].rgb += c * st.firstLobe1.rgb;
+                        outPasses[passBase + (dir ? 4u : 5u)].rgb += c * st.firstLobe2.rgb;
+                    }
+                    if (nGroups > 0u) {
+                        uint gIdx = 0u;
+                        if (sh.emitterIdx >= 0) gIdx = (floatBitsToUint(lights[sh.emitterIdx].pos_type.w) >> 8u) & 0xFFu;
+                        outPasses[passBase + 8u + min(gIdx, nGroups - 1u)].rgb += c;
+                    }
+                }
+            }
+        }
+    }
+
+    if (pc.bounce >= u.counts.w) return;
+
+    // NEE gölge ışınını ShadowQueue'ya it
+    bool deltaMat = isMatDelta(rm);
+    if (totalLights > 0u && !deltaMat) {
+        LightSampleGpu ls = sampleOneLight(sh.p, sh.n, sh.linkSlot, rng);
+        if (ls.valid) {
+            vec3 fT, fd, fsp, ftr;
+            float bPdf;
+            evalBsdf(rm, wo, ls.wi, sh, fT, bPdf, fd, fsp, ftr);
+            float cosT = abs(dot(ls.wi, sh.n));
+            if (cosT > 0.0 && max(fT.r, max(fT.g, fT.b)) > 0.0) {
+                float w = ls.delta ? 1.0 : powerHeuristic(1.0, ls.pdf, 1.0, bPdf);
+                vec3 c = throughput * fT * ls.Li * (cosT * w / ls.pdf);
+                if (diffBounces >= 1u && clampInd > 0.0) {
+                    float mx = max(c.r, max(c.g, c.b));
+                    if (mx > clampInd) c *= clampInd / mx;
+                }
+                if (isFiniteVec3(c) && max(c.r, max(c.g, c.b)) > 0.0) {
+                    uint slot = atomicAdd(wfCounters[2], 1u);
+                    GpuShadowWork sw;
+                    sw.origin_tMin = vec4(offsetOrigin(sh.p, sh.ng, ls.wi), 1e-4);
+                    sw.dir_tMax = vec4(ls.wi, ls.dist);
+                    uint lIdxP1 = uint(ls.lightIdx + 1);
+                    uint meta = (ls.groupIdx & 0xFFu) | ((lIdxP1 & 0xFFFFu) << 8u);
+                    sw.contrib_group = vec4(c, uintBitsToFloat(meta));
+                    sw.meta = uvec4(pixIdx, pc.bounce == 0u ? 1u : 0u, floatBitsToUint(rayTime), 0u);
+                    wfShadows[slot] = sw;
+                }
+            }
+        }
+    }
+
+    // BSDF örneklemesi ve sonraki sekme sıkıştırması (compaction)
+    BsdfSampleGpu bs = sampleBsdf(rm, wo, sh, rng);
+    if (!bs.valid) return;
+
+    if (bs.passThrough) {
+        throughput *= bs.f * (abs(dot(bs.wi, sh.n)) / bs.pdf);
+        if (!isFiniteVec3(throughput)) return;
+    } else {
+        if (wantPasses && pc.bounce == 0u) {
+            st.firstLobe0.rgb = bs.lobeFrac0;
+            st.firstLobe1.rgb = bs.lobeFrac1;
+            st.firstLobe2.rgb = bs.lobeFrac2;
+        }
+        float cosT = abs(dot(bs.wi, sh.n));
+        throughput *= bs.f * (cosT / bs.pdf);
+        if (!isFiniteVec3(throughput)) return;
+        lastBsdfPdf = bs.pdf;
+        lastPoint = sh.p;
+        lastNormal = sh.n;
+        prevSlot = sh.linkSlot;
+        specBounce = bs.delta;
+        if (!bs.delta) ++diffBounces;
+        camRay = camRay && bs.delta && bs.refracted;
+    }
+
+    if (pc.bounce >= 3u) {
+        float pRR = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.05, 0.99);
+        if (rand1(rng) >= pRR) return;
+        throughput /= pRR;
+    }
+
+    uint nextVis = VIS_DIFFUSE;
+    if (bs.passThrough) nextVis = rw.meta.y;
+    else if (bs.refracted) nextVis = VIS_TRANSMISSION;
+    else if (bs.delta || luminance(bs.lobeFrac1) > luminance(bs.lobeFrac0)) nextVis = VIS_GLOSSY;
+
+    st.throughput_t = vec4(throughput, rayTime);
+    st.radiance_pdf.w = lastBsdfPdf;
+    uint newFlags = (specBounce ? 1u : 0u) | (camRay ? 2u : 0u) | (firstSeg ? 4u : 0u) |
+                    ((diffBounces & 0xFFu) << 16u) | ((prevSlot & 0xFFu) << 24u);
+    st.lastPos_spec = vec4(lastPoint, uintBitsToFloat(newFlags));
+    st.lastNorm_rng = vec4(lastNormal, uintBitsToFloat(rng));
+    wfPaths[pixIdx] = st;
+
+    uint nextQueue = 1u - pc.pingPong;
+    uint outIdx = atomicAdd(wfCounters[nextQueue], 1u);
+    GpuRayWork nr;
+    nr.origin_tMin = vec4(offsetOrigin(sh.p, sh.ng, bs.wi), 1e-4);
+    nr.dir_tMax = vec4(bs.wi, INF_T);
+    nr.meta = uvec4(pixIdx, nextVis, floatBitsToUint(rayTime), 0u);
+    if (nextQueue == 0u) wfRaysA[outIdx] = nr;
+    else wfRaysB[outIdx] = nr;
+}
+
+#elif WF_STAGE == 3
+// ── Stage 3: wf_shadow ──
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    uint shCount = wfCounters[2];
+    if (i >= shCount) return;
+
+    GpuShadowWork sw = wfShadows[i];
+    uint pixIdx = sw.meta.x;
+    bool isDepth0 = sw.meta.y != 0u;
+    float rayTime = uintBitsToFloat(sw.meta.z);
+    uint meta = floatBitsToUint(sw.contrib_group.w);
+    uint groupIdx = meta & 0xFFu;
+    int lightIdx = int((meta >> 8u) & 0xFFFFu) - 1;
+
+    vec3 vis = traceShadowTransmittance(sw.origin_tMin.xyz, sw.dir_tMax.xyz, sw.dir_tMax.w, rayTime, lightIdx);
+    vec3 added = sw.contrib_group.rgb * vis;
+    if (!isFiniteVec3(added) || max(added.r, max(added.g, added.b)) <= 0.0) return;
+
+    outBeauty[pixIdx].rgb += added;
+    if (u.flags.y != 0u) {
+        uint passBase = pixIdx * PASS_STRIDE;
+        uint nGroups = min(u.flags.z, 16u);
+        if (nGroups > 0u) outPasses[passBase + 8u + min(groupIdx, nGroups - 1u)].rgb += added;
+        GpuPathState st = wfPaths[pixIdx];
+        if (isDepth0) {
+            outPasses[passBase + 0u].rgb += added * st.firstLobe0.rgb;
+            outPasses[passBase + 2u].rgb += added * st.firstLobe1.rgb;
+            outPasses[passBase + 4u].rgb += added * st.firstLobe2.rgb;
+        } else {
+            outPasses[passBase + 1u].rgb += added * st.firstLobe0.rgb;
+            outPasses[passBase + 3u].rgb += added * st.firstLobe1.rgb;
+            outPasses[passBase + 5u].rgb += added * st.firstLobe2.rgb;
+        }
+    }
+}
+#endif

@@ -87,6 +87,10 @@ public:
 
     const Color3f& radiance() const { return m_radiance; }
     float area() const { return m_area; }
+    const Vec3f& p0() const { return m_p0; }
+    const Vec3f& p1() const { return m_p1; }
+    const Vec3f& p2() const { return m_p2; }
+    const Vec3f& normal() const { return m_normal; }
 
 private:
     Vec3f m_p0, m_p1, m_p2;
