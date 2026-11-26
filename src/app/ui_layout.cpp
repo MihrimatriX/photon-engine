@@ -156,6 +156,8 @@ void Application::drawMenuBar() {
         if (ImGui::MenuItem(ICON_EYE_OFF "  Gizle / göster", "H", false, hasSel)) toggleSelectionVisibility();
         if (ImGui::MenuItem(ICON_SCAN_EYE "  Yalnız seçimi göster", "I", false, hasNode)) isolateSelection();
         if (ImGui::MenuItem(ICON_EYE "  Hepsini göster", "Alt+H")) showAllNodes();
+        ImGui::Separator();
+        if (ImGui::MenuItem(ICON_COMMAND "  Komut paleti…", "Ctrl+K")) m_s.showCommandPalette = true;
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Ekle")) {

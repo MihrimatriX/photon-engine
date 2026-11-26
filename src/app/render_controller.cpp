@@ -76,10 +76,17 @@ void RenderController::restart(bool interactive) {
     m_cv.notify_all();
 }
 
-void RenderController::setScene(std::shared_ptr<const Scene> scene, bool interactive) {
+void RenderController::setScene(std::shared_ptr<const Scene> scene, bool interactive, SceneUpdateKind kind) {
     {
         std::lock_guard<std::mutex> lk(m_mutex);
+        const bool samePtr = (scene.get() == m_scene.get());
         m_scene = std::move(scene);
+        const SceneUpdateKind cur = static_cast<SceneUpdateKind>(m_pendingUpdateKind.load());
+        const SceneUpdateKind next = (!samePtr || kind == SceneUpdateKind::Full || cur == SceneUpdateKind::Full ||
+                                      (cur != kind && m_uploadedVersion != m_sceneVersion.load()))
+                                         ? SceneUpdateKind::Full
+                                         : kind;
+        m_pendingUpdateKind.store(static_cast<uint32_t>(next));
         ++m_sceneVersion;
     }
     restart(interactive);
@@ -111,6 +118,8 @@ void RenderController::setSettings(const RenderSettings& rs) {
                   rs.shadowQuality != m_settings.shadowQuality ||
                   rs.adaptiveSampling != m_settings.adaptiveSampling ||
                   rs.noiseThreshold != m_settings.noiseThreshold || rs.clampIndirect != m_settings.clampIndirect ||
+                  rs.motionBlur != m_settings.motionBlur || rs.shutterAngle != m_settings.shutterAngle ||
+                  rs.pathGuiding != m_settings.pathGuiding || rs.gpuMode != m_settings.gpuMode ||
                   !(rs.filter == m_settings.filter);
         m_settings = rs;
     }
@@ -187,10 +196,17 @@ void RenderController::setTransparentPreview(bool transparent) {
     m_cv.notify_all();
 }
 
-std::unique_lock<std::mutex> RenderController::lockScene() {
+std::unique_lock<std::mutex> RenderController::lockScene(SceneUpdateKind kind) {
     if (!m_passInteractive.load()) m_cancel = true;
     std::unique_lock<std::mutex> lock(m_sceneMutex);
-    ++m_sceneVersion; // yerinde düzenleme: cihazdaki kopya (GPU) yenilenmeli
+    const uint64_t ver = m_sceneVersion.load();
+    if (m_uploadedVersion == ver) {
+        m_pendingUpdateKind.store(static_cast<uint32_t>(kind));
+    } else {
+        const SceneUpdateKind cur = static_cast<SceneUpdateKind>(m_pendingUpdateKind.load());
+        if (cur != kind) m_pendingUpdateKind.store(static_cast<uint32_t>(SceneUpdateKind::Full));
+    }
+    ++m_sceneVersion; // yerinde düzenleme: cihazdaki kopya (GPU) artımlı yenilenebilir
     return lock;
 }
 
@@ -341,19 +357,28 @@ void RenderController::threadMain() {
             std::lock_guard<std::mutex> flk(m_frameMutex);
             m_stats.device = m_device->info().name;
             m_stats.deviceKind = deviceKindName(m_device->info().kind);
+            m_stats.deviceMemoryBytes = m_device->info().memoryBytes;
+            m_stats.hardwareRayTracing = m_device->info().hardwareRayTracing;
             m_stats.deviceNote = deviceNote;
         }
 
+        const int prevSpp = m_needBegin ? 0 : m_spp;
         const auto passStart = Clock::now();
         bool ok = false;
         try {
             std::lock_guard<std::mutex> sceneLock(m_sceneMutex);
-            // Sahne yalnız değiştiğinde yüklenir (CPU'da bedava, GPU'da tampon kopyası).
+            // Sahne yalnız değiştiğinde yüklenir; aynı sahnede malzeme/ışık/dönüşüm değiştiyse artımlı!
             const uint64_t version = m_sceneVersion.load();
             if (m_uploadedScene != scene.get() || m_uploadedVersion != version) {
-                m_device->setScene(scene);
+                const SceneUpdateKind pendingKind = static_cast<SceneUpdateKind>(m_pendingUpdateKind.load());
+                if (m_uploadedScene == scene.get() && pendingKind != SceneUpdateKind::Full) {
+                    m_device->updateScene(scene, pendingKind);
+                } else {
+                    m_device->setScene(scene);
+                }
                 m_uploadedScene = scene.get();
                 m_uploadedVersion = version;
+                m_pendingUpdateKind.store(static_cast<uint32_t>(SceneUpdateKind::Full));
             }
             if (m_needBegin) {
                 rs.width = m_beginW;
@@ -370,8 +395,6 @@ void RenderController::threadMain() {
             }
             ok = m_session->advance(&m_cancel);
         } catch (const std::exception& e) {
-            // Bir karodaki hata thread'i öldürmesin: birikimi at, bir sonraki
-            // değişiklikte yeniden dene (F1.8). Hata konsola yazılır.
             std::fprintf(stderr, "Viewport render hatası: %s\n", e.what());
             std::lock_guard<std::mutex> relk(m_mutex);
             m_dirty = false;
@@ -382,8 +405,6 @@ void RenderController::threadMain() {
         m_passInteractive = false;
         const double passMs = std::chrono::duration<double, std::milli>(Clock::now() - passStart).count();
         if (!ok) {
-            // İptal: film yarım, bir sonraki turda yeniden kurulur. (Oturum bitmişse advance
-            // false döner ama birikim geçerlidir; yakınsama bayrağı bekleme koşulunu kapatır.)
             if (m_session->finished()) m_converged = m_session->converged();
             continue;
         }
@@ -391,13 +412,10 @@ void RenderController::threadMain() {
         m_spp = m_session->samples();
         m_converged = m_session->converged();
         if (interactive) {
-            // Çözünürlük merdivenini ölçülen süreye göre ayarla.
             if (passMs > kInteractiveBudgetMs * 1.4 && m_ladder < 8) ++m_ladder;
             else if (passMs < kInteractiveBudgetMs * 0.35 && m_ladder > 2) --m_ladder;
         }
 
-        // Gürültü giderme: etkileşimde her kare (hızlı kalite), sonra 2, 4, 8, ... örnekte
-        // ve hedefe ulaşınca (yüksek kalite). Arada son temiz kare gösterilmeye devam eder.
         const bool reached = (target > 0 && m_spp >= target) || m_converged;
         const bool denoiseNow = wantDenoise && (interactive || isPowerOfTwo(m_spp) || reached);
         const bool publishNow = !wantDenoise || denoiseNow;
@@ -419,6 +437,19 @@ void RenderController::threadMain() {
             publish(*hdr, alpha.get(), denoiseNow);
         }
 
+        const int batchSpp = std::max(1, m_spp - prevSpp);
+        const double totalSamples = static_cast<double>(m_session->width()) *
+                                    static_cast<double>(m_session->height()) * static_cast<double>(batchSpp);
+        const double msps = passMs > 0.01 ? (totalSamples / (passMs * 1000.0)) : 0.0;
+
+        std::string modeLabel;
+        if (m_device && m_device->info().kind == DeviceKind::Vulkan) {
+            if (rs.gpuMode == GpuMode::Wavefront) modeLabel = "WF";
+            else if (rs.gpuMode == GpuMode::Megakernel) modeLabel = "Compute";
+            else if (m_device->info().hardwareRayTracing) modeLabel = "RT";
+            else modeLabel = "Compute";
+        }
+
         std::lock_guard<std::mutex> flk(m_frameMutex);
         m_stats.spp = m_spp;
         m_stats.targetSpp = target;
@@ -426,6 +457,12 @@ void RenderController::threadMain() {
         m_stats.height = m_session->height();
         m_stats.seconds = std::chrono::duration<double>(Clock::now() - m_startTime).count();
         m_stats.passMs = passMs;
+        m_stats.msamplesPerSec = m_stats.msamplesPerSec > 0.0 ? (0.65 * m_stats.msamplesPerSec + 0.35 * msps) : msps;
+        m_stats.deviceMemoryBytes = m_device ? m_device->info().memoryBytes : 0;
+        m_stats.hardwareRayTracing = m_device ? m_device->info().hardwareRayTracing : false;
+        m_stats.pathGuiding = rs.pathGuiding;
+        m_stats.motionBlur = rs.motionBlur;
+        m_stats.gpuModeLabel = modeLabel;
         m_stats.interactive = interactive;
         m_stats.converged = reached;
     }

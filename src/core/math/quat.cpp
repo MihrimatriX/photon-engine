@@ -5,29 +5,55 @@
 #include <algorithm>
 #include <cmath>
 
+#if defined(_MSC_VER)
+#pragma float_control(precise, on, push)
+#endif
+
 namespace photon {
 
+namespace {
+
+constexpr double kPiD = 3.14159265358979323846;
+constexpr double kDegToRadD = kPiD / 180.0;
+constexpr double kRadToDegD = 180.0 / kPiD;
+
+inline double clampUnit(double v) {
+    if (v < -1.0) return -1.0;
+    if (v > 1.0) return 1.0;
+    return v;
+}
+
+} // namespace
+
 Quatf Quatf::normalized() const {
-    const float len2 = x * x + y * y + z * z + w * w;
-    if (!(len2 > 1e-16f)) return Quatf::identity();
-    const float inv = 1.0f / std::sqrt(len2);
-    return Quatf(x * inv, y * inv, z * inv, w * inv);
+    const double dx = static_cast<double>(x);
+    const double dy = static_cast<double>(y);
+    const double dz = static_cast<double>(z);
+    const double dw = static_cast<double>(w);
+    const double len2 = dx * dx + dy * dy + dz * dz + dw * dw;
+    if (!(len2 > 1e-16)) return Quatf::identity();
+    const double inv = 1.0 / std::sqrt(len2);
+    return Quatf(static_cast<float>(dx * inv), static_cast<float>(dy * inv),
+                 static_cast<float>(dz * inv), static_cast<float>(dw * inv));
 }
 
 Quatf Quatf::fromEulerDeg(const Vec3f& eulerDeg) {
-    const float hx = eulerDeg.x * DEG_TO_RAD * 0.5f;
-    const float hy = eulerDeg.y * DEG_TO_RAD * 0.5f;
-    const float hz = eulerDeg.z * DEG_TO_RAD * 0.5f;
-    const float cx = std::cos(hx), sx = std::sin(hx);
-    const float cy = std::cos(hy), sy = std::sin(hy);
-    const float cz = std::cos(hz), sz = std::sin(hz);
+    const double hx = static_cast<double>(eulerDeg.x) * kDegToRadD * 0.5;
+    const double hy = static_cast<double>(eulerDeg.y) * kDegToRadD * 0.5;
+    const double hz = static_cast<double>(eulerDeg.z) * kDegToRadD * 0.5;
+    const double cx = std::cos(hx), sx = std::sin(hx);
+    const double cy = std::cos(hy), sy = std::sin(hy);
+    const double cz = std::cos(hz), sz = std::sin(hz);
     // R = Rz * Ry * Rx
-    return Quatf(
-        sx * cy * cz - cx * sy * sz,
-        cx * sy * cz + sx * cy * sz,
-        cx * cy * sz - sx * sy * cz,
-        cx * cy * cz + sx * sy * sz
-    ).normalized();
+    const double qx = sx * cy * cz - cx * sy * sz;
+    const double qy = cx * sy * cz + sx * cy * sz;
+    const double qz = cx * cy * sz - sx * sy * cz;
+    const double qw = cx * cy * cz + sx * sy * sz;
+    const double len2 = qx * qx + qy * qy + qz * qz + qw * qw;
+    if (!(len2 > 1e-16)) return Quatf::identity();
+    const double inv = 1.0 / std::sqrt(len2);
+    return Quatf(static_cast<float>(qx * inv), static_cast<float>(qy * inv),
+                 static_cast<float>(qz * inv), static_cast<float>(qw * inv));
 }
 
 Quatf Quatf::fromMat3(const Mat4f& m) {
@@ -63,17 +89,24 @@ Quatf Quatf::fromMat3(const Mat4f& m) {
 
 Vec3f Quatf::toEulerDeg() const {
     const Quatf q = normalized();
-    const float sinr = 2.0f * (q.w * q.x + q.y * q.z);
-    const float cosr = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
-    const float rx = std::atan2(sinr, cosr);
+    const double qx = static_cast<double>(q.x);
+    const double qy = static_cast<double>(q.y);
+    const double qz = static_cast<double>(q.z);
+    const double qw = static_cast<double>(q.w);
 
-    const float sinp = std::clamp(2.0f * (q.w * q.y - q.z * q.x), -1.0f, 1.0f);
-    const float ry = std::asin(sinp);
+    const double sinr = 2.0 * (qw * qx + qy * qz);
+    const double cosr = 1.0 - 2.0 * (qx * qx + qy * qy);
+    const double rx = std::atan2(sinr, cosr);
 
-    const float siny = 2.0f * (q.w * q.z + q.x * q.y);
-    const float cosy = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
-    const float rz = std::atan2(siny, cosy);
-    return Vec3f(rx * RAD_TO_DEG, ry * RAD_TO_DEG, rz * RAD_TO_DEG);
+    const double sinp = clampUnit(2.0 * (qw * qy - qz * qx));
+    const double ry = std::asin(sinp);
+
+    const double siny = 2.0 * (qw * qz + qx * qy);
+    const double cosy = 1.0 - 2.0 * (qy * qy + qz * qz);
+    const double rz = std::atan2(siny, cosy);
+    return Vec3f(static_cast<float>(rx * kRadToDegD),
+                 static_cast<float>(ry * kRadToDegD),
+                 static_cast<float>(rz * kRadToDegD));
 }
 
 Mat4f Quatf::toMat4() const {
@@ -96,30 +129,39 @@ Mat4f Quatf::toMat4() const {
 
 Quatf Quatf::slerp(const Quatf& aIn, const Quatf& bIn, float t) {
     const Quatf a = aIn.normalized();
-    Quatf b = bIn.normalized();
-    float d = a.dot(b);
-    if (d < 0.0f) {
+    const Quatf bn = bIn.normalized();
+    double ax = static_cast<double>(a.x), ay = static_cast<double>(a.y);
+    double az = static_cast<double>(a.z), aw = static_cast<double>(a.w);
+    double bx = static_cast<double>(bn.x), by = static_cast<double>(bn.y);
+    double bz = static_cast<double>(bn.z), bw = static_cast<double>(bn.w);
+    const double td = static_cast<double>(t);
+
+    double d = ax * bx + ay * by + az * bz + aw * bw;
+    if (d < 0.0) {
         d = -d;
-        b = Quatf(-b.x, -b.y, -b.z, -b.w);
+        bx = -bx; by = -by; bz = -bz; bw = -bw;
     }
-    if (d > 0.9995f) {
-        return Quatf(
-            a.x + (b.x - a.x) * t,
-            a.y + (b.y - a.y) * t,
-            a.z + (b.z - a.z) * t,
-            a.w + (b.w - a.w) * t
-        ).normalized();
+    double rx, ry, rz, rw;
+    if (d > 0.9995) {
+        rx = ax + (bx - ax) * td;
+        ry = ay + (by - ay) * td;
+        rz = az + (bz - az) * td;
+        rw = aw + (bw - aw) * td;
+    } else {
+        const double theta = std::acos(clampUnit(d));
+        const double sinT = std::sin(theta);
+        const double wa = std::sin((1.0 - td) * theta) / sinT;
+        const double wb = std::sin(td * theta) / sinT;
+        rx = ax * wa + bx * wb;
+        ry = ay * wa + by * wb;
+        rz = az * wa + bz * wb;
+        rw = aw * wa + bw * wb;
     }
-    const float theta = std::acos(std::clamp(d, -1.0f, 1.0f));
-    const float sinT = std::sin(theta);
-    const float wa = std::sin((1.0f - t) * theta) / sinT;
-    const float wb = std::sin(t * theta) / sinT;
-    return Quatf(
-        a.x * wa + b.x * wb,
-        a.y * wa + b.y * wb,
-        a.z * wa + b.z * wb,
-        a.w * wa + b.w * wb
-    ).normalized();
+    const double len2 = rx * rx + ry * ry + rz * rz + rw * rw;
+    if (!(len2 > 1e-16)) return Quatf::identity();
+    const double inv = 1.0 / std::sqrt(len2);
+    return Quatf(static_cast<float>(rx * inv), static_cast<float>(ry * inv),
+                 static_cast<float>(rz * inv), static_cast<float>(rw * inv));
 }
 
 Transform composeTRS(const Vec3f& pos, const Quatf& rot, const Vec3f& scale) {
@@ -181,3 +223,7 @@ Transform interpolateTransform(const Transform& t0, const Transform& t1, float a
 }
 
 } // namespace photon
+
+#if defined(_MSC_VER)
+#pragma float_control(pop)
+#endif

@@ -368,10 +368,15 @@ void Application::processDrops() {
 
 void Application::handleShortcuts() {
     ImGuiIO& io = ImGui::GetIO();
-    if (io.WantTextInput) return;
     const bool ctrl = io.KeyCtrl;
     const bool shift = io.KeyShift;
     auto pressed = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, false); };
+
+    if (ctrl && pressed(ImGuiKey_K)) {
+        m_s.showCommandPalette = !m_s.showCommandPalette;
+        return;
+    }
+    if (m_s.showCommandPalette || io.WantTextInput) return;
 
     if (ctrl && pressed(ImGuiKey_Z)) { shift ? redo() : undo(); }
     if (ctrl && pressed(ImGuiKey_Y)) redo();
@@ -508,6 +513,7 @@ void Application::frame(float dt) {
     drawImportDialog();
     drawAboutWindows();
     drawDocumentDialogs();
+    drawCommandPalette();
     ImGui::Render();
     renderRasterView();
 
@@ -548,6 +554,7 @@ int Application::run() {
             }
     };
     if (ui == "render") m_s.showRenderDialog = true;
+    else if (ui == "palette") m_s.showCommandPalette = true;
     else if (ui == "finalrender") {
         // Son render yolunun uçtan uca denemesi: küçük çıktı geçici klasöre, pencere açık.
         m_s.showRenderDialog = true;

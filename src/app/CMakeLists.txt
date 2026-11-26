@@ -17,6 +17,7 @@ add_executable(photon_app WIN32
     ui_properties.cpp
     ui_render.cpp
     ui_import.cpp
+    ui_command_palette.cpp
 )
 
 target_link_libraries(photon_app PRIVATE

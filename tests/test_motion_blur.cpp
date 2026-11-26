@@ -44,7 +44,11 @@ TEST(TransformAnimation, QuatSlerpAndTrackInterpolation) {
     // 0° → 90° Y ekseni dönmesi: t = 0.5'te tam 45° olmalı
     const Quatf q0 = Quatf::fromEulerDeg(Vec3f(0.0f, 0.0f, 0.0f));
     const Quatf q1 = Quatf::fromEulerDeg(Vec3f(0.0f, 90.0f, 0.0f));
+    EXPECT_NEAR(q1.y, std::sin(PI_OVER_4), 1e-4f);
+    EXPECT_NEAR(q1.w, std::cos(PI_OVER_4), 1e-4f);
     const Quatf qMid = Quatf::slerp(q0, q1, 0.5f);
+    EXPECT_NEAR(qMid.y, std::sin(PI_OVER_4 * 0.5f), 1e-4f);
+    EXPECT_NEAR(qMid.w, std::cos(PI_OVER_4 * 0.5f), 1e-4f);
     const Vec3f euler = qMid.toEulerDeg();
     EXPECT_NEAR(euler.y, 45.0f, 1e-3f);
     EXPECT_NEAR(euler.x, 0.0f, 1e-3f);

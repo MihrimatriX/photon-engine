@@ -135,8 +135,8 @@ void Application::drawRenderDialog() {
     }
     if (ui::Section(ICON_GAUGE, "Kalite")) {
         if (ui::BeginProps("q")) {
-            ui::Prop("Cihaz", "Viewport ve son render'ın çalıştığı işlemci. GPU'lar bulunursa listelenir; GPU arka "
-                              "ucu gelene kadar seçilemez (nedeni üzerine gelince yazar)");
+            ui::Prop("Cihaz", "Viewport ve son render'ın çalıştığı motor: CPU (Embree), Vulkan GPU "
+                              "(Donanım RT / Wavefront / Compute) veya Hibrit GPU+CPU");
             {
                 const auto& devices = enumerateDevices();
                 auto labelOf = [&](const std::string& id) {
@@ -159,6 +159,24 @@ void Application::drawRenderDialog() {
                 }
                 if (out.device != before) savePrefs();
             }
+            ui::Prop("GPU modu", "Vulkan yürütme stratejisi: Otomatik donanıma göre en hızlı yolu seçer");
+            {
+                struct ModeEntry { GpuMode mode; const char* label; };
+                static constexpr ModeEntry kGpuModes[] = {
+                    {GpuMode::Auto, "Otomatik"},
+                    {GpuMode::RayQuery, "Donanım RT"},
+                    {GpuMode::Wavefront, "Wavefront"},
+                    {GpuMode::Megakernel, "Compute"},
+                };
+                const char* curLabel = "Otomatik";
+                for (const auto& e : kGpuModes)
+                    if (e.mode == m_s.settings.gpuMode) curLabel = e.label;
+                if (ImGui::BeginCombo("##gpumode", curLabel)) {
+                    for (const auto& e : kGpuModes)
+                        if (ImGui::Selectable(e.label, e.mode == m_s.settings.gpuMode)) m_s.settings.gpuMode = e.mode;
+                    ImGui::EndCombo();
+                }
+            }
             ui::Prop("Örnek sayısı", "Piksel başına ışın sayısı. Daha çok = daha az gürültü, daha uzun süre");
             ui::SliderI("##spp", &out.spp, 8, 8192, "%d", ImGuiSliderFlags_Logarithmic);
             ui::Prop("Süre sınırı", "0 = yok. Dolunca o ana dek olan örneklerle bitirir");
@@ -170,6 +188,10 @@ void Application::drawRenderDialog() {
             ImGui::EndDisabled();
             ui::Prop("Sekme sayısı");
             ui::SliderI("##mb", &m_s.settings.maxBounces, 1, 32);
+            ui::Prop("Path Guiding", "SD-Tree (Müller 2017) yol kılavuzluğu: zor dolaylı ışıkta gürültüyü azaltır");
+            ui::Toggle("pg", &m_s.settings.pathGuiding);
+            ui::Prop("Hareket bulanıklığı", "Kamera ve animasyonlu nesnelerde enstantane hareket bulanıklığı");
+            ui::Toggle("mblur", &m_s.settings.motionBlur);
             ui::Prop("Piksel filtresi", "Kenar yumuşatma çekirdeği. Blackman-Harris: temiz kenar, az bulanıklık "
                                         "(önerilen). Kutu: en keskin ama merdivenli kenar ve titreşen ince ayrıntı");
             {
@@ -218,9 +240,9 @@ void Application::drawRenderDialog() {
             }
             ImGui::EndDisabled();
             ui::Prop("Render geçişleri", "Yalnız EXR: tek dosyada katmanlar. Işık: DiffDir/Ind, GlossDir/Ind, "
-                                         "TransDir/Ind, Emit, Env (toplamı beauty). Veri: Depth, Position, Normal, "
-                                         "DiffCol (albedo), ObjectID, MaterialID. Nuke, Fusion, After Effects ve "
-                                         "Blender compositor'da açılır");
+                                         "TransDir/Ind, Emit, Env, LG_* (ışık grupları). Veri: Depth, Position, "
+                                         "Normal, DiffCol, ObjectID, MaterialID ve Psyop Cryptomatte 1.2.0 "
+                                         "(CryptoObject/CryptoMaterial). Nuke, Fusion, AE ve Blender'da açılır");
             ImGui::BeginDisabled(out.format != 2);
             ui::Toggle("passes", &out.passes);
             ImGui::EndDisabled();
