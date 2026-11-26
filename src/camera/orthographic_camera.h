@@ -34,6 +34,7 @@ public:
                        float verticalExtent, float aspectRatio);
 
     Ray generateRay(float u, float v, const Vec2f& lensSample) const override;
+    CameraGpuDesc describeGpu() const override;
 
 private:
     Vec3f m_horizontal;

@@ -1,8 +1,10 @@
 // scene_graph.cpp — Sahne ağacı işlemleri (arama, silme) ve Scene'e derleme (bake).
 #include "scene/scene_graph.h"
+#include "geometry/mesh_instance.h"
 #include "geometry/triangle.h"
 #include "geometry/sphere.h"
 #include "scene/material_library.h"
+#include <cmath>
 #include <unordered_map>
 #include <algorithm>
 
@@ -42,6 +44,15 @@ SceneNode* SceneGraph::findByUid(uint64_t uid) {
 
 namespace {
 
+bool transformsDiffer(const Transform& a, const Transform& b) {
+    const Mat4f& ma = a.matrix();
+    const Mat4f& mb = b.matrix();
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 4; ++c)
+            if (std::abs(ma(r, c) - mb(r, c)) > 1e-6f) return true;
+    return false;
+}
+
 std::unique_ptr<SceneNode> cloneNodeRec(const SceneNode& src, bool cloneMaterials,
                                         std::unordered_map<const Material*, std::shared_ptr<Material>>& memo) {
     auto n = std::make_unique<SceneNode>(src.name, src.type);
@@ -50,6 +61,8 @@ std::unique_ptr<SceneNode> cloneNodeRec(const SceneNode& src, bool cloneMaterial
     n->mesh = src.mesh;
     n->sphereRadius = src.sphereRadius;
     n->visible = src.visible;
+    n->visibilityMask = src.visibilityMask;
+    n->transformTrack = src.transformTrack;
     n->pickId = src.pickId;
     n->sourcePath = src.sourcePath;
     n->sourceIndex = src.sourceIndex;
@@ -152,10 +165,17 @@ GroundQuad placeGroundUnder(const AABB& box) {
     return g;
 }
 
-void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Transform& parentXform,
-                             bool isolateMaterials, const std::shared_ptr<Material>& overrideMaterial) const {
+void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Transform& parentXform0,
+                             const Transform& parentXform1, bool isolateMaterials,
+                             const std::shared_ptr<Material>& overrideMaterial,
+                             bool hasShutter, float shutterT0, float shutterT1) const {
     if (!node.visible) return;
-    Transform world = parentXform * node.localTransform;
+    const Transform local0 = (hasShutter && !node.transformTrack.empty()) ? node.transformTrack.evaluate(shutterT0)
+                                                                          : node.localTransform;
+    const Transform local1 = (hasShutter && !node.transformTrack.empty()) ? node.transformTrack.evaluate(shutterT1)
+                                                                          : node.localTransform;
+    const Transform world0 = parentXform0 * local0;
+    const Transform world1 = hasShutter ? (parentXform1 * local1) : world0;
 
     // İzole derlemede (son render) malzeme kopyalanır: render sürerken kullanıcı
     // asıl malzemeyi düzenlese bile render'ın gördüğü değerler değişmez.
@@ -165,35 +185,60 @@ void SceneGraph::compileNode(const SceneNode& node, Scene& outScene, const Trans
     }
 
     if (node.type == SceneNodeType::Mesh && node.mesh) {
-        auto baked = bakeMesh(*node.mesh, world, mat.get());
+        // BLAS/TLAS instancing: yerel TriangleMesh paylaşılır, dönüşüm MeshInstance üzerindedir.
+        auto inst = std::make_shared<MeshInstance>(node.mesh, world0, mat.get());
+        inst->setVisibilityMask(node.visibilityMask);
+        if (hasShutter && transformsDiffer(world0, world1)) {
+            inst->setMotionTransform(world1);
+        }
         outScene.retainMaterial(mat);
-        outScene.tagShape(baked.get(), node.uid);
-        outScene.addShape(baked);
+        outScene.tagShape(inst.get(), node.uid);
+        outScene.setShapeName(inst.get(), node.name);
+        if (mat && outScene.materialNames().find(mat.get()) == outScene.materialNames().end()) {
+            outScene.setMaterialName(mat.get(), node.name + "_Mat");
+        }
+        outScene.addShape(inst);
     } else if (node.type == SceneNodeType::Sphere && mat && node.sphereRadius > 0) {
-        Vec3f center = world.transformPoint(Vec3f(0, 0, 0));
+        Vec3f center = world0.transformPoint(Vec3f(0, 0, 0));
         // Eşit olmayan ölçekte küre elipsoid olmalı; ponytail: en büyük eksen ölçeği alınır.
-        Vec3f sx = world.transformVector(Vec3f(1, 0, 0));
-        Vec3f sy = world.transformVector(Vec3f(0, 1, 0));
-        Vec3f sz = world.transformVector(Vec3f(0, 0, 1));
+        Vec3f sx = world0.transformVector(Vec3f(1, 0, 0));
+        Vec3f sy = world0.transformVector(Vec3f(0, 1, 0));
+        Vec3f sz = world0.transformVector(Vec3f(0, 0, 1));
         float s = std::max({sx.length(), sy.length(), sz.length()});
         outScene.retainMaterial(mat);
         auto sphere = std::make_shared<Sphere>(center, node.sphereRadius * s, mat.get());
+        sphere->setVisibilityMask(node.visibilityMask);
         outScene.tagShape(sphere.get(), node.uid);
+        outScene.setShapeName(sphere.get(), node.name);
+        if (outScene.materialNames().find(mat.get()) == outScene.materialNames().end()) {
+            outScene.setMaterialName(mat.get(), node.name + "_Mat");
+        }
         outScene.addShape(sphere);
     }
 
     for (const auto& child : node.children) {
-        compileNode(*child, outScene, world, isolateMaterials, overrideMaterial);
+        compileNode(*child, outScene, world0, world1, isolateMaterials, overrideMaterial, hasShutter, shutterT0, shutterT1);
     }
 }
 
 void SceneGraph::compile(Scene& outScene, const std::vector<std::shared_ptr<Light>>& lights,
                          std::shared_ptr<EnvironmentLight> environment, bool isolateMaterials) const {
     outScene.reset();
-    compileNode(*m_root, outScene, Transform{}, isolateMaterials);
+    compileNode(*m_root, outScene, Transform{}, Transform{}, isolateMaterials, nullptr, false, 0.0f, 0.0f);
     for (const auto& l : lights) outScene.addLight(l);
     if (environment) outScene.setEnvironment(std::move(environment));
     outScene.buildAccelerator();
+}
+
+bool SceneGraph::hasTransformAnimation() const {
+    std::vector<const SceneNode*> stack{m_root.get()};
+    while (!stack.empty()) {
+        const SceneNode* n = stack.back();
+        stack.pop_back();
+        if (!n->transformTrack.empty()) return true;
+        for (const auto& c : n->children) stack.push_back(c.get());
+    }
+    return false;
 }
 
 AABB SceneGraph::nodeWorldBounds(const SceneNode& node) {
@@ -228,8 +273,10 @@ AABB SceneGraph::worldBounds() const {
 namespace photon {
 
 void SceneGraph::compileInto(Scene& outScene, bool isolateMaterials,
-                             const std::shared_ptr<Material>& overrideMaterial) const {
-    compileNode(*m_root, outScene, Transform{}, isolateMaterials, overrideMaterial);
+                             const std::shared_ptr<Material>& overrideMaterial,
+                             bool hasShutter, float shutterT0, float shutterT1) const {
+    compileNode(*m_root, outScene, Transform{}, Transform{}, isolateMaterials, overrideMaterial,
+                hasShutter, shutterT0, shutterT1);
 }
 
 // ── Hiyerarşi düzenleme ──────────────────────────────────────────────────

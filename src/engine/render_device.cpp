@@ -1,7 +1,10 @@
-// render_device.cpp — CPU cihazı ve cihaz listesi / seçimi.
+// render_device.cpp — CPU, Vulkan GPU (Compute/RT/Wavefront) ve Hibrit cihaz kaydı ve seçimi.
 #include "engine/render_device.h"
 #include "engine/gpu_probe.h"
+#include "engine/hybrid_device.h"
+#include "engine/vulkan_device.h"
 
+#include <cstdlib>
 #include <mutex>
 #include <thread>
 
@@ -12,8 +15,9 @@ const char* deviceKindName(DeviceKind kind) {
         case DeviceKind::Cpu: return "CPU";
         case DeviceKind::Cuda: return "CUDA";
         case DeviceKind::Optix: return "OptiX";
-        case DeviceKind::Vulkan: return "Vulkan RT";
+        case DeviceKind::Vulkan: return "Vulkan";
         case DeviceKind::D3D12: return "D3D12 DXR";
+        case DeviceKind::Hybrid: return "Hibrit";
     }
     return "?";
 }
@@ -66,6 +70,11 @@ DeviceInfo cpuInfo() {
     return d;
 }
 
+int parseVulkanIndex(const std::string& id) {
+    if (id.rfind("vulkan:", 0) != 0) return -1;
+    return std::atoi(id.c_str() + 7);
+}
+
 } // namespace
 
 const std::vector<DeviceInfo>& enumerateDevices() {
@@ -73,6 +82,26 @@ const std::vector<DeviceInfo>& enumerateDevices() {
     static std::vector<DeviceInfo> devices;
     std::call_once(once, [] {
         devices.push_back(cpuInfo());
+        std::vector<DeviceInfo> vks = probeVulkanDevices();
+        const DeviceInfo* bestVk = nullptr;
+        for (const DeviceInfo& v : vks) {
+            if (!bestVk || (isVulkanHardwareGpu(v.id) && !isVulkanHardwareGpu(bestVk->id))) bestVk = &v;
+        }
+        DeviceInfo hybridInfo{};
+        bool hasHybrid = false;
+        if (bestVk) {
+            hybridInfo.id = "hybrid";
+            hybridInfo.kind = DeviceKind::Hybrid;
+            hybridInfo.name = bestVk->name + " + CPU";
+            hybridInfo.threads = devices.front().threads;
+            hybridInfo.memoryBytes = bestVk->memoryBytes;
+            hybridInfo.hardwareRayTracing = bestVk->hardwareRayTracing;
+            hybridInfo.usable = true;
+            hybridInfo.note = "Eşzamanlı Vulkan GPU + CPU, dinamik EMA yük dengeleme";
+            hasHybrid = true;
+        }
+        for (DeviceInfo& v : vks) devices.push_back(std::move(v));
+        if (hasHybrid) devices.push_back(std::move(hybridInfo));
         for (DeviceInfo& g : probeCudaDevices()) devices.push_back(std::move(g));
     });
     return devices;
@@ -82,7 +111,13 @@ std::unique_ptr<RenderDevice> createDevice(const std::string& id, std::string* e
     const auto& devices = enumerateDevices();
     const std::string want = id.empty() ? "auto" : id;
     if (want == "auto") {
-        // En iyi kullanılabilir cihaz. GPU arka uçları geldiğinde burada GPU'ya öncelik verilir.
+        // Donanım Vulkan GPU varsa tercih et; yazılım tarayıcıları (Lavapipe) yerine CPU kullan.
+        for (const DeviceInfo& d : devices) {
+            if (d.usable && d.kind == DeviceKind::Vulkan && isVulkanHardwareGpu(d.id)) {
+                auto vkDev = createVulkanDevice(parseVulkanIndex(d.id), d, nullptr);
+                if (vkDev) return vkDev;
+            }
+        }
         for (const DeviceInfo& d : devices)
             if (d.usable && d.kind == DeviceKind::Cpu) return std::make_unique<CpuDevice>(d);
     }
@@ -93,6 +128,25 @@ std::unique_ptr<RenderDevice> createDevice(const std::string& id, std::string* e
             return nullptr;
         }
         if (d.kind == DeviceKind::Cpu) return std::make_unique<CpuDevice>(d);
+        if (d.kind == DeviceKind::Vulkan) {
+            return createVulkanDevice(parseVulkanIndex(d.id), d, error);
+        }
+        if (d.kind == DeviceKind::Hybrid) {
+            // En iyi kullanılabilir Vulkan cihazı + CPU'yu eşleştir.
+            const DeviceInfo* bestVk = nullptr;
+            for (const DeviceInfo& v : devices) {
+                if (!v.usable || v.kind != DeviceKind::Vulkan) continue;
+                if (!bestVk || (isVulkanHardwareGpu(v.id) && !isVulkanHardwareGpu(bestVk->id))) bestVk = &v;
+            }
+            if (!bestVk) {
+                if (error) *error = "Hibrit mod için kullanılabilir Vulkan GPU bulunamadı";
+                return nullptr;
+            }
+            auto gpu = createVulkanDevice(parseVulkanIndex(bestVk->id), *bestVk, error);
+            if (!gpu) return nullptr;
+            auto cpu = std::make_unique<CpuDevice>(devices.front());
+            return std::make_unique<HybridDevice>(d, std::move(gpu), std::move(cpu));
+        }
     }
     if (error) {
         std::string ids;

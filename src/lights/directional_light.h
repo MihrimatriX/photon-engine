@@ -27,6 +27,7 @@ public:
 
     /// Direction light travels toward (sampleLi returns the opposite).
     const Vec3f& direction() const { return m_direction; }
+    const Color3f& irradiance() const { return m_irradiance; }
 
 private:
     Vec3f m_direction; // Direction light travels TO

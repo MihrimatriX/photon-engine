@@ -63,4 +63,20 @@ Ray ThinLensCamera::generateRay(float u, float v, const Vec2f& lensSample) const
     return Ray(lensPointWorld, direction);
 }
 
+CameraGpuDesc ThinLensCamera::describeGpu() const {
+    CameraGpuDesc d;
+    d.position = m_position;
+    d.lowerLeft = m_lowerLeft;
+    d.horizontal = m_horizontal;
+    d.vertical = m_vertical;
+    d.u = m_u;
+    d.v = m_v;
+    d.forward = -m_w;
+    d.lensRadius = m_lensRadius;
+    d.blades = m_blades;
+    d.bladeRotation = m_bladeRotation;
+    d.orthographic = false;
+    return d;
+}
+
 } // namespace photon

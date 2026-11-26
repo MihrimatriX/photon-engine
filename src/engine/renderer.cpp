@@ -4,6 +4,11 @@
 #include "core/threading/parallel.h"
 #include "samplers/sobol_sampler.h"
 #include "integrators/path_tracer.h"
+#include "integrators/path_guiding.h"
+#include "geometry/mesh.h"
+#include "geometry/mesh_instance.h"
+#include "geometry/sphere.h"
+#include "geometry/triangle.h"
 #include "materials/disney.h"
 #include "materials/dielectric.h"
 #include "materials/lambertian.h"
@@ -12,8 +17,10 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 namespace photon {
@@ -50,6 +57,67 @@ Color3f primaryAlbedo(const SurfaceInteraction& si) {
     return Color3f(0.5f);
 }
 
+struct CryptoLookup {
+    std::unordered_map<const void*, float> objects;
+    std::unordered_map<const Material*, float> materials;
+};
+
+CryptoLookup buildCryptoLookup(const Scene& scene, RenderPassFilms& passes) {
+    CryptoLookup lk;
+    const auto& shapeNames = scene.shapeNames();
+    const auto& shapeOwners = scene.shapeOwners();
+    const auto& matNames = scene.materialNames();
+
+    size_t anonShape = 0;
+    size_t anonMat = 0;
+    auto registerMat = [&](const Material* m) {
+        if (!m || lk.materials.count(m)) return;
+        std::string name;
+        if (auto it = matNames.find(m); it != matNames.end() && !it->second.empty()) {
+            name = it->second;
+        } else {
+            name = "material_" + std::to_string(anonMat++);
+        }
+        lk.materials[m] = passes.cryptoMaterial.registerName(name);
+    };
+
+    for (const auto& [m, name] : matNames) {
+        if (m && !name.empty()) lk.materials[m] = passes.cryptoMaterial.registerName(name);
+    }
+
+    for (const auto& shape : scene.shapes()) {
+        if (!shape) continue;
+        const void* ptr = shape.get();
+        std::string objName;
+        if (auto it = shapeNames.find(ptr); it != shapeNames.end() && !it->second.empty()) {
+            objName = it->second;
+        } else if (auto oit = shapeOwners.find(ptr); oit != shapeOwners.end() && oit->second != 0) {
+            objName = "object_" + std::to_string(oit->second);
+        } else {
+            objName = "shape_" + std::to_string(anonShape++);
+        }
+        lk.objects[ptr] = passes.cryptoObject.registerName(objName);
+
+        if (const auto* inst = dynamic_cast<const MeshInstance*>(shape.get())) {
+            registerMat(inst->material());
+            if (inst->mesh()) registerMat(inst->mesh()->material());
+        } else if (const auto* mesh = dynamic_cast<const TriangleMesh*>(shape.get())) {
+            registerMat(mesh->material());
+        } else if (const auto* sph = dynamic_cast<const Sphere*>(shape.get())) {
+            registerMat(sph->material());
+        } else if (const auto* tri = dynamic_cast<const Triangle*>(shape.get())) {
+            registerMat(tri->material());
+        }
+    }
+
+    for (const auto& [ptr, name] : shapeNames) {
+        if (ptr && !name.empty() && !lk.objects.count(ptr)) {
+            lk.objects[ptr] = passes.cryptoObject.registerName(name);
+        }
+    }
+    return lk;
+}
+
 struct PixelSample {
     Color3f L;
     Color3f albedo;
@@ -61,6 +129,8 @@ struct PixelSample {
     Vec3f position;
     Color3f objectId;
     Color3f materialId;
+    float cryptoObjHash = 0.0f;
+    float cryptoMatHash = 0.0f;
 };
 
 // Tek bir alt-piksel örneği. AOV istendiğinde ya da arka plan modu ortam değilse
@@ -68,7 +138,8 @@ struct PixelSample {
 // kamera ışınına arka plan rengi/şeffaflık uygulanır, çarpanda albedo ve normal alınır.
 PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& integrator,
                        const PixelFilterSampler& filter, Sampler& sampler, int x, int y, int sampleIndex,
-                       int width, int height, bool wantAovs, bool wantPasses = false) {
+                       int width, int height, bool wantAovs, bool wantPasses = false, bool motionBlur = false,
+                       const CryptoLookup* crypto = nullptr) {
     sampler.startPixel(x, y);
     sampler.startSample(sampleIndex);
 
@@ -78,7 +149,10 @@ PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& int
     Vec2f screen = rasterToScreen(static_cast<float>(x) + 0.5f + offset.x, static_cast<float>(y) + 0.5f + offset.y,
                                   width, height);
     Vec2f lensSample = sampler.get2D();
-    Ray ray = camera.generateRay(screen.x, screen.y, lensSample);
+    Ray ray = motionBlur ? camera.generateRay(screen.x, screen.y, lensSample, sampler.get1D())
+                         : camera.generateRay(screen.x, screen.y, lensSample);
+    ray.coneWidth = camera.pixelConeWidth(height);
+    ray.coneSpread = camera.pixelConeSpread(height);
 
     PixelSample out;
     const Background& bg = scene.background();
@@ -93,6 +167,12 @@ PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& int
         out.position = primary.isect.point;
         out.objectId = idColor(scene.nodeUidOf(primary.isect));
         out.materialId = idColor(reinterpret_cast<uintptr_t>(primary.isect.material));
+        if (crypto) {
+            if (auto it = crypto->objects.find(primary.isect.hitObject); it != crypto->objects.end())
+                out.cryptoObjHash = it->second;
+            if (auto it = crypto->materials.find(primary.isect.material); it != crypto->materials.end())
+                out.cryptoMatHash = it->second;
+        }
     }
     if (primary.catcherAlpha >= 0.0f) {
         // Gölge yakalayıcı: kapsama = gölgenin opaklığı; albedo = görünen arka plan.
@@ -130,6 +210,10 @@ void addPasses(RenderPassFilms* passes, int x, int y, const PixelSample& s) {
     passes->position.addSampleSigned(x, y, Color3f(s.position.x, s.position.y, s.position.z));
     passes->objectId.addSample(x, y, s.objectId);
     passes->materialId.addSample(x, y, s.materialId);
+    const size_t nGroups = std::min(passes->lightGroups.size(), static_cast<size_t>(LightPasses::kMaxLightGroups));
+    for (size_t g = 0; g < nGroups; ++g) passes->lightGroups[g].second.addSample(x, y, s.light.lightGroups[g]);
+    if (passes->cryptoObject.width() > 0) passes->cryptoObject.addSample(x, y, s.cryptoObjHash);
+    if (passes->cryptoMaterial.width() > 0) passes->cryptoMaterial.addSample(x, y, s.cryptoMatHash);
 }
 
 void addAovs(AovFilms* aovs, int x, int y, const PixelSample& s) {
@@ -149,7 +233,19 @@ void denoiseWithAovs(Image& out, const AovFilms* aovs) {
     }
 }
 
+bool lightGroupsMatch(const RenderPassFilms& passes, const std::vector<std::string>& names, int w, int h) {
+    if (passes.lightGroups.size() != names.size()) return false;
+    for (size_t i = 0; i < names.size(); ++i) {
+        if (passes.lightGroups[i].first != names[i]) return false;
+        if (passes.lightGroups[i].second.width() != w || passes.lightGroups[i].second.height() != h) return false;
+    }
+    return true;
+}
+
 } // namespace
+
+Renderer::Renderer() = default;
+Renderer::~Renderer() = default;
 
 // Owen karıştırmalı Sobol (Burley 2020): her piksel ve boyut kendi karıştırmasını
 // alır, ilerlemeli render'da her ön-ek (1, 2, 4... örnek) iyi tabakalanır.
@@ -174,18 +270,23 @@ Color3f idColor(uint64_t id) {
     }
 }
 
-std::vector<ExrLayer> makeExrLayers(const RenderPassFilms* passes, const AovFilms* aovs, std::vector<Image>& storage) {
+std::vector<ExrLayer> makeExrLayers(const RenderPassFilms* passes, const AovFilms* aovs,
+                                    std::vector<Image>& storage,
+                                    std::vector<CryptoRankImage>* cryptoStorage) {
     std::vector<ExrLayer> layers;
     storage.clear();
-    storage.reserve(static_cast<size_t>(LightPass::Count) + 8); // işaretçiler geçerli kalsın
+    const size_t nGroups = passes ? passes->lightGroups.size() : 0;
+    storage.reserve(static_cast<size_t>(LightPass::Count) + 8 + nGroups); // işaretçiler geçerli kalsın
     auto add = [&](const std::string& name, const Film& f, const char* suffixes, bool full) {
         if (f.width() <= 0) return;
         storage.push_back(f.resolve());
-        layers.push_back(ExrLayer{name, &storage.back(), suffixes, full});
+        layers.push_back(ExrLayer{name, &storage.back(), suffixes, full, nullptr});
     };
     if (passes) {
         for (int k = 0; k < static_cast<int>(LightPass::Count); ++k)
             add(lightPassName(static_cast<LightPass>(k)), passes->light[k], "RGB", false);
+        for (const auto& [groupName, film] : passes->lightGroups)
+            add("LG_" + groupName, film, "RGB", false);
         add("Depth", passes->depth, "Z", true);
         add("Position", passes->position, "XYZ", true);
         add("ObjectID", passes->objectId, "RGB", false);
@@ -195,7 +296,33 @@ std::vector<ExrLayer> makeExrLayers(const RenderPassFilms* passes, const AovFilm
         add("DiffCol", aovs->albedo, "RGB", false);
         add("Normal", aovs->normal, "XYZ", false);
     }
+    if (passes && cryptoStorage && passes->cryptoObject.width() > 0 && passes->cryptoObject.height() > 0) {
+        cryptoStorage->clear();
+        auto objRanks = passes->cryptoObject.resolveRanks(3);
+        auto matRanks = passes->cryptoMaterial.resolveRanks(3);
+        cryptoStorage->reserve(objRanks.size() + matRanks.size());
+        auto pushCrypto = [&](const std::string& base, std::vector<CryptoRankImage>& ranks) {
+            for (size_t i = 0; i < ranks.size(); ++i) {
+                char idx[32];
+                std::snprintf(idx, sizeof(idx), "%02u", static_cast<unsigned>(i % 100u));
+                cryptoStorage->push_back(std::move(ranks[i]));
+                layers.push_back(ExrLayer{base + idx, nullptr, "RGBA", true, &cryptoStorage->back().rgba});
+            }
+        };
+        pushCrypto("CryptoObject", objRanks);
+        pushCrypto("CryptoMaterial", matRanks);
+    }
     return layers;
+}
+
+std::vector<std::pair<std::string, std::string>> makeExrCryptoMetadata(const RenderPassFilms* passes) {
+    std::vector<std::pair<std::string, std::string>> meta;
+    if (!passes || passes->cryptoObject.width() <= 0 || passes->cryptoObject.height() <= 0) return meta;
+    auto obj = passes->cryptoObject.exrMetadata("CryptoObject");
+    auto mat = passes->cryptoMaterial.exrMetadata("CryptoMaterial");
+    meta.insert(meta.end(), obj.begin(), obj.end());
+    meta.insert(meta.end(), mat.begin(), mat.end());
+    return meta;
 }
 
 std::unique_ptr<Sampler> createRenderSampler(int samplesPerPixel, uint64_t seed) {
@@ -271,7 +398,35 @@ SampleBatchResult Renderer::renderSamples(const Scene& scene, const Camera& came
     const int h = accum.height();
     if (w <= 0 || h <= 0 || count <= 0) return result;
     if (aovs && (aovs->albedo.width() != w || aovs->albedo.height() != h)) aovs->resize(w, h);
-    if (passes && (passes->depth.width() != w || passes->depth.height() != h)) passes->resize(w, h);
+    if (passes) {
+        if (passes->depth.width() != w || passes->depth.height() != h) passes->resize(w, h);
+        if (!lightGroupsMatch(*passes, scene.lightGroupNames(), w, h)) {
+            passes->initLightGroups(w, h, scene.lightGroupNames());
+        }
+    }
+
+    std::unique_ptr<CryptoLookup> cryptoLookup;
+    if (passes) {
+        cryptoLookup = std::make_unique<CryptoLookup>(buildCryptoLookup(scene, *passes));
+    }
+
+    // SD-Tree Path Guiding: ilk 32 örnekte artan dalgalarla (2, 4, 8, 16, 32) eğitilip
+    // arıtılır, ardından dondurulmuş örnekleme ağacıyla saf yönlendirmeli render sürer.
+    if (settings.pathGuiding) {
+        if (!m_guiding || m_guidingScene != &scene || firstSample == 0) {
+            m_guiding = std::make_unique<GuidingField>(scene.bounds());
+            m_guidingScene = &scene;
+            m_guidingSamples = 0;
+            m_guidingNextRefine = 2;
+            m_guidingIter = 0;
+        }
+    } else if (m_guiding) {
+        m_guiding.reset();
+        m_guidingScene = nullptr;
+        m_guidingSamples = 0;
+        m_guidingNextRefine = 2;
+        m_guidingIter = 0;
+    }
 
     std::unique_ptr<Sampler> baseSampler = createRenderSampler(settings.samplesPerPixel, 12345);
     PathTracer integrator(settings.maxBounces, 3, settings.aoStrength, settings.shadowQuality);
@@ -313,35 +468,64 @@ SampleBatchResult Renderer::renderSamples(const Scene& scene, const Camera& came
 
     const bool wantAovs = aovs != nullptr;
     const bool wantPasses = passes != nullptr;
-    const int lastSample = firstSample + count;
+    const int endSample = firstSample + count;
     std::atomic<uint64_t> traced{0};
-    result.completed = parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
-        // Sobol karıştırması partiler boyunca SABİT kalmalı; yoksa ardışık örnekler
-        // aynı dizinin devamı olmaz ve tabakalanma kaybolur. Piksel ayrışması içeride.
-        const uint64_t tileSeed = 12345; // karo boyutundan bağımsız, deterministik
-        std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
-        uint64_t local = 0;
-        for (int y = yBegin; y < yEnd; ++y) {
-            // Satır başında iptal kontrolü: büyük karolarda bile tepki ~ms.
-            if (cancel && cancel->load(std::memory_order_relaxed)) break;
-            for (int x = xBegin; x < xEnd; ++x) {
-                if (!skipMask.empty() && skipMask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)])
-                    continue;
-                for (int s = firstSample; s < lastSample; ++s) {
-                    PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h,
-                                                wantAovs, wantPasses);
-                    accum.addSample(x, y, ps.L);
-                    if (wantAovs) addAovs(aovs, x, y, ps);
-                    if (wantPasses) addPasses(passes, x, y, ps);
-                    ++local;
-                    if (adaptive && s + 1 < lastSample && s + 1 >= minSpp && ((s + 1) & 7) == 0 &&
-                        accum.relativeError(x, y) < threshold)
-                        break;
+
+    int curSample = firstSample;
+    while (curSample < endSample) {
+        int chunkEnd = endSample;
+        if (settings.pathGuiding && m_guiding && m_guidingSamples < 32) {
+            const int untilRefine = std::max(1, m_guidingNextRefine - m_guidingSamples);
+            chunkEnd = std::min(endSample, curSample + untilRefine);
+            integrator.setGuiding(m_guiding->ready() ? m_guiding.get() : nullptr, m_guiding.get());
+        } else if (settings.pathGuiding && m_guiding) {
+            integrator.setGuiding(m_guiding->ready() ? m_guiding.get() : nullptr, nullptr);
+        } else {
+            integrator.setGuiding(nullptr, nullptr);
+        }
+
+        const bool completed = parallelFor2D(w, h, [&](int xBegin, int xEnd, int yBegin, int yEnd) {
+            // Sobol karıştırması partiler boyunca SABİT kalmalı; yoksa ardışık örnekler
+            // aynı dizinin devamı olmaz ve tabakalanma kaybolur. Piksel ayrışması içeride.
+            const uint64_t tileSeed = 12345; // karo boyutundan bağımsız, deterministik
+            std::unique_ptr<Sampler> tileSampler = baseSampler->clone(tileSeed);
+            uint64_t local = 0;
+            for (int y = yBegin; y < yEnd; ++y) {
+                // Satır başında iptal kontrolü: büyük karolarda bile tepki ~ms.
+                if (cancel && cancel->load(std::memory_order_relaxed)) break;
+                for (int x = xBegin; x < xEnd; ++x) {
+                    if (!skipMask.empty() && skipMask[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)])
+                        continue;
+                    for (int s = curSample; s < chunkEnd; ++s) {
+                        PixelSample ps = tracePixel(scene, camera, integrator, filter, *tileSampler, x, y, s, w, h,
+                                                    wantAovs, wantPasses, settings.motionBlur, cryptoLookup.get());
+                        accum.addSample(x, y, ps.L);
+                        if (wantAovs) addAovs(aovs, x, y, ps);
+                        if (wantPasses) addPasses(passes, x, y, ps);
+                        ++local;
+                        if (adaptive && s + 1 < chunkEnd && s + 1 >= minSpp && ((s + 1) & 7) == 0 &&
+                            accum.relativeError(x, y) < threshold)
+                            break;
+                    }
                 }
             }
+            traced.fetch_add(local, std::memory_order_relaxed);
+        }, settings.tileSize, pool, cancel);
+
+        if (!completed) {
+            result.completed = false;
+            break;
         }
-        traced.fetch_add(local, std::memory_order_relaxed);
-    }, settings.tileSize, pool, cancel);
+        if (settings.pathGuiding && m_guiding && m_guidingSamples < 32) {
+            m_guidingSamples += (chunkEnd - curSample);
+            if (m_guidingSamples >= m_guidingNextRefine) {
+                m_guiding->refine(++m_guidingIter);
+                m_guidingNextRefine = m_guidingNextRefine < 32 ? m_guidingNextRefine * 2 : 64;
+            }
+        }
+        curSample = chunkEnd;
+    }
+
     result.samplesTraced = traced.load();
     return result;
 }

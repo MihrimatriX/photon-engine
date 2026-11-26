@@ -55,6 +55,43 @@ void BVH::build(std::vector<std::shared_ptr<Shape>> primitives) {
     freeBuildTree(root);
 }
 
+void BVH::buildMesh(const TriangleMesh& mesh) {
+    m_keep.clear();
+    m_nodes.clear();
+    m_prims.clear();
+    m_tris.clear();
+
+    const uint32_t n = static_cast<uint32_t>(mesh.numTriangles());
+    if (n == 0) return;
+
+    std::vector<PrimRef> refs;
+    refs.reserve(n);
+    std::vector<BuildPrimitive> buildPrims;
+    buildPrims.reserve(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        refs.push_back(PrimRef{nullptr, &mesh, i});
+        buildPrims.emplace_back(i, mesh.triangleBounds(i));
+    }
+
+    int totalNodes = 0;
+    std::vector<PrimRef> orderedPrims;
+    orderedPrims.reserve(n);
+    BVHBuildNode* root = recursiveBuild(buildPrims, 0, static_cast<int>(buildPrims.size()),
+                                        &totalNodes, orderedPrims, refs);
+    m_prims = std::move(orderedPrims);
+    m_tris.resize(m_prims.size());
+    for (size_t i = 0; i < m_prims.size(); ++i) {
+        Vec3f p0, p1, p2;
+        mesh.triangleVertices(m_prims[i].tri, p0, p1, p2);
+        const Vec3f e1 = p1 - p0, e2 = p2 - p0;
+        m_tris[i] = TriAccel{p0, e1, e2, 1e-14f * e1.lengthSquared() * e2.lengthSquared()};
+    }
+    m_nodes.resize(totalNodes);
+    int offset = 0;
+    flattenBVHTree(root, &offset);
+    freeBuildTree(root);
+}
+
 struct BucketInfo {
     int count = 0;
     AABB bounds = AABB::empty();
@@ -300,16 +337,20 @@ bool BVH::intersect(Ray& ray, SurfaceInteraction& isect) const {
                 const uint32_t pi = n.primitivesOffset + static_cast<uint32_t>(k);
                 const PrimRef& p = m_prims[pi];
                 if (p.mesh) {
+                    if ((p.mesh->visibilityMask() & ray.visibilityMask) == 0) continue;
                     float t;
                     if (hitTriangleLean(pi, ray, t)) {
                         ray.tMax = t;
                         bestTri = static_cast<int>(pi);
                         shapeHit = false;
                     }
-                } else if (p.shape && p.shape->intersect(ray, isect)) {
-                    isect.hitObject = p.shape;
-                    bestTri = -1;
-                    shapeHit = true;
+                } else if (p.shape) {
+                    if ((p.shape->visibilityMask() & ray.visibilityMask) == 0) continue;
+                    if (p.shape->intersect(ray, isect)) {
+                        isect.hitObject = p.shape;
+                        bestTri = -1;
+                        shapeHit = true;
+                    }
                 }
             }
         } else {
@@ -376,8 +417,10 @@ bool BVH::intersectAny(const Ray& ray) const {
                     const PrimRef& p = m_prims[pi];
                     float t;
                     if (p.mesh) {
+                        if ((p.mesh->visibilityMask() & ray.visibilityMask) == 0) continue;
                         if (hitTriangleLean(pi, ray, t)) return true;
                     } else if (p.shape) {
+                        if ((p.shape->visibilityMask() & ray.visibilityMask) == 0) continue;
                         Ray r = ray;
                         SurfaceInteraction dummy;
                         if (p.shape->intersect(r, dummy)) return true;

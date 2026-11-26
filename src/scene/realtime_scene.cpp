@@ -229,13 +229,25 @@ std::vector<RealtimeLight> packRealtimeLights(const std::vector<LightDesc>& desc
                     l.cosOuter = std::cos(half);
                     l.cosInner = std::cos(half * (1.0f - std::clamp(d.coneBlend, 0.0f, 1.0f)));
                 }
+                if (!d.iesPath.empty()) {
+                    l.ies = loadIes(d.iesPath);
+                }
                 break;
             case LightDesc::Type::Area: {
                 l.type = RealtimeLight::Type::Area;
                 l.direction = aim;
-                const float area = std::max(1e-4f, d.width) * std::max(1e-4f, d.height);
+                const float w = std::max(1e-4f, d.width);
+                const float h = std::max(1e-4f, d.height);
+                const float area = w * h;
                 l.intensity = L * area;
                 l.radius = std::sqrt(area * INV_PI);
+                // document.cpp::buildLights ile birebir aynı dikdörtgen tabanı
+                const Vec3f up = std::abs(aim.y) > 0.95f ? Vec3f(1, 0, 0) : Vec3f(0, 1, 0);
+                const Vec3f uDir = up.cross(aim).normalized();
+                const Vec3f vDir = aim.cross(uDir).normalized();
+                l.areaU = uDir * (w * 0.5f);
+                l.areaV = vDir * (h * 0.5f);
+                l.areaRadiance = L;
                 break;
             }
             case LightDesc::Type::Directional:
@@ -384,6 +396,37 @@ Color3f sampleToneLut(const ToneLut& lut, const Color3f& hdr) {
         for (int ch = 0; ch < 3; ++ch) out[ch] += w * static_cast<float>(p[ch]) / 255.0f;
     }
     return Color3f(out[0], out[1], out[2]);
+}
+
+RealtimeIesAtlas buildIesAtlas(std::vector<RealtimeLight>& lights) {
+    RealtimeIesAtlas atlas;
+    atlas.width = 181;
+    atlas.slices = 0;
+    for (RealtimeLight& l : lights) {
+        l.iesSlice = -1;
+        if (l.type != RealtimeLight::Type::Spot || !l.ies) continue;
+        l.iesSlice = atlas.slices++;
+    }
+    if (atlas.slices == 0) return atlas;
+    atlas.data.resize(static_cast<size_t>(atlas.slices) * static_cast<size_t>(atlas.width), 0.0f);
+    for (const RealtimeLight& l : lights) {
+        if (l.iesSlice < 0 || !l.ies) continue;
+        float* row = &atlas.data[static_cast<size_t>(l.iesSlice) * static_cast<size_t>(atlas.width)];
+        for (int g = 0; g < atlas.width; ++g) {
+            row[g] = l.ies->evaluate(static_cast<float>(g), 0.0f);
+        }
+    }
+    return atlas;
+}
+
+float sampleIesAtlas(const RealtimeIesAtlas& atlas, int slice, float gammaDeg) {
+    if (slice < 0 || slice >= atlas.slices || atlas.width < 2 || atlas.data.empty()) return 1.0f;
+    const float g = std::clamp(gammaDeg, 0.0f, 180.0f) * static_cast<float>(atlas.width - 1) / 180.0f;
+    const int i0 = std::min(static_cast<int>(g), atlas.width - 2);
+    const int i1 = i0 + 1;
+    const float t = g - static_cast<float>(i0);
+    const float* row = &atlas.data[static_cast<size_t>(slice) * static_cast<size_t>(atlas.width)];
+    return row[i0] * (1.0f - t) + row[i1] * t;
 }
 
 } // namespace photon

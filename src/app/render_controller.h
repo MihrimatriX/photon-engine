@@ -71,12 +71,18 @@ struct ViewportStats {
     int height = 0;
     double seconds = 0.0;   ///< Bu birikimin başlangıcından beri
     double passMs = 0.0;
+    double msamplesPerSec = 0.0;     ///< Canlı verim (M örnek/sn)
+    uint64_t deviceMemoryBytes = 0;  ///< Cihaz VRAM / bellek (bayt)
+    bool hardwareRayTracing = false; ///< VK_KHR_ray_query donanım RT etkin mi
+    bool pathGuiding = false;        ///< SD-Tree Path Guiding etkin mi
+    bool motionBlur = false;         ///< Hareket bulanıklığı etkin mi
     bool denoised = false;
     bool interactive = false;
     bool converged = false;
-    std::string device;     ///< Render eden cihazın adı
-    std::string deviceKind; ///< "CPU", "CUDA"... (rozet için kısa ad)
-    std::string deviceNote; ///< İstenen cihaz açılamadıysa nedeni (CPU'ya düşüldü)
+    std::string device;       ///< Render eden cihazın adı
+    std::string deviceKind;   ///< "CPU", "Vulkan", "Hibrit"... (rozet için kısa ad)
+    std::string gpuModeLabel; ///< "RT", "Wavefront", "Compute" vb.
+    std::string deviceNote;   ///< İstenen cihaz açılamadıysa nedeni (CPU'ya düşüldü)
 };
 
 /// UI'a verilen hazır kare.
@@ -97,7 +103,8 @@ public:
     void start();
     void stop();
 
-    void setScene(std::shared_ptr<const Scene> scene, bool interactive = false);
+    void setScene(std::shared_ptr<const Scene> scene, bool interactive = false,
+                  SceneUpdateKind kind = SceneUpdateKind::Full);
     void setCamera(const CameraParams& cam, bool interactive);
     /// Görüntüyü etkileyen alanlar değiştiyse yeniden başlatır.
     void setSettings(const RenderSettings& rs);
@@ -110,19 +117,19 @@ public:
     void setTargetSpp(int spp);  ///< 0 = sınırsız; artırmak birikimi sıfırlamaz
     void setPaused(bool paused);
     void setTransparentPreview(bool transparent);
-    /// Render cihazı ("auto", "cpu", "cuda:0"). Açılamazsa CPU'ya düşülür; stats().deviceNote nedenini söyler.
+    /// Render cihazı ("auto", "cpu", "vulkan:0", "hybrid"). Açılamazsa CPU'ya düşülür; stats().deviceNote nedenini söyler.
     void setDevice(const std::string& id);
     void restart(bool interactive = false);
 
     /// Mevcut pass'i iptal eder ve sahne kilidini döndürür. Kilit tutulurken
     /// render thread'i sahneye dokunmaz; yerinde düzenleme güvenlidir.
     /// Kilit bırakılınca restart() çağrılmalı (edit() bunu yapar).
-    std::unique_lock<std::mutex> lockScene();
+    std::unique_lock<std::mutex> lockScene(SceneUpdateKind kind = SceneUpdateKind::Materials);
 
     template <typename F>
-    void edit(F&& fn, bool interactive = true) {
+    void edit(F&& fn, bool interactive = true, SceneUpdateKind kind = SceneUpdateKind::Materials) {
         {
-            auto lock = lockScene();
+            auto lock = lockScene(kind);
             fn();
         }
         restart(interactive);
@@ -170,6 +177,7 @@ private:
     std::atomic<bool> m_passInteractive{false};
     std::mutex m_sceneMutex;
     std::atomic<uint64_t> m_sceneVersion{1}; ///< setScene ve yerinde düzenlemede artar
+    std::atomic<uint32_t> m_pendingUpdateKind{static_cast<uint32_t>(SceneUpdateKind::Full)};
 
     // ── yalnız render thread'i ──
     std::unique_ptr<RenderDevice> m_device;

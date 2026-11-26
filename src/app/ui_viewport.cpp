@@ -681,13 +681,16 @@ void Application::prepareRealtime(const AABB& box) {
     }
     rt.exposure = std::exp2(m_s.settings.exposure);
     whiteBalanceMatrix(m_s.imager.whiteBalanceK, m_s.imager.tint, rt.whiteBalance);
+    rt.imager = m_s.imager;
     rt.background = static_cast<int>(e.background.mode);
     rt.backgroundColor = e.background.color;
 
-    // Işıklar (+ fiziksel gökte güneş). Zeminin ışıklardan aldığı pay (alt yarıküre radyansı):
+    // Işıklar (+ fiziksel gökte güneş) + IES 1B profil atlası. Zeminin ışıklardan aldığı pay (alt yarıküre radyansı):
     // güneşsiz liste (güneş pişirilen ortamda zaten var), zeminde 9 noktanın ortalaması.
     static const RealtimeEnvironment kNoEnv;
     rt.lights = packRealtimeLights(m_s.lights, rt.env ? *rt.env : kNoEnv, box);
+    RealtimeIesAtlas atlas = buildIesAtlas(rt.lights);
+    rt.iesAtlas = atlas.slices > 0 ? std::make_shared<const RealtimeIesAtlas>(std::move(atlas)) : nullptr;
     rt.groundExtra = Color3f(0.0f);
     if (groundInEnv) {
         const auto noSun = packRealtimeLights(m_s.lights, kNoEnv, box);
@@ -893,19 +896,43 @@ void Application::drawViewportOverlay(const ImVec2& origin, const ImVec2& size) 
         dl->ChannelsMerge();
     }
 
-    // ── Sağ üst: ilerleme rozeti (GPU modunda: mod adı ve üçgen sayısı) ──
+    // ── Sağ üst: canlı stüdyo HUD rozeti (cihaz, M örnek/sn, VRAM, Guiding/MB/OIDN) ──
     const ViewportStats st = m_s.viewport.stats();
-    char line1[64], line2[96];
+    char line1[128], line2[192];
     if (isRasterMode(m_s.viewMode)) {
         std::snprintf(line1, sizeof(line1), "%s", viewModeName(m_s.viewMode));
-        std::snprintf(line2, sizeof(line2), "GPU  •  %s üçgen", ui::formatCount(m_rasterTris).c_str());
+        if (m_s.viewMode == ViewMode::Realtime) {
+            std::snprintf(line2, sizeof(line2), "GPU v2 (LTC·GTAO·SSR)  •  %s üçgen", ui::formatCount(m_rasterTris).c_str());
+        } else {
+            std::snprintf(line2, sizeof(line2), "GPU  •  %s üçgen", ui::formatCount(m_rasterTris).c_str());
+        }
     } else {
-        if (st.targetSpp > 0) std::snprintf(line1, sizeof(line1), "%d / %d örnek", st.spp, st.targetSpp);
-        else std::snprintf(line1, sizeof(line1), "%d örnek", st.spp);
-        std::snprintf(line2, sizeof(line2), "%s%s%s%s%s", st.deviceKind.c_str(), st.deviceKind.empty() ? "" : "  •  ",
-                      ui::formatDuration(st.seconds).c_str(),
-                      st.interactive ? "  •  hareket" : (st.denoised ? "  •  OIDN" : ""),
-                      m_s.viewMode == ViewMode::Clay ? "  •  kil" : "");
+        std::string backend = st.deviceKind.empty() ? "CPU" : st.deviceKind;
+        if (!st.gpuModeLabel.empty()) backend += " " + st.gpuModeLabel;
+        if (st.targetSpp > 0) {
+            if (st.msamplesPerSec > 0.01)
+                std::snprintf(line1, sizeof(line1), "%d / %d örnek  •  %.1f M örnek/sn", st.spp, st.targetSpp, st.msamplesPerSec);
+            else
+                std::snprintf(line1, sizeof(line1), "%d / %d örnek", st.spp, st.targetSpp);
+        } else {
+            if (st.msamplesPerSec > 0.01)
+                std::snprintf(line1, sizeof(line1), "%d örnek  •  %.1f M örnek/sn", st.spp, st.msamplesPerSec);
+            else
+                std::snprintf(line1, sizeof(line1), "%d örnek", st.spp);
+        }
+        std::string sub = backend + "  •  " + ui::formatDuration(st.seconds);
+        if (st.deviceMemoryBytes > 0 && st.deviceKind != "CPU") {
+            char vram[32];
+            std::snprintf(vram, sizeof(vram), "  •  %.1f GB",
+                          static_cast<double>(st.deviceMemoryBytes) / (1024.0 * 1024.0 * 1024.0));
+            sub += vram;
+        }
+        if (st.pathGuiding) sub += "  •  Guiding";
+        if (st.motionBlur) sub += "  •  MB";
+        if (st.interactive) sub += "  •  hareket";
+        else if (st.denoised) sub += "  •  OIDN";
+        if (m_s.viewMode == ViewMode::Clay) sub += "  •  kil";
+        std::snprintf(line2, sizeof(line2), "%s", sub.c_str());
     }
     const ImVec2 t1 = ImGui::CalcTextSize(line1);
     const ImVec2 t2 = ImGui::CalcTextSize(line2);

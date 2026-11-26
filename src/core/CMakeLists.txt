@@ -9,11 +9,13 @@ add_library(photon_core STATIC)
 target_sources(photon_core PRIVATE
     math/vec.cpp
     math/transform.cpp
+    math/quat.cpp
     color/transfer.cpp
     color/spectral.cpp
     image/film.cpp
     image/image.cpp
     image/image_io.cpp
+    image/cryptomatte.cpp
     image/tone_mapping.cpp
     image/imager.cpp
     image/pixel_filter.cpp

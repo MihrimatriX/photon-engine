@@ -205,7 +205,7 @@ public:
     void pasteMaterial();
     template <typename F>
     void editLive(F&& fn) {
-        m_s.viewport.edit(std::forward<F>(fn), true);
+        m_s.viewport.edit(std::forward<F>(fn), true, SceneUpdateKind::Materials);
         m_s.documentDirty = true;
     }
 
@@ -252,6 +252,7 @@ private:
     void drawRenderDialog();
     void drawAboutWindows();
     void drawDocumentDialogs();
+    void drawCommandPalette();
 
     // ── Otomatik kayıt ve kurtarma (scene_ops.cpp) ──
     static constexpr float kAutosaveSeconds = 120.0f;

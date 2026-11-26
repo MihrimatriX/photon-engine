@@ -1,0 +1,312 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#ifdef PHOTON_USE_RAY_QUERY
+#extension GL_EXT_ray_query : require
+#endif
+
+#include "pathtracer_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+void insertCrypto(inout float ids[4], inout float cnts[4], float h) {
+    if (h == 0.0) return;
+    for (int i = 0; i < 4; ++i) {
+        if (ids[i] == h) {
+            cnts[i] += 1.0;
+            return;
+        }
+        if (cnts[i] == 0.0) {
+            ids[i] = h;
+            cnts[i] = 1.0;
+            return;
+        }
+    }
+}
+
+void main() {
+    uint px = gl_GlobalInvocationID.x;
+    uint py = gl_GlobalInvocationID.y;
+    if (px >= u.dims.x || py >= u.dims.y) return;
+    uint pixIdx = py * u.dims.x + px;
+
+    bool wantAovs = u.flags.x != 0u;
+    bool wantPasses = u.flags.y != 0u;
+    uint nGroups = min(u.flags.z, 16u);
+    uint bgMode = u.envInfo.z;
+    uint maxBounces = u.counts.w;
+    float clampInd = u.camVert_clamp.w;
+
+    vec3 sumL = vec3(0.0);
+    vec3 sumAlb = vec3(0.0);
+    vec3 sumNorm = vec3(0.0);
+    float sumAlpha = 0.0;
+    float sumDepth = 0.0;
+    vec3 sumPos = vec3(0.0);
+    vec3 sumObjId = vec3(0.0);
+    uint lastMatHash = 0u;
+
+    vec3 sumPass[8];
+    vec3 sumLG[16];
+    float cObjIds[4]; float cObjCnt[4];
+    float cMatIds[4]; float cMatCnt[4];
+    if (wantPasses) {
+        for (int i = 0; i < 8; ++i) sumPass[i] = vec3(0.0);
+        for (int i = 0; i < 16; ++i) sumLG[i] = vec3(0.0);
+        for (int i = 0; i < 4; ++i) {
+            cObjIds[i] = 0.0; cObjCnt[i] = 0.0;
+            cMatIds[i] = 0.0; cMatCnt[i] = 0.0;
+        }
+    }
+
+    uint sampleCount = u.dims.w;
+    uint firstSample = u.dims.z;
+    uint nExplicit = u.counts.z;
+    bool hasEnv = (u.flags.w & 2u) != 0u;
+    uint totalLights = nExplicit + (hasEnv ? 1u : 0u);
+    float lightPmfAll = totalLights > 0u ? (1.0 / float(totalLights)) : 0.0;
+
+    for (uint s = 0u; s < sampleCount; ++s) {
+        uint rng = initRng(px, py, firstSample + s);
+        vec3 ro, rd;
+        float rayTime;
+        generateCameraRay(px, py, rng, ro, rd, rayTime);
+
+        vec3 L = vec3(0.0);
+        vec3 throughput = vec3(1.0);
+        bool specBounce = true;
+        bool camRay = true;
+        uint visMask = VIS_CAMERA;
+        float lastBsdfPdf = 0.0;
+        vec3 lastPoint = ro;
+        vec3 lastNormal = vec3(0.0, 1.0, 0.0);
+        uint prevSlot = 0u;
+        uint diffBounces = 0u;
+        vec3 firstLobe0 = vec3(1.0);
+        vec3 firstLobe1 = vec3(0.0);
+        vec3 firstLobe2 = vec3(0.0);
+        bool firstSeg = true;
+
+        for (uint bounce = 0u; bounce <= maxBounces; ++bounce) {
+            HitInfo hi = traceScene(ro, rd, 1e-4, INF_T, rayTime, visMask, camRay);
+
+            // Opaklık kesiği atlaması
+            for (int skip = 0; hi.hit && skip < 16; ++skip) {
+                SurfHit tmpSh = resolveHit(hi, ro, rd, rayTime);
+                ResolvedMat tmpRm = resolveMaterial(tmpSh.matIdx, tmpSh);
+                if (tmpRm.opacity >= 0.999 || rand1(rng) < tmpRm.opacity) break;
+                ro = offsetOrigin(tmpSh.p, tmpSh.ng, rd);
+                hi = traceScene(ro, rd, 1e-4, INF_T, rayTime, visMask, camRay);
+            }
+
+            if (!hi.hit) {
+                if (firstSeg && wantAovs) {
+                    vec3 bg = bgMode == 1u ? u.bgColor_filter.rgb : evalEnvironment(rd);
+                    sumAlb += clamp(bg, vec3(0.0), vec3(1.0));
+                }
+                if (bounce == 0u && bgMode != 0u) {
+                    if (bgMode == 1u) {
+                        vec3 added = throughput * u.bgColor_filter.rgb;
+                        if (isFiniteVec3(added)) {
+                            L += added;
+                            if (wantPasses) {
+                                sumPass[7] += added;
+                                if (nGroups > 0u) sumLG[min(u.envInfo.w, nGroups - 1u)] += added;
+                            }
+                        }
+                    }
+                    break;
+                }
+                if (hasEnv) {
+                    vec3 Le = evalEnvironment(rd);
+                    float w = 1.0;
+                    if (!specBounce) {
+                        float lPdf = envNeePdf(rd, lastNormal);
+                        w = powerHeuristic(1.0, lastBsdfPdf, 1.0, lPdf);
+                    }
+                    vec3 c = throughput * Le * w;
+                    if (diffBounces >= 2u && clampInd > 0.0) {
+                        float mx = max(c.r, max(c.g, c.b));
+                        if (mx > clampInd) c *= clampInd / mx;
+                    }
+                    if (isFiniteVec3(c)) {
+                        L += c;
+                        if (wantPasses) {
+                            if (bounce == 0u) sumPass[7] += c;
+                            else {
+                                bool dir = (bounce == 1u);
+                                sumPass[dir ? 0 : 1] += c * firstLobe0;
+                                sumPass[dir ? 2 : 3] += c * firstLobe1;
+                                sumPass[dir ? 4 : 5] += c * firstLobe2;
+                            }
+                            if (nGroups > 0u) sumLG[min(u.envInfo.w, nGroups - 1u)] += c;
+                        }
+                    }
+                }
+                break;
+            }
+
+            SurfHit sh = resolveHit(hi, ro, rd, rayTime);
+            ResolvedMat rm = resolveMaterial(sh.matIdx, sh);
+            vec3 wo = -rd;
+
+            if (firstSeg) {
+                firstSeg = false;
+                if (wantAovs) {
+                    sumAlb += clamp(rm.baseColor, vec3(0.0), vec3(1.0));
+                    sumNorm += sh.n;
+                    sumAlpha += 1.0;
+                    sumDepth += hi.t;
+                    sumPos += sh.p;
+                }
+                if (wantPasses) {
+                    sumObjId += sh.objColor;
+                    lastMatHash = sh.matIdHash;
+                    insertCrypto(cObjIds, cObjCnt, sh.cryptoObj);
+                    insertCrypto(cMatIds, cMatCnt, sh.cryptoMat);
+                }
+            }
+
+            // Yayıcı isabeti (Light Linking MIS uyumlu)
+            if (max(rm.emission.r, max(rm.emission.g, rm.emission.b)) > 0.0) {
+                bool linked = (bounce == 0u) || (sh.emitterIdx < 0) || isLightLinked(uint(sh.emitterIdx), prevSlot);
+                if (linked) {
+                    float w = 1.0;
+                    if (!specBounce && sh.emitterIdx >= 0) {
+                        float lPdf = lightPmfAll * lightPdfHit(uint(sh.emitterIdx), lastPoint, sh.p);
+                        if (lPdf > 0.0 && lastBsdfPdf > 0.0) w = powerHeuristic(1.0, lastBsdfPdf, 1.0, lPdf);
+                    }
+                    vec3 c = throughput * rm.emission * w;
+                    if (diffBounces >= 2u && clampInd > 0.0) {
+                        float mx = max(c.r, max(c.g, c.b));
+                        if (mx > clampInd) c *= clampInd / mx;
+                    }
+                    if (isFiniteVec3(c)) {
+                        L += c;
+                        if (wantPasses) {
+                            if (bounce == 0u) sumPass[6] += c;
+                            else {
+                                bool dir = (bounce == 1u);
+                                sumPass[dir ? 0 : 1] += c * firstLobe0;
+                                sumPass[dir ? 2 : 3] += c * firstLobe1;
+                                sumPass[dir ? 4 : 5] += c * firstLobe2;
+                            }
+                            if (nGroups > 0u) {
+                                uint gIdx = 0u;
+                                if (sh.emitterIdx >= 0) {
+                                    gIdx = (floatBitsToUint(lights[sh.emitterIdx].pos_type.w) >> 8u) & 0xFFu;
+                                }
+                                sumLG[min(gIdx, nGroups - 1u)] += c;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (bounce >= maxBounces) break;
+
+            // Doğrudan ışık örneklemesi (NEE + MIS)
+            bool deltaMat = isMatDelta(rm);
+            if (totalLights > 0u && !deltaMat) {
+                LightSampleGpu ls = sampleOneLight(sh.p, sh.n, sh.linkSlot, rng);
+                if (ls.valid) {
+                    vec3 fT, fd, fsp, ftr;
+                    float bPdf;
+                    evalBsdf(rm, wo, ls.wi, sh, fT, bPdf, fd, fsp, ftr);
+                    float cosT = abs(dot(ls.wi, sh.n));
+                    if (cosT > 0.0 && max(fT.r, max(fT.g, fT.b)) > 0.0) {
+                        vec3 shO = offsetOrigin(sh.p, sh.ng, ls.wi);
+                        vec3 vis = traceShadowTransmittance(shO, ls.wi, ls.dist, rayTime, ls.lightIdx);
+                        if (max(vis.r, max(vis.g, vis.b)) > 0.0) {
+                            float w = ls.delta ? 1.0 : powerHeuristic(1.0, ls.pdf, 1.0, bPdf);
+                            vec3 c = throughput * fT * ls.Li * vis * (cosT * w / ls.pdf);
+                            if (diffBounces >= 1u && clampInd > 0.0) {
+                                float mx = max(c.r, max(c.g, c.b));
+                                if (mx > clampInd) c *= clampInd / mx;
+                            }
+                            if (isFiniteVec3(c)) {
+                                L += c;
+                                if (wantPasses) {
+                                    if (nGroups > 0u) sumLG[min(ls.groupIdx, nGroups - 1u)] += c;
+                                    if (bounce == 0u) {
+                                        vec3 ssum = fd + fsp + ftr;
+                                        vec3 fr0 = vec3(ssum.r > 0.0 ? fd.r / ssum.r : 1.0, ssum.g > 0.0 ? fd.g / ssum.g : 1.0, ssum.b > 0.0 ? fd.b / ssum.b : 1.0);
+                                        vec3 fr1 = vec3(ssum.r > 0.0 ? fsp.r / ssum.r : 0.0, ssum.g > 0.0 ? fsp.g / ssum.g : 0.0, ssum.b > 0.0 ? fsp.b / ssum.b : 0.0);
+                                        vec3 fr2 = vec3(ssum.r > 0.0 ? ftr.r / ssum.r : 0.0, ssum.g > 0.0 ? ftr.g / ssum.g : 0.0, ssum.b > 0.0 ? ftr.b / ssum.b : 0.0);
+                                        sumPass[0] += c * fr0;
+                                        sumPass[2] += c * fr1;
+                                        sumPass[4] += c * fr2;
+                                    } else {
+                                        sumPass[1] += c * firstLobe0;
+                                        sumPass[3] += c * firstLobe1;
+                                        sumPass[5] += c * firstLobe2;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // BSDF örneklemesi
+            BsdfSampleGpu bs = sampleBsdf(rm, wo, sh, rng);
+            if (!bs.valid) break;
+            if (bs.passThrough) {
+                throughput *= bs.f * (abs(dot(bs.wi, sh.n)) / bs.pdf);
+                if (!isFiniteVec3(throughput)) break;
+                ro = offsetOrigin(sh.p, sh.ng, bs.wi);
+                rd = bs.wi;
+                continue;
+            }
+
+            if (wantPasses && bounce == 0u) {
+                firstLobe0 = bs.lobeFrac0;
+                firstLobe1 = bs.lobeFrac1;
+                firstLobe2 = bs.lobeFrac2;
+            }
+
+            float cosT = abs(dot(bs.wi, sh.n));
+            throughput *= bs.f * (cosT / bs.pdf);
+            if (!isFiniteVec3(throughput)) break;
+
+            lastBsdfPdf = bs.pdf;
+            lastPoint = sh.p;
+            lastNormal = sh.n;
+            prevSlot = sh.linkSlot;
+            specBounce = bs.delta;
+            if (!bs.delta) ++diffBounces;
+            camRay = camRay && bs.delta && bs.refracted;
+
+            if (bs.refracted) visMask = VIS_TRANSMISSION;
+            else if (bs.delta || luminance(bs.lobeFrac1) > luminance(bs.lobeFrac0)) visMask = VIS_GLOSSY;
+            else visMask = VIS_DIFFUSE;
+
+            ro = offsetOrigin(sh.p, sh.ng, bs.wi);
+            rd = bs.wi;
+
+            if (bounce >= 3u) {
+                float pRR = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.05, 0.99);
+                if (rand1(rng) >= pRR) break;
+                throughput /= pRR;
+            }
+        }
+
+        if (isFiniteVec3(L)) sumL += max(L, vec3(0.0));
+    }
+
+    outBeauty[pixIdx] = vec4(sumL, float(sampleCount));
+    if (wantAovs) {
+        outAovs[pixIdx * 3u + 0u] = vec4(sumAlb, sumAlpha);
+        outAovs[pixIdx * 3u + 1u] = vec4(sumNorm, sumDepth);
+        outAovs[pixIdx * 3u + 2u] = vec4(sumPos, 0.0);
+    }
+    if (wantPasses) {
+        uint base = pixIdx * PASS_STRIDE;
+        for (uint i = 0u; i < 8u; ++i) outPasses[base + i] = vec4(sumPass[i], 0.0);
+        for (uint i = 0u; i < 16u; ++i) outPasses[base + 8u + i] = vec4(sumLG[i], 0.0);
+        outPasses[base + 24u] = vec4(sumObjId, uintBitsToFloat(lastMatHash));
+        outPasses[base + 25u] = vec4(cObjIds[0], cObjCnt[0], cObjIds[1], cObjCnt[1]);
+        outPasses[base + 26u] = vec4(cObjIds[2], cObjCnt[2], cObjIds[3], cObjCnt[3]);
+        outPasses[base + 27u] = vec4(cMatIds[0], cMatCnt[0], cMatIds[1], cMatCnt[1]);
+        outPasses[base + 28u] = vec4(cMatIds[2], cMatCnt[2], cMatIds[3], cMatCnt[3]);
+    }
+}

@@ -125,23 +125,22 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - Temizlik: kullanılmayan `quaternion.h` silindi (F1.26). F6.9, F7.1 kutuları gerçeğe getirildi.
   - **Dikkat:** GitHub'da etiket ve sürüm yok; sitenin İndir düğmeleri `releases/latest` adresine gidiyor. `v0.3.0` etiketi atılırsa CI paketi üretip yayımlar.
   - Bu makinede `gh` ve Python yok; GitHub sorguları `Invoke-RestMethod` ile.
+- **2026-11-26 (oturum 10, bulut, v0.4.0 + v0.5.0 Stüdyo Prodüksiyon Sprinti, dal `feat/v0.5.0`):**
+  - **M1 — Temeller, OpenPBR & Kompakt Mipmap:** Birleşik OpenPBR / glTF 2.0 (`ior`, `specularTransmission`, `coatIor`, `coatTint`, `sheenColor`), 8-bit kompakt mipmap dokular (~%83 bellek tasarrufu) ve Ray Cone LOD (`TextureMipMap`, RTG §20).
+  - **M2 — BLAS/TLAS Instancing, Görünürlük, Işık/Gölge Bağlama & Motion Blur:** Embree 4 + CPU `SceneInstance` BLAS/TLAS instancing, nesne başına ışın görünürlük maskesi (`VisCamera|Diffuse|Glossy|Transmission|Shadow`), `LightLinkSet` ışık ve gölge bağlama, kamera + nesne doğrusal hareket bulanıklığı (`TransformTrack`, enstantane açısı).
+  - **M3 — Prodüksiyon Geçişleri & Path Guiding:** Psyop Cryptomatte 1.2.0 (`CryptoObject`/`CryptoMaterial` + MurmurHash3-32 manifest), ışık grupları (`LG_*` EXR katmanları), Müller 2017 SD-Tree Path Guiding (`GuidingField`).
+  - **M4 — GPU Engine v2:** Vulkan SDK derleme bağımlılığı olmadan dinamik yükleyicili (`vulkan_abi.h`) Vulkan 1.1 Compute SAH BVH2 + 4 aşamalı Wavefront + `VK_KHR_ray_query` Donanım RT shader'ları (önceden derlenmiş SPIR-V başlıkları repoda), eşzamanlı `HybridDevice` (GPU+CPU) ve artımlı `updateScene(Materials|Lights|Transforms)` + FNV-1a BLAS önbelleği.
+  - **M5 — Gerçek Zamanlı OpenGL 3.3 Viewport v2:** Heitz 2016 64×64 LTC dikdörtgen alan ışıkları (`ltc_lut.*`), Spot IES 1D dokulu atlas, Jimenez 2016 GTAO + çift yanlı bulanıklaştırma, 5 seviyeli Hi-Z SSR, 5 seviyeli Jimenez/Karis HDR Bloom ve CPU ile birebir GPU Imager + 64³ ToneLut kompoziti.
+  - **M6 — Stüdyo UX & v0.5.0:** `Ctrl+K` Türkçe bulanık aramalı Komut Paleti (40+ eylem), canlı viewport performans HUD'u (`Vulkan RT/WF/Compute` / `Hibrit` / `CPU`, M örnek/sn, VRAM, bayraklar), Özellikler ve Render panellerinde OpenPBR, ışın görünürlüğü, ışık/gölge bağlama, ışık grubu, Motion Blur, Path Guiding ve GPU modu denetimleri. Sürüm `0.5.0`.
 - **Sıradaki adımlar:**
-  - Gerçek zamanlı mod: LTC alan ışıkları, SSR, GTAO, TAA, imager efektleri, IES dokusu (`docs/EKSIK_ANALIZI.md`).
   - Gerçek 3ds Max / Maya / Blender ile canlı bağlantı ve doğrudan açma denemesi (bu ortamda yok); Windows'ta `CreateProcessW` yolu.
-  - `docs/EKSIK_ANALIZI.md` öncelik 1: GPU (CUDA), path guiding (Open PGL), doku belleği + mipmap, BLAS/TLAS.
-  - OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli.
-  - Kostikler: cam arkası ve delta ışık + parlak yüzey yolları hâlâ gürültülü (parlama sınırı geçici çözüm). Path guiding (Open PGL) ya da MNEE.
-  - Render geçişleri (AOV'ler, ışık grupları, çok katmanlı EXR, Cryptomatte); ışık bağlama; yansımada görünürlük bayrağı.
-  - GPU (Faz 9).
-  - Pullar ve kutu eşleme dünya uzayında (nesne hareket edince kayar).
-  - GPU Katı modunda dokular ve ışıklar yok (yalnız taban rengi).
+  - Gerçek zamanlı mod: TAA (zamansal kenar yumuşatma) ve GPU Katı modunda doku/ışık desteği.
+  - OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli; yüksek performanslı RTX/RDNA kartlarda Vulkan RT benchmark ölçümü ve `bench/BASELINE.md` güncellemesi.
+  - Pullar ve kutu eşleme dünya uzayında (nesne hareket edince kayar) → nesne uzayı.
   - Tutamaç sürüklenirken Esc ile iptal (şimdilik Ctrl+Z).
-  - Kurulum paketi (Inno Setup, makinede yok), kod imzalama, log + çökme dökümü (eksik analizi "Faz 1").
-  - Embree sonrası ölçüm ve `bench/BASELINE.md` (F2.13).
-  - F2.6/F2.7 furnace + chi-kare testleri; F2.8 golden görüntüler.
-  - F3.8 malzeme ID tablosu / geometri önbelleği: büyük modelde ışık-ortam düzenlemesi tüm sahneyi yeniden bake ediyor. Faz 6 TLAS/BLAS (Embree instancing) ile birlikte.
-  - Kutu eşleme dünya uzayında (nesne taşınınca doku kayar) → nesne uzayı.
-  - TODO(human) öğrenme maddeleri bu oturumda kullanıcı yokken Claude tarafından yazıldı (kullanıcı isteği: "tüm işleri sen yap"). İstenirse ilgili fonksiyonlar egzersiz olarak yeniden boşaltılabilir.
+  - Kurulum paketi (Inno Setup, makinede yok), kod imzalama, log + çökme dökümü.
+  - F2.8 golden görüntüler; `v0.5.0` etiketi ile GitHub Release yayımlama.
+  - TODO(human) öğrenme maddeleri önceki oturumda kullanıcı isteğiyle tamamlandı; istenirse ilgili fonksiyonlar egzersiz olarak yeniden boşaltılabilir.
 
 ## Kaynaklar (CG/CGI pipeline)
 

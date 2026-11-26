@@ -176,6 +176,7 @@ struct AppState {
     bool showRenderDialog = false;
     bool showAbout = false;
     bool showShortcuts = false;
+    bool showCommandPalette = false;
     int leftTab = 0;
     int rightTab = 0;
     int gizmoOp = 0;               ///< 0 yok, 1 taşı, 2 döndür, 3 ölçekle

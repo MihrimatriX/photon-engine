@@ -108,6 +108,34 @@ float Film::relativeError(int x, int y) const {
     return std::sqrt(var / static_cast<float>(n)) / (std::max(mean, 0.0f) + 0.01f);
 }
 
+void Film::merge(const Film& other) {
+    if (other.m_width != m_width || other.m_height != m_height) return;
+    for (size_t i = 0; i < m_sum.size(); ++i) m_sum[i] += other.m_sum[i];
+    for (size_t i = 0; i < m_count.size(); ++i) m_count[i] += other.m_count[i];
+    for (size_t i = 0; i < m_sumSq.size(); ++i) m_sumSq[i] += other.m_sumSq[i];
+    m_rejected.fetch_add(other.rejectedSamples(), std::memory_order_relaxed);
+}
+
+void Film::addBatch(int x, int y, const Color3f& sumRadiance, uint32_t sampleCount, bool allowSigned) {
+    if (sampleCount == 0 || x < 0 || x >= m_width || y < 0 || y >= m_height) return;
+    const size_t flat = flatIndex(x, y);
+    m_count[flat] += sampleCount;
+    const bool ok = finite3(sumRadiance.r, sumRadiance.g, sumRadiance.b) &&
+                    (allowSigned || (sumRadiance.r >= 0.0f && sumRadiance.g >= 0.0f && sumRadiance.b >= 0.0f));
+    if (!ok) {
+        m_rejected.fetch_add(sampleCount, std::memory_order_relaxed);
+        return;
+    }
+    float* s = &m_sum[flat * 3];
+    s[0] += sumRadiance.r;
+    s[1] += sumRadiance.g;
+    s[2] += sumRadiance.b;
+    if (!allowSigned) {
+        const float avgLum = sumRadiance.luminance() / static_cast<float>(sampleCount);
+        m_sumSq[flat] += avgLum * avgLum * static_cast<float>(sampleCount);
+    }
+}
+
 Image Film::resolve() const {
     Image out(m_width, m_height);
     for (int y = 0; y < m_height; ++y) {

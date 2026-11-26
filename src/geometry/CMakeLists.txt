@@ -4,6 +4,7 @@ add_library(photon_geometry STATIC
     sphere.cpp
     triangle.cpp
     mesh.cpp
+    mesh_instance.cpp
     bvh.cpp
 )
 

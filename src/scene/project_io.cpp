@@ -27,6 +27,7 @@
 #include <fstream>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace photon {
 
@@ -193,6 +194,7 @@ std::shared_ptr<Material> materialFromJson(const json& j, const fs::path& base) 
 struct SaveCtx {
     PathMap paths;
     std::unordered_map<const Material*, int> materialIndex;
+    std::unordered_set<uint64_t> linkedUids;
     json materials = json::array();
 
     int materialId(const std::shared_ptr<Material>& m) {
@@ -210,7 +212,17 @@ json nodeJson(const SceneNode& n, SaveCtx& ctx, bool insideSource) {
     json j;
     j["name"] = n.name;
     j["visible"] = n.visible;
+    if (n.visibilityMask != VisAll) j["visibility"] = static_cast<int>(n.visibilityMask);
+    if (ctx.linkedUids.count(n.uid) > 0) j["linkUid"] = n.uid;
     j["xf"] = transformJson(n.localTransform);
+    if (!n.transformTrack.empty()) {
+        json keys = json::array();
+        for (const TransformKey& k : n.transformTrack.keys) {
+            keys.push_back({{"t", k.time}, {"p", vec3(k.pos)}, {"r", vec3(k.rotEulerDeg)}, {"s", vec3(k.scale)}});
+        }
+        j["transformKeys"] = std::move(keys);
+        if (!n.transformTrack.smooth) j["transformSmooth"] = false;
+    }
     switch (n.type) {
         case SceneNodeType::Group: j["type"] = "group"; break;
         case SceneNodeType::Mesh: j["type"] = "mesh"; break;
@@ -249,13 +261,31 @@ json nodeJson(const SceneNode& n, SaveCtx& ctx, bool insideSource) {
 struct LoadCtx {
     fs::path base;
     std::vector<std::shared_ptr<Material>> materials;
+    std::unordered_map<uint64_t, uint64_t> uidRemap;
     std::vector<std::string> warnings;
 };
 
 void applyCommon(SceneNode& n, const json& j, LoadCtx& ctx) {
     n.name = j.value("name", n.name);
     n.visible = j.value("visible", true);
+    n.visibilityMask = static_cast<uint8_t>(j.value("visibility", static_cast<int>(VisAll)) & VisAll);
+    if (auto lu = j.find("linkUid"); lu != j.end() && lu->is_number_unsigned()) {
+        ctx.uidRemap[lu->get<uint64_t>()] = n.uid;
+    }
     n.localTransform = readTransform(j);
+    n.transformTrack = TransformTrack{};
+    if (auto tk = j.find("transformKeys"); tk != j.end() && tk->is_array()) {
+        n.transformTrack.smooth = j.value("transformSmooth", true);
+        for (const auto& kj : *tk) {
+            if (!kj.is_object()) continue;
+            TransformKey k;
+            k.time = kj.value("t", 0.0f);
+            k.pos = readVec3(kj, "p", Vec3f(0.0f));
+            k.rotEulerDeg = readVec3(kj, "r", Vec3f(0.0f));
+            k.scale = readVec3(kj, "s", Vec3f(1.0f));
+            n.transformTrack.setKey(k);
+        }
+    }
     const int mi = j.value("material", -1);
     if (mi >= 0 && mi < static_cast<int>(ctx.materials.size())) n.material = ctx.materials[static_cast<size_t>(mi)];
 }
@@ -390,6 +420,21 @@ const char* lightTypeName(LightDesc::Type t) {
     return "area";
 }
 
+const char* linkModeName(LightLinkSet::Mode m) {
+    switch (m) {
+        case LightLinkSet::Mode::Include: return "include";
+        case LightLinkSet::Mode::Exclude: return "exclude";
+        case LightLinkSet::Mode::All: break;
+    }
+    return "all";
+}
+
+LightLinkSet::Mode linkModeFromName(const std::string& s) {
+    if (s == "include") return LightLinkSet::Mode::Include;
+    if (s == "exclude") return LightLinkSet::Mode::Exclude;
+    return LightLinkSet::Mode::All;
+}
+
 json lightJson(const LightDesc& d, const PathMap& paths) {
     json j;
     j["type"] = lightTypeName(d.type);
@@ -410,10 +455,23 @@ json lightJson(const LightDesc& d, const PathMap& paths) {
         j["coneBlend"] = d.coneBlend;
         if (!d.iesPath.empty()) j["ies"] = paths(d.iesPath);
     }
+    if (!d.lightGroup.empty()) j["lightGroup"] = d.lightGroup;
+    if (!d.lightLink.isDefault()) {
+        json ll;
+        if (d.lightLink.mode != LightLinkSet::Mode::All) {
+            ll["mode"] = linkModeName(d.lightLink.mode);
+            ll["nodes"] = d.lightLink.nodeUids;
+        }
+        if (d.lightLink.shadowMode != LightLinkSet::Mode::All) {
+            ll["shadowMode"] = linkModeName(d.lightLink.shadowMode);
+            ll["shadowNodes"] = d.lightLink.shadowNodeUids;
+        }
+        j["lightLink"] = std::move(ll);
+    }
     return j;
 }
 
-LightDesc lightFromJson(const json& j, const fs::path& base) {
+LightDesc lightFromJson(const json& j, const fs::path& base, const std::unordered_map<uint64_t, uint64_t>& uidRemap) {
     LightDesc d;
     const std::string t = j.value("type", std::string("area"));
     d.type = t == "directional" ? LightDesc::Type::Directional
@@ -436,6 +494,25 @@ LightDesc lightFromJson(const json& j, const fs::path& base) {
     d.coneAngleDeg = j.value("coneAngle", d.coneAngleDeg);
     d.coneBlend = j.value("coneBlend", d.coneBlend);
     d.iesPath = resolvePath(j.value("ies", std::string()), base);
+    d.lightGroup = j.value("lightGroup", std::string());
+    if (auto ll = j.find("lightLink"); ll != j.end() && ll->is_object()) {
+        auto remapList = [&](const char* key) {
+            std::vector<uint64_t> out;
+            if (auto it = ll->find(key); it != ll->end() && it->is_array()) {
+                for (const auto& v : *it) {
+                    if (!v.is_number_unsigned()) continue;
+                    const uint64_t raw = v.get<uint64_t>();
+                    auto r = uidRemap.find(raw);
+                    out.push_back(r != uidRemap.end() ? r->second : raw);
+                }
+            }
+            return out;
+        };
+        d.lightLink.mode = linkModeFromName(ll->value("mode", std::string("all")));
+        d.lightLink.nodeUids = remapList("nodes");
+        d.lightLink.shadowMode = linkModeFromName(ll->value("shadowMode", std::string("all")));
+        d.lightLink.shadowNodeUids = remapList("shadowNodes");
+    }
     return d;
 }
 
@@ -510,6 +587,10 @@ std::string projectJsonText(const SceneGraph& graph, const ProjectData& data, co
     SaveCtx ctx;
     ctx.paths.base = pathFromUtf8(baseDir);
     ctx.paths.hooks = hooks;
+    for (const auto& l : data.lights) {
+        ctx.linkedUids.insert(l.lightLink.nodeUids.begin(), l.lightLink.nodeUids.end());
+        ctx.linkedUids.insert(l.lightLink.shadowNodeUids.begin(), l.lightLink.shadowNodeUids.end());
+    }
     json root;
     root["format"] = "photon-project";
     root["version"] = 2;
@@ -586,7 +667,7 @@ bool loadProjectJson(const std::string& text, const std::string& baseDir, SceneG
         data.camera = root.value("camera", json::object());
         data.render = root.value("render", json::object());
         if (root.contains("environment")) data.environment = environmentFromJson(root["environment"], ctx.base);
-        for (const auto& l : root.value("lights", json::array())) data.lights.push_back(lightFromJson(l, ctx.base));
+        for (const auto& l : root.value("lights", json::array())) data.lights.push_back(lightFromJson(l, ctx.base, ctx.uidRemap));
         data.cameraTracks.clear();
         if (auto an = root.find("animation"); an != root.end() && an->is_object())
             for (const auto& t : an->value("cameraTracks", json::array()))

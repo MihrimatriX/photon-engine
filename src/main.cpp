@@ -61,6 +61,10 @@ struct Options {
     float filterWidth = 0.0f;  ///< ≤ 0 → projedeki / filtrenin varsayılanı
     std::string device = "auto";
     bool listDevices = false;
+    bool motionBlur = false;
+    float shutterAngle = -1.0f; ///< < 0 → projedeki / varsayılan 180°
+    bool guiding = false;
+    std::string gpuMode;        ///< auto|megakernel|wavefront|rt
 };
 
 void usage() {
@@ -68,8 +72,9 @@ void usage() {
                  "              [--res GxY] [--threads N] [--bounces N] [--no-denoise] [--stats stats.json]\n"
                  "              [--noise 0.02] [--min-spp N] [--clamp X] [--time saniye]\n"
                  "              [--filter box|triangle|gaussian|blackman-harris] [--filter-width piksel]\n"
-                 "              [--passes]  (çıktı .exr: render geçişleri tek dosyada)\n"
-                 "              [--device auto|cpu|cuda:0] [--list-devices]\n";
+                 "              [--passes]  (çıktı .exr: render geçişleri, LG_*, Cryptomatte tek dosyada)\n"
+                 "              [--motion-blur] [--shutter 180] [--guiding]\n"
+                 "              [--device auto|cpu|vulkan:0|hybrid] [--gpu-mode auto|megakernel|wavefront|rt] [--list-devices]\n";
 }
 
 void printDevices() {
@@ -129,6 +134,10 @@ int main(int argc, char** argv) {
         else if (a == "--filter-width") o.filterWidth = static_cast<float>(std::atof(next().c_str()));
         else if (a == "--device") o.device = next();
         else if (a == "--list-devices") o.listDevices = true;
+        else if (a == "--motion-blur") o.motionBlur = true;
+        else if (a == "--shutter") o.shutterAngle = static_cast<float>(std::atof(next().c_str()));
+        else if (a == "--guiding") o.guiding = true;
+        else if (a == "--gpu-mode") o.gpuMode = next();
         else if (a == "-h" || a == "--help") { usage(); return 0; }
         else if (!a.empty() && a[0] != '-') o.input = a;
         else { usage(); return 2; }
@@ -214,6 +223,17 @@ int main(int argc, char** argv) {
     if (o.noise > 0.0f) rs.noiseThreshold = o.noise;
     rs.minAdaptiveSamples = o.minSpp;
     rs.clampIndirect = o.clamp >= 0.0f ? o.clamp : data.render.value("clampIndirect", 0.0f);
+    rs.motionBlur = o.motionBlur || data.render.value("motionBlur", false);
+    rs.shutterAngle = std::clamp(o.shutterAngle >= 0.0f ? o.shutterAngle : data.render.value("shutterAngle", 180.0f),
+                                 0.0f, 360.0f);
+    rs.pathGuiding = o.guiding || data.render.value("pathGuiding", false);
+    {
+        const std::string gm = !o.gpuMode.empty() ? o.gpuMode : data.render.value("gpuMode", std::string("auto"));
+        if (gm == "megakernel") rs.gpuMode = GpuMode::Megakernel;
+        else if (gm == "wavefront") rs.gpuMode = GpuMode::Wavefront;
+        else if (gm == "rt" || gm == "rayquery") rs.gpuMode = GpuMode::RayQuery;
+        else rs.gpuMode = GpuMode::Auto;
+    }
     {
         // Proje (yoksa kutu: eski projeler öyle render edildi; model/Cornell modunda Blackman–Harris).
         const bool fromProject = !o.cornell && !isSupportedModelFile(o.input);
@@ -270,9 +290,11 @@ int main(int argc, char** argv) {
     bool ok;
     if (ext == ".exr" && o.passes) {
         std::vector<Image> storage;
-        const std::vector<ExrLayer> layers = makeExrLayers(session.passes(), session.aovs(), storage);
+        std::vector<CryptoRankImage> cryptoStorage;
+        const std::vector<ExrLayer> layers = makeExrLayers(session.passes(), session.aovs(), storage, &cryptoStorage);
+        const auto cryptoMeta = makeExrCryptoMetadata(session.passes());
         const Image alpha = session.resolveAlpha();
-        ok = saveMultiLayerEXR(o.out, img, &alpha, layers);
+        ok = saveMultiLayerEXR(o.out, img, &alpha, layers, cryptoMeta);
     } else if (ext == ".exr") ok = saveImageEXR(img, o.out);
     else if (ext == ".jpg" || ext == ".jpeg") ok = saveImageJPG(img, o.out, rs.tmo, rs.exposure);
     else ok = saveImagePNG(img, o.out, rs.tmo, rs.exposure);

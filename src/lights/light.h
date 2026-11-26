@@ -12,7 +12,24 @@
 #include "geometry/surface_interaction.h"
 #include "lights/light_bounds.h"
 
+#include <cstdint>
+#include <string>
+#include <vector>
+
 namespace photon {
+
+/// Işık bağlama (Light Linking & Shadow Linking) kuralı: bir ışığın hangi sahne düğümlerini
+/// aydınlatacağı ve hangi düğümlerin o ışıktan gölge düşüreceği.
+struct LightLinkSet {
+    enum class Mode : uint8_t { All = 0, Include = 1, Exclude = 2 };
+    Mode mode = Mode::All;
+    std::vector<uint64_t> nodeUids;
+    Mode shadowMode = Mode::All;
+    std::vector<uint64_t> shadowNodeUids;
+
+    bool isDefault() const { return mode == Mode::All && shadowMode == Mode::All; }
+    bool operator==(const LightLinkSet&) const = default;
+};
 
 /// @brief Result of sampling a light source from a shading point.
 struct LightSample {
@@ -59,6 +76,18 @@ public:
     /// Işık BVH'si için uzaysal/yönsel sınırlar. Sonsuz uzaktaki ışıklar (ortam, güneş/yönlü)
     /// sınırsızdır ve false döner; onlar BVH'nin dışında ayrıca seçilir.
     virtual bool bounds(LightBounds& /*out*/) const { return false; }
+
+    /// Işık bağlama ve gölge bağlama kümesi (varsayılan: tüm nesneler).
+    void setLightLink(LightLinkSet link) { m_lightLink = std::move(link); }
+    const LightLinkSet& lightLink() const { return m_lightLink; }
+
+    /// EXR ışık grubu adı (boş = varsayılan grup; doluysa LG_<ad> katmanına yazılır).
+    void setLightGroup(std::string group) { m_lightGroup = std::move(group); }
+    const std::string& lightGroup() const { return m_lightGroup; }
+
+private:
+    LightLinkSet m_lightLink;
+    std::string m_lightGroup;
 };
 
 /// Alıcı tarafı kosinüsü: ışık normalin arkasındaysa bile küçük bir pay bırakılır

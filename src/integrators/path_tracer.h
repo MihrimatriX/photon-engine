@@ -11,6 +11,8 @@
 
 namespace photon {
 
+class GuidingField;
+
 /// Işık geçişleri (render passes, compositing): her örneğin katkısı yolun ilk yüzeyindeki lob
 /// grubuna (difüz / parlak / geçirgen) ve doğrudan (ışığa ilk yüzeyden ulaşan) ya da dolaylı
 /// olmasına göre ayrılır; kameranın doğrudan gördüğü yayıcılar Emission, ortam/arka plan
@@ -22,7 +24,9 @@ enum class LightPass : int {
 };
 
 struct LightPasses {
+    static constexpr int kMaxLightGroups = 16;
     Color3f c[static_cast<int>(LightPass::Count)];
+    Color3f lightGroups[kMaxLightGroups]; ///< LG_* ışık grubu katkıları (toplam = Beauty)
 };
 
 /// Geçişin çok katmanlı EXR'deki adı (Cycles/Blender adlandırması).
@@ -69,7 +73,7 @@ public:
     /// ağırlığıyla çarpılmıştır. Kaçış (açık mesh) ya da soğrulma → false.
     static bool randomWalkSubsurface(const Scene& scene, const SurfaceInteraction& entry, const Vec3f& dir,
                                      const SubsurfaceCoeffs& coeffs, Sampler& sampler, Color3f& throughput,
-                                     SurfaceInteraction& exitSi);
+                                     SurfaceInteraction& exitSi, float rayTime = 0.0f);
 
     /// Test kancası: yuvarlatılmış kenar normali (integratörün ilk köşelerde kullandığı hesap).
     static Vec3f roundedEdgeNormalForTest(const Scene& scene, const SurfaceInteraction& isect, float radius,
@@ -79,12 +83,20 @@ public:
     /// @p limit olacak şekilde kırpar. 0 = kapalı. Yanlıdır ama kostik parlamaları söndürür.
     void setClampIndirect(float limit) { m_clampIndirect = limit > 0.0f ? limit : 0.0f; }
 
+    /// SD-Tree Path Guiding alanları: @p sampleField örnekleme (salt-okunur), @p trainField eğitim (atomik).
+    void setGuiding(const GuidingField* sampleField, GuidingField* trainField) {
+        m_sampleGuiding = sampleField;
+        m_trainGuiding = trainField;
+    }
+
 private:
     float m_clampIndirect = 0.0f;
     int m_maxDepth;
     int m_russianRouletteDepth;
     float m_aoStrength;
     int m_shadowQuality;
+    const GuidingField* m_sampleGuiding = nullptr;
+    GuidingField* m_trainGuiding = nullptr;
 };
 
 } // namespace photon

@@ -16,6 +16,7 @@
 #include "core/math/vec.h"
 #include "core/color/spectrum.h"
 #include "core/image/image.h"
+#include "core/image/imager.h"
 #include "geometry/mesh.h"
 #include "scene/realtime_scene.h"
 #include "scene/scene_graph.h"
@@ -67,9 +68,11 @@ public:
     struct Realtime {
         std::shared_ptr<const RealtimeEnvironment> env;   ///< işaretçi değişince GPU'ya yeniden yüklenir
         std::shared_ptr<const ToneLut> lut;
+        std::shared_ptr<const RealtimeIesAtlas> iesAtlas; ///< Spot IES fotometrik profil atlası
         std::vector<RealtimeLight> lights;
         float exposure = 1.0f;                            ///< 2^EV
         float whiteBalance[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+        ImagerSettings imager;                            ///< GPU Imager: bloom, CA, kontrast, doygunluk, vinyet
         int background = 0;                               ///< 0 ortam, 1 düz renk, 2 şeffaf
         Color3f backgroundColor{0.18f};
         bool ground = false;
@@ -124,33 +127,57 @@ private:
     unsigned int texture(const std::shared_ptr<const Image>& image, bool srgb);
     void purge();
     bool ensureTargets(int w, int h);
+    bool ensureHdrTargets(int w, int h);
+    void releaseHdrTargets();
     void renderRealtime(const Frame& f, const std::vector<Item>& items);
     bool ensureShadowTargets();
     void drawMesh(const GpuMesh& g) const;
 
     bool m_ready = false;
-    unsigned int m_progShade = 0;  ///< Katı + normal (uMode ile)
-    unsigned int m_progFlat = 0;   ///< Tek renk (tel kafes, ızgara, derinlik ön geçişi)
-    unsigned int m_progPbr = 0;    ///< Gerçek zamanlı yüzeyler
-    unsigned int m_progDepth = 0;  ///< Gölge haritası
-    unsigned int m_progBg = 0;     ///< Arka plan (ortam ya da renk), tam ekran üçgen
+    unsigned int m_progShade = 0;      ///< Katı + normal (uMode ile)
+    unsigned int m_progFlat = 0;       ///< Tek renk (tel kafes, ızgara, derinlik ön geçişi)
+    unsigned int m_progPbr = 0;        ///< Gerçek zamanlı yüzeyler (v2: HDR MRT + LTC + IES)
+    unsigned int m_progDepth = 0;      ///< Gölge haritası
+    unsigned int m_progBg = 0;         ///< Arka plan (ortam ya da renk), doğrusal HDR
+    unsigned int m_progGtao = 0;       ///< GTAO (Jimenez 2016) ufuk tabanlı AO
+    unsigned int m_progAoBlur = 0;     ///< Derinliğe duyarlı iki taraflı (bilateral) AO süzgeci
+    unsigned int m_progHiZ = 0;        ///< Hi-Z min-Z derinlik piramidi
+    unsigned int m_progSsr = 0;        ///< Hi-Z ekran uzayı yansımaları (SSR)
+    unsigned int m_progBloomDown = 0;  ///< 5 aşamalı HDR Bloom aşağı örnekleme + Karis eşik
+    unsigned int m_progBloomUp = 0;    ///< 5 aşamalı HDR Bloom tent yukarı örnekleme
+    unsigned int m_progPost = 0;       ///< Son birleştirme + GPU Imager + 64³ ToneLut → m_tex
     unsigned int m_quadVao = 0, m_quadVbo = 0, m_quadIbo = 0; ///< Birim zemin dörtgeni (y = 0, x,z ∈ [0,1])
     unsigned int m_emptyVao = 0;
     unsigned int m_envTex = 0, m_lutTex = 0;
+    unsigned int m_ltc1Tex = 0, m_ltc2Tex = 0, m_iesTex = 0;
+    int m_iesSlices = 0;
     int m_envLevels = 1;
     std::weak_ptr<const RealtimeEnvironment> m_envSource;
     std::weak_ptr<const ToneLut> m_lutSource;
+    std::weak_ptr<const RealtimeIesAtlas> m_iesSource;
     unsigned int m_shadowFbo = 0, m_shadowTex = 0;
     unsigned int m_sampCmp = 0, m_sampRaw = 0;            ///< aynı derinlik dokusu: PCF / engelleyici araması
     unsigned int m_glassFbo = 0, m_glassTex = 0;          ///< yalnız camların derinliği (kısmi gölge), ½ çözünürlük
     bool m_shadowOk = false;
     static constexpr int kShadowSize = 2048;              ///< bir ışığın gölge haritası
     static constexpr int kShadowAtlas = 2 * kShadowSize;  ///< 2×2 atlas: en çok 4 gölgeli ışık
+    static constexpr int kBloomLevels = 5;
+    static constexpr int kHiZLevels = 5;
     std::unordered_map<const Image*, GpuTexture> m_textures[2]; ///< [0] doğrusal, [1] sRGB
     unsigned int m_gridVao = 0, m_gridVbo = 0;
     int m_gridVerts = 0;
-    unsigned int m_msFbo = 0, m_msColor = 0, m_msDepth = 0; ///< 4× çok örnekli hedef
-    unsigned int m_fbo = 0, m_tex = 0;                        ///< Çözülmüş (resolve) doku
+    unsigned int m_msFbo = 0, m_msColor = 0, m_msDepth = 0; ///< 4× çok örnekli hedef (Katı/Tel/Normal)
+    unsigned int m_fbo = 0, m_tex = 0;                      ///< Çözülmüş (resolve) son doku
+    // Gerçek zamanlı v2 HDR MRT + ekran uzayı geçiş hedefleri
+    unsigned int m_hdrFbo = 0, m_hdrColor = 0, m_hdrNormRough = 0, m_hdrDepth = 0;
+    unsigned int m_aoFbo = 0, m_aoTex = 0, m_aoBlurFbo = 0, m_aoBlurTex = 0;
+    unsigned int m_hizTex = 0, m_hizFbo[kHiZLevels] = {};
+    unsigned int m_ssrFbo = 0, m_ssrTex = 0;
+    unsigned int m_bloomFbo[kBloomLevels] = {}, m_bloomTex[kBloomLevels] = {};
+    int m_bloomW[kBloomLevels] = {}, m_bloomH[kBloomLevels] = {};
+    int m_hizW[kHiZLevels] = {}, m_hizH[kHiZLevels] = {};
+    int m_hdrW = 0, m_hdrH = 0;
+    bool m_hdrOk = false;
     int m_w = 0, m_h = 0;
     std::unordered_map<const TriangleMesh*, GpuMesh> m_meshes;
 };

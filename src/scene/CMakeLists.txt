@@ -7,11 +7,13 @@ add_library(photon_scene STATIC
     model_import.cpp
     project_io.cpp
     camera_animation.cpp
+    transform_animation.cpp
     mesh_binary.cpp
     package.cpp
     dcc_convert.cpp
     primitives.cpp
     realtime_scene.cpp
+    ltc_lut.cpp
 )
 
 target_link_libraries(photon_scene PUBLIC

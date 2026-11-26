@@ -23,6 +23,13 @@ public:
 
     /// Returns the world-space bounding box of the shape.
     virtual AABB bounds() const = 0;
+
+    /// Işın görünürlük bayrakları (VisCamera | VisDiffuse | VisGlossy | VisTransmission | VisShadow).
+    void setVisibilityMask(uint8_t mask) { m_visibilityMask = mask; }
+    uint8_t visibilityMask() const { return m_visibilityMask; }
+
+private:
+    uint8_t m_visibilityMask = VisAll;
 };
 
 } // namespace photon

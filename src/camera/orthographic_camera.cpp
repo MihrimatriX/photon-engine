@@ -27,4 +27,17 @@ Ray OrthographicCamera::generateRay(float u, float v, const Vec2f&) const {
     return Ray(origin, m_forward);
 }
 
+CameraGpuDesc OrthographicCamera::describeGpu() const {
+    CameraGpuDesc d;
+    d.position = m_lowerLeft + m_horizontal * 0.5f + m_vertical * 0.5f;
+    d.lowerLeft = m_lowerLeft;
+    d.horizontal = m_horizontal;
+    d.vertical = m_vertical;
+    d.u = m_horizontal.lengthSquared() > 0.0f ? m_horizontal.normalized() : Vec3f(1, 0, 0);
+    d.v = m_vertical.lengthSquared() > 0.0f ? m_vertical.normalized() : Vec3f(0, 1, 0);
+    d.forward = m_forward;
+    d.orthographic = true;
+    return d;
+}
+
 } // namespace photon

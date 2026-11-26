@@ -1,6 +1,8 @@
-// embree_accel.cpp — Sahne şekillerini Embree geometrilerine çevirme ve ışın sorguları.
+// embree_accel.cpp — Sahne şekillerini Embree 4 geometrilerine çevirme (BLAS/TLAS instancing,
+// ışın görünürlük maskesi, çok adımlı nesne hareket bulanıklığı) ve ışın sorguları.
 #include "engine/embree_accel.h"
 #include "geometry/mesh.h"
+#include "geometry/mesh_instance.h"
 #include "geometry/triangle.h"
 #include "geometry/shape.h"
 
@@ -8,6 +10,7 @@
 #include <iostream>
 #include <limits>
 #include <mutex>
+#include <unordered_map>
 
 #if defined(PHOTON_HAS_EMBREE)
 #include <embree4/rtcore.h>
@@ -33,10 +36,44 @@ RTCDevice sharedDevice() {
 }
 
 struct GeomInfo {
-    const TriangleMesh* mesh = nullptr;  ///< Üçgen mesh (çoğunluk)
-    const Triangle* triangle = nullptr;  ///< Tek üçgen (alan ışığı dörtgenleri)
-    const Shape* shape = nullptr;        ///< Diğer şekiller (küre): kullanıcı geometrisi
+    const TriangleMesh* mesh = nullptr;       ///< Doğrudan üçgen mesh
+    const MeshInstance* instance = nullptr;   ///< TLAS örneği (paylaşılan BLAS + dönüşüm/hareket)
+    const Triangle* triangle = nullptr;       ///< Tek üçgen (alan ışığı dörtgenleri)
+    const Shape* shape = nullptr;             ///< Diğer şekiller (küre): kullanıcı geometrisi
 };
+
+void fillRowMajor3x4(const Transform& xf, float out[12]) {
+    const Mat4f& m = xf.matrix();
+    out[0] = m(0, 0); out[1] = m(0, 1); out[2]  = m(0, 2); out[3]  = m(0, 3);
+    out[4] = m(1, 0); out[5] = m(1, 1); out[6]  = m(1, 2); out[7]  = m(1, 3);
+    out[8] = m(2, 0); out[9] = m(2, 1); out[10] = m(2, 2); out[11] = m(2, 3);
+}
+
+RTCScene buildMeshBlas(RTCDevice dev, const TriangleMesh& mesh) {
+    const auto& pos = mesh.positions();
+    const auto& idx = mesh.indices();
+    if (pos.empty() || idx.size() < 3) return nullptr;
+    RTCScene blas = rtcNewScene(dev);
+    rtcSetSceneFlags(blas, RTC_SCENE_FLAG_ROBUST);
+    rtcSetSceneBuildQuality(blas, RTC_BUILD_QUALITY_MEDIUM);
+    RTCGeometry g = rtcNewGeometry(dev, RTC_GEOMETRY_TYPE_TRIANGLE);
+    auto* v = static_cast<float*>(rtcSetNewGeometryBuffer(g, RTC_BUFFER_TYPE_VERTEX, 0, RTC_FORMAT_FLOAT3,
+                                                          3 * sizeof(float), pos.size()));
+    for (size_t i = 0; i < pos.size(); ++i) {
+        v[i * 3 + 0] = pos[i].x;
+        v[i * 3 + 1] = pos[i].y;
+        v[i * 3 + 2] = pos[i].z;
+    }
+    auto* ib = static_cast<uint32_t*>(rtcSetNewGeometryBuffer(g, RTC_BUFFER_TYPE_INDEX, 0, RTC_FORMAT_UINT3,
+                                                              3 * sizeof(uint32_t), idx.size() / 3));
+    std::memcpy(ib, idx.data(), (idx.size() / 3) * 3 * sizeof(uint32_t));
+    rtcSetGeometryMask(g, 0xFFFFFFFFu); // maskeleme TLAS örneğinde yapılır
+    rtcCommitGeometry(g);
+    rtcAttachGeometry(blas, g);
+    rtcReleaseGeometry(g);
+    rtcCommitScene(blas);
+    return blas;
+}
 
 // ── Kullanıcı geometrisi (küre vb.) için geri çağrılar ──
 // Embree yalnız kutuyu bilir; kesişimi motorun kendi Shape::intersect'i yapar.
@@ -58,6 +95,8 @@ void userIntersect(const RTCIntersectFunctionNArguments* args) {
     RTCRayHit* rh = reinterpret_cast<RTCRayHit*>(args->rayhit); // N = 1
     Ray r(Vec3f(rh->ray.org_x, rh->ray.org_y, rh->ray.org_z), Vec3f(rh->ray.dir_x, rh->ray.dir_y, rh->ray.dir_z),
           rh->ray.tnear, rh->ray.tfar);
+    r.time = rh->ray.time;
+    r.visibilityMask = static_cast<uint8_t>(rh->ray.mask);
     SurfaceInteraction tmp;
     if (!shape->intersect(r, tmp)) return;
     rh->ray.tfar = tmp.t;
@@ -75,6 +114,8 @@ void userOccluded(const RTCOccludedFunctionNArguments* args) {
     const auto* shape = static_cast<const Shape*>(args->geometryUserPtr);
     RTCRay* ray = reinterpret_cast<RTCRay*>(args->ray);
     Ray r(Vec3f(ray->org_x, ray->org_y, ray->org_z), Vec3f(ray->dir_x, ray->dir_y, ray->dir_z), ray->tnear, ray->tfar);
+    r.time = ray->time;
+    r.visibilityMask = static_cast<uint8_t>(ray->mask);
     SurfaceInteraction tmp;
     if (shape->intersect(r, tmp)) ray->tfar = -std::numeric_limits<float>::infinity();
 }
@@ -83,10 +124,22 @@ void userOccluded(const RTCOccludedFunctionNArguments* args) {
 
 struct EmbreeAccel::Impl {
     RTCScene scene = nullptr;
-    std::vector<GeomInfo> geoms;  // geomID → kaynak
-    ~Impl() {
-        if (scene) rtcReleaseScene(scene);
+    std::unordered_map<const TriangleMesh*, RTCScene> blasCache;
+    std::vector<GeomInfo> geoms;  // TLAS geomID / instID → kaynak
+
+    void clear() {
+        if (scene) {
+            rtcReleaseScene(scene);
+            scene = nullptr;
+        }
+        for (auto& kv : blasCache) {
+            if (kv.second) rtcReleaseScene(kv.second);
+        }
+        blasCache.clear();
+        geoms.clear();
     }
+
+    ~Impl() { clear(); }
 };
 
 EmbreeAccel::EmbreeAccel() : m_impl(std::make_unique<Impl>()) {}
@@ -98,15 +151,15 @@ bool EmbreeAccel::available() {
 
 void EmbreeAccel::build(const std::vector<std::shared_ptr<Shape>>& shapes) {
     RTCDevice dev = sharedDevice();
-    if (m_impl->scene) rtcReleaseScene(m_impl->scene);
-    m_impl->geoms.clear();
+    m_impl->clear();
     m_bounds = AABB::empty();
     RTCScene scene = rtcNewScene(dev);
     // ROBUST: kenarlarda ve köşelerde "su geçirmez" test; ince boşluklardan ışık sızmaz.
     rtcSetSceneFlags(scene, RTC_SCENE_FLAG_ROBUST);
     rtcSetSceneBuildQuality(scene, RTC_BUILD_QUALITY_MEDIUM);
 
-    auto attach = [&](RTCGeometry g, const GeomInfo& info) {
+    auto attach = [&](RTCGeometry g, uint8_t mask, const GeomInfo& info) {
+        rtcSetGeometryMask(g, static_cast<unsigned int>(mask));
         rtcCommitGeometry(g);
         const unsigned id = rtcAttachGeometry(scene, g);
         rtcReleaseGeometry(g);
@@ -117,7 +170,41 @@ void EmbreeAccel::build(const std::vector<std::shared_ptr<Shape>>& shapes) {
     for (const auto& s : shapes) {
         if (!s) continue;
         m_bounds.merge(s->bounds());
-        if (const auto* mesh = dynamic_cast<const TriangleMesh*>(s.get())) {
+        const uint8_t mask = s->visibilityMask();
+
+        if (const auto* inst = dynamic_cast<const MeshInstance*>(s.get())) {
+            const TriangleMesh* mptr = inst->mesh().get();
+            if (!mptr || mptr->positions().empty() || mptr->indices().size() < 3) continue;
+            RTCScene blas = nullptr;
+            auto it = m_impl->blasCache.find(mptr);
+            if (it != m_impl->blasCache.end()) {
+                blas = it->second;
+            } else {
+                blas = buildMeshBlas(dev, *mptr);
+                if (blas) m_impl->blasCache[mptr] = blas;
+            }
+            if (!blas) continue;
+
+            RTCGeometry ig = rtcNewGeometry(dev, RTC_GEOMETRY_TYPE_INSTANCE);
+            rtcSetGeometryInstancedScene(ig, blas);
+            if (inst->hasMotion()) {
+                // 5 SLERP zaman adımı: büyük açılı dönmelerde bile matris daralması olmadan akıcı bulanıklık.
+                constexpr unsigned kMotionSteps = 5;
+                rtcSetGeometryTimeStepCount(ig, kMotionSteps);
+                for (unsigned step = 0; step < kMotionSteps; ++step) {
+                    const float alpha = static_cast<float>(step) / static_cast<float>(kMotionSteps - 1);
+                    float xf[12];
+                    fillRowMajor3x4(inst->transformAt(alpha), xf);
+                    rtcSetGeometryTransform(ig, step, RTC_FORMAT_FLOAT3X4_ROW_MAJOR, xf);
+                }
+            } else {
+                rtcSetGeometryTimeStepCount(ig, 1);
+                float xf[12];
+                fillRowMajor3x4(inst->transform0(), xf);
+                rtcSetGeometryTransform(ig, 0, RTC_FORMAT_FLOAT3X4_ROW_MAJOR, xf);
+            }
+            attach(ig, mask, GeomInfo{nullptr, inst, nullptr, nullptr});
+        } else if (const auto* mesh = dynamic_cast<const TriangleMesh*>(s.get())) {
             const auto& pos = mesh->positions();
             const auto& idx = mesh->indices();
             if (pos.empty() || idx.size() < 3) continue;
@@ -133,7 +220,7 @@ void EmbreeAccel::build(const std::vector<std::shared_ptr<Shape>>& shapes) {
             auto* ib = static_cast<uint32_t*>(rtcSetNewGeometryBuffer(g, RTC_BUFFER_TYPE_INDEX, 0, RTC_FORMAT_UINT3,
                                                                       3 * sizeof(uint32_t), idx.size() / 3));
             std::memcpy(ib, idx.data(), (idx.size() / 3) * 3 * sizeof(uint32_t));
-            attach(g, GeomInfo{mesh, nullptr, nullptr});
+            attach(g, mask, GeomInfo{mesh, nullptr, nullptr, nullptr});
         } else if (const auto* tri = dynamic_cast<const Triangle*>(s.get())) {
             RTCGeometry g = rtcNewGeometry(dev, RTC_GEOMETRY_TYPE_TRIANGLE);
             auto* v = static_cast<float*>(rtcSetNewGeometryBuffer(g, RTC_BUFFER_TYPE_VERTEX, 0, RTC_FORMAT_FLOAT3,
@@ -149,7 +236,7 @@ void EmbreeAccel::build(const std::vector<std::shared_ptr<Shape>>& shapes) {
             ib[0] = 0;
             ib[1] = 1;
             ib[2] = 2;
-            attach(g, GeomInfo{nullptr, tri, nullptr});
+            attach(g, mask, GeomInfo{nullptr, nullptr, tri, nullptr});
         } else {
             RTCGeometry g = rtcNewGeometry(dev, RTC_GEOMETRY_TYPE_USER);
             rtcSetGeometryUserPrimitiveCount(g, 1);
@@ -157,7 +244,7 @@ void EmbreeAccel::build(const std::vector<std::shared_ptr<Shape>>& shapes) {
             rtcSetGeometryBoundsFunction(g, userBounds, nullptr);
             rtcSetGeometryIntersectFunction(g, userIntersect);
             rtcSetGeometryOccludedFunction(g, userOccluded);
-            attach(g, GeomInfo{nullptr, nullptr, s.get()});
+            attach(g, mask, GeomInfo{nullptr, nullptr, nullptr, s.get()});
         }
     }
     rtcCommitScene(scene);
@@ -175,8 +262,8 @@ bool EmbreeAccel::intersect(Ray& ray, SurfaceInteraction& isect) const {
     rh.ray.dir_z = ray.direction.z;
     rh.ray.tnear = ray.tMin;
     rh.ray.tfar = ray.tMax;
-    rh.ray.time = 0.0f;
-    rh.ray.mask = 0xFFFFFFFFu;
+    rh.ray.time = ray.time;
+    rh.ray.mask = static_cast<unsigned int>(ray.visibilityMask);
     rh.ray.id = 0;
     rh.ray.flags = 0;
     rh.hit.geomID = RTC_INVALID_GEOMETRY_ID;
@@ -184,20 +271,31 @@ bool EmbreeAccel::intersect(Ray& ray, SurfaceInteraction& isect) const {
     rtcIntersect1(m_impl->scene, &rh);
     if (rh.hit.geomID == RTC_INVALID_GEOMETRY_ID) return false;
 
-    const GeomInfo& g = m_impl->geoms[rh.hit.geomID];
     const float t = rh.ray.tfar;
+    if (rh.hit.instID[0] != RTC_INVALID_GEOMETRY_ID) {
+        const GeomInfo& g = m_impl->geoms[rh.hit.instID[0]];
+        if (!g.instance) return false;
+        g.instance->shadeInstanceHit(rh.hit.primID, ray, t, rh.hit.u, rh.hit.v, isect);
+        isect.hitObject = g.instance;
+        ray.tMax = t;
+        return true;
+    }
+
+    const GeomInfo& g = m_impl->geoms[rh.hit.geomID];
     if (g.mesh) {
         g.mesh->shadeTriangle(rh.hit.primID, ray, t, rh.hit.u, rh.hit.v, isect);
         isect.hitObject = g.mesh;
     } else if (g.triangle) {
         g.triangle->fillHit(ray, t, rh.hit.u, rh.hit.v, isect);
         isect.hitObject = g.triangle;
-    } else {
+    } else if (g.shape) {
         // Kullanıcı geometrisi: tam yüzey verisi için şeklin kendi testini tekrarla.
         Ray r = ray;
         r.tMax = t * 1.00001f + 1e-6f;
         if (!g.shape->intersect(r, isect)) return false;
         isect.hitObject = g.shape;
+    } else {
+        return false;
     }
     ray.tMax = t;
     return true;
@@ -214,8 +312,8 @@ bool EmbreeAccel::intersectAny(const Ray& ray) const {
     r.dir_z = ray.direction.z;
     r.tnear = ray.tMin;
     r.tfar = ray.tMax;
-    r.time = 0.0f;
-    r.mask = 0xFFFFFFFFu;
+    r.time = ray.time;
+    r.mask = static_cast<unsigned int>(ray.visibilityMask);
     r.id = 0;
     r.flags = 0;
     rtcOccluded1(m_impl->scene, &r);

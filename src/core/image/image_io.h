@@ -65,17 +65,22 @@ bool saveImageEXR(const Image& img, const std::string& path);
 struct ExrLayer {
     std::string name;
     const Image* image = nullptr;
-    const char* suffixes = "RGB"; ///< kanal başına bir harf; uzunluğu kanal sayısıdır ("Z" = tek kanal)
-    bool fullFloat = false;       ///< 32-bit (konum, derinlik); renkler 16-bit half
+    const char* suffixes = "RGB"; ///< kanal başına bir harf; uzunluğu kanal sayısıdır ("Z" = tek kanal, "RGBA" = 4 kanal)
+    bool fullFloat = false;       ///< 32-bit (konum, derinlik, Cryptomatte); renkler 16-bit half
+    const std::vector<float>* rgba4 = nullptr; ///< Doluysa image yerine 4 kanallı (w*h*4) float tampon okunur
 };
 
-/// Beauty (R, G, B ve varsa A) + katmanlar, tek EXR dosyasında, sahne-doğrusal, ZIP sıkıştırmalı.
-/// @p alpha'nın r kanalı kapsamadır; beauty önceden çarpılmış (premultiplied) kabul edilir.
+/// Beauty (R, G, B ve varsa A) + katmanlar + isteğe bağlı metin üstverisi (Cryptomatte manifest),
+/// tek EXR dosyasında, sahne-doğrusal, ZIP sıkıştırmalı.
 bool saveMultiLayerEXR(const std::string& path, const Image& beauty, const Image* alpha,
-                       const std::vector<ExrLayer>& layers);
+                       const std::vector<ExrLayer>& layers,
+                       const std::vector<std::pair<std::string, std::string>>& stringAttributes = {});
 
 /// EXR dosyasının kanal adları (sıralı). Okunamazsa boş.
 std::vector<std::string> readExrChannelNames(const std::string& path);
+
+/// EXR dosyasındaki metin üstverisini (custom string attributes) okur (Cryptomatte manifest testi için).
+std::vector<std::pair<std::string, std::string>> readExrStringAttributes(const std::string& path);
 
 /// Load a Radiance .hdr file. Fails for any non-HDR format.
 std::optional<Image> loadImageHDR(const std::string& path);

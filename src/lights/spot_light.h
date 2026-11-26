@@ -29,6 +29,12 @@ public:
     /// Işıktan @p w yönüne (birim) giden şiddetin göreli çarpanı [0, 1].
     float falloff(const Vec3f& w) const;
 
+    const Vec3f& position() const { return m_position; }
+    const Vec3f& direction() const { return m_frame.n; }
+    const Color3f& intensity() const { return m_intensity; }
+    float cosInner() const { return m_cosInner; }
+    float cosOuter() const { return m_cosOuter; }
+
 private:
     Vec3f m_position;
     Frame m_frame; ///< n = eksen

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(PhotonEngine VERSION 0.3.0 LANGUAGES CXX)
+project(PhotonEngine VERSION 0.5.0 LANGUAGES CXX)
 
 # ──────────────────────────────────────────────
 # C++ Standard

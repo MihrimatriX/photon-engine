@@ -27,19 +27,22 @@
 
 namespace photon {
 
-enum class DeviceKind { Cpu, Cuda, Optix, Vulkan, D3D12 };
+enum class DeviceKind { Cpu, Cuda, Optix, Vulkan, D3D12, Hybrid };
 const char* deviceKindName(DeviceKind kind);
+
+/// Artımlı sahne güncelleme türü (F3.8): GPU'da yalnız değişen tamponlar yeniden yüklenir.
+enum class SceneUpdateKind : uint8_t { Full = 0, Materials, Lights, Transforms };
 
 /// Bir cihazın kimliği ve donanım bilgisi.
 struct DeviceInfo {
-    std::string id;               ///< "cpu", "cuda:0" (CLI --device ve proje ayarı bu kimliği kullanır)
+    std::string id;               ///< "cpu", "vulkan:0", "hybrid", "cuda:0"
     DeviceKind kind = DeviceKind::Cpu;
-    std::string name;             ///< "Intel Core i7-6700K", "NVIDIA GeForce GTX 1080"
+    std::string name;             ///< "Intel Core i7-6700K", "NVIDIA GeForce RTX 4090"
     int threads = 0;              ///< CPU: donanım iş parçacığı sayısı
     uint64_t memoryBytes = 0;     ///< GPU: toplam bellek
-    int computeMajor = 0;         ///< CUDA hesaplama yeteneği (ör. 6.1 = Pascal)
+    int computeMajor = 0;         ///< CUDA / Vulkan sürüm ana numarası
     int computeMinor = 0;
-    bool hardwareRayTracing = false; ///< RT çekirdekleri (Turing ve sonrası, sm ≥ 7.5)
+    bool hardwareRayTracing = false; ///< Donanım RT çekirdekleri (VK_KHR_ray_query / RT çekirdekleri)
     bool usable = false;          ///< Bu derlemede bu cihaz için bir arka uç var mı
     std::string note;             ///< Kullanılamıyorsa nedeni; kullanılabiliyorsa kısa açıklama
 };
@@ -69,6 +72,11 @@ public:
     /// Sahneyi cihaza yükler (ya da günceller). Sahne değişmez kabul edilir; yerinde
     /// düzenlemeden sonra (malzeme) yeniden çağrılmalıdır ki GPU kopyası da güncellensin.
     virtual void setScene(std::shared_ptr<const Scene> scene) = 0;
+    /// Artımlı sahne güncellemesi: varsayılanı setScene() çağırır; GPU cihazları yalnız değişen
+    /// tamponu (Materials / Lights / Transforms TLAS) yeniden yükler.
+    virtual void updateScene(std::shared_ptr<const Scene> scene, SceneUpdateKind /*kind*/) {
+        setScene(std::move(scene));
+    }
     virtual bool hasScene() const = 0;
 
     /// Her piksele [firstSample, firstSample + count) örnekleri ekler. Hedeflerin boyutu
@@ -81,8 +89,8 @@ public:
 /// yapılır ve önbelleklenir.
 const std::vector<DeviceInfo>& enumerateDevices();
 
-/// @p id: "auto" (en iyi kullanılabilir cihaz), "cpu" ya da enumerateDevices()'daki bir kimlik.
-/// Cihaz yoksa ya da bu derlemede arka ucu yoksa nullptr döner ve @p error nedenini yazar.
+/// @p id: "auto" (en iyi kullanılabilir donanım cihazı), "cpu", "vulkan:0", "hybrid" ya da
+/// enumerateDevices()'daki bir kimlik. Yoksa nullptr döner ve @p error nedenini yazar.
 std::unique_ptr<RenderDevice> createDevice(const std::string& id = "auto", std::string* error = nullptr);
 
 } // namespace photon

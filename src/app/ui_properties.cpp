@@ -216,6 +216,33 @@ void Application::drawProperties() {
                     ui::Tooltip("Parçalar grubun yerine geçer, dünyadaki yerleri değişmez (Ctrl+Shift+G)");
                 }
             }
+            if (ui::Section(ICON_SCAN_EYE, "Işın görünürlüğü", node->visibilityMask != VisAll)) {
+                auto visToggle = [&](const char* label, const char* id, uint8_t bit, const char* tip) {
+                    ui::Prop(label, tip);
+                    bool on = (node->visibilityMask & bit) != 0;
+                    if (ui::Toggle(id, &on)) {
+                        pushUndo();
+                        if (on) node->visibilityMask |= bit;
+                        else node->visibilityMask &= static_cast<uint8_t>(~bit);
+                        markDocumentChanged(true);
+                    }
+                };
+                if (ui::BeginProps("rayvis")) {
+                    visToggle("Kamera", "rvc", VisCamera, "Doğrudan kamera ışınlarında görünürlük");
+                    visToggle("Difüz", "rvd", VisDiffuse, "Mat yüzeylerin dolaylı aydınlatmasında (GI) görünürlük");
+                    visToggle("Parlak (Glossy)", "rvg", VisGlossy, "Ayna ve parlak yansımalarda görünürlük");
+                    visToggle("Geçirgen (Cam)", "rvt", VisTransmission, "Cam ve kırılma ışınlarında görünürlük");
+                    visToggle("Gölge", "rvs", VisShadow, "Diğer yüzeylere gölge düşürme");
+                    ui::EndProps();
+                }
+                if (node->visibilityMask != VisAll) {
+                    if (ui::GhostButton("Tüm ışınlara aç", ImVec2(-FLT_MIN, 0))) {
+                        pushUndo();
+                        node->visibilityMask = VisAll;
+                        markDocumentChanged(true);
+                    }
+                }
+            }
             if (ui::Section(ICON_INFO, "Bilgi", false)) {
                 size_t tris = 0, parts = 0;
                 std::function<void(const SceneNode&)> walk = [&](const SceneNode& s) {
@@ -509,6 +536,18 @@ void Application::drawMaterialProps() {
                    "0 = ayna gibi parlak, 1 = tamamen mat");
             slider("Yansıma", "##spec", d->specular(), 0, 1, [&](float v) { d->setSpecular(v); },
                    "Yalıtkanlarda dik açıdaki yansıma gücü (0.5 ≈ %4)");
+            slider("Kırılma indisi (IOR)", "##ior", d->ior(), 1.0001f, 3.0f, [&](float v) { d->setIor(v); },
+                   "OpenPBR taban yalıtkan kırılma indisi (su: 1.33, cam: 1.50, elmas: 2.42)");
+            {
+                ui::Prop("Cam geçirgenliği", "OpenPBR / glTF speküler iletim: 0 = opak, 1 = tam cam kırılması");
+                float tr = d->specularTransmission();
+                if (ui::SliderF("##spectr", &tr, 0.0f, 1.0f, "%.2f")) {
+                    undoPoint(*this, ImGui::GetID("##spectr"));
+                    const bool wasTrans = d->specularTransmission() > 0.0f;
+                    editLive([&] { d->setSpecularTransmission(tr); });
+                    if ((tr > 0.0f) != wasTrans) markDocumentChanged(true);
+                }
+            }
             {
                 ui::Prop("Opaklık", "1 = tam yüzey, 0 = yüzey yok. Yaprak, file ve etiket gibi kesik yüzeyler için; "
                                     "cam değildir, ışık kırılmadan geçer");
@@ -537,6 +576,16 @@ void Application::drawMaterialProps() {
                    "Araç boyası, lake: taban üzerinde ince şeffaf parlak katman");
             slider("Kaplama pürüzlülüğü", "##ccr", d->clearCoatRoughness(), 0, 1,
                    [&](float v) { d->setClearCoatRoughness(v); });
+            if (d->clearCoat() > 0.0f) {
+                slider("Vernik IOR", "##ccior", d->coatIor(), 1.0001f, 2.5f, [&](float v) { d->setCoatIor(v); },
+                       "OpenPBR vernik katmanı kırılma indisi (varsayılan 1.50)");
+                ui::Prop("Vernik tonu", "Vernik altından geçen ışığa verdiği soğurma tonu (beyaz = nötr)");
+                Color3f ct = d->coatTint();
+                if (colorEdit("##cctint", ct)) {
+                    undoPoint(*this, ImGui::GetID("cctint"));
+                    editLive([&] { d->setCoatTint(ct); });
+                }
+            }
             ui::EndProps();
         }
     }
@@ -547,9 +596,16 @@ void Application::drawMaterialProps() {
                    "Fırçalanmış metal gibi yönlü parlama");
             slider("Kumaş parlaklığı", "##sheen", d->sheen(), 0, 1, [&](float v) { d->setSheen(v); },
                    "Kadife/kumaş kenarlarındaki yumuşak parlama (sheen)");
-            if (d->sheen() > 0.0f)
+            if (d->sheen() > 0.0f) {
                 slider("Lif dağınıklığı", "##sheenr", d->sheenRoughness(), 0.02f, 1, [&](float v) { d->setSheenRoughness(v); },
                        "Küçük: ince, keskin kenar parlaması (saten). Büyük: geniş, yumuşak hale (kadife, yün)");
+                ui::Prop("Sheen rengi", "OpenPBR / glTF kumaş parlama rengi");
+                Color3f sc = d->sheenColor();
+                if (colorEdit("##sheenc", sc)) {
+                    undoPoint(*this, ImGui::GetID("sheenc"));
+                    editLive([&] { d->setSheenColor(sc); });
+                }
+            }
             slider("Difüz pürüzlülüğü", "##diffr", d->diffuseRoughness(), 0, 1,
                    [&](float v) { d->setDiffuseRoughness(v); },
                    "0 = Lambert. Büyüdükçe yüzey 'düzleşir': kil, beton, kumaş, toz (enerji korunumlu Oren–Nayar)");
@@ -1048,8 +1104,67 @@ void Application::drawLightProps() {
                 ui::Prop("Yükseklik ");
                 if (ImGui::DragFloat("##h", &l.height, std::max(1e-3f, l.height * 0.01f), 1e-3f, 1e5f, "%.3f")) { undoPoint(*this, ImGui::GetID("h")); changed = true; }
             }
+            ui::Prop("Işık grubu (EXR)", "Aynı adlı ışıklar çok katmanlı EXR'de LG_<ad> katmanında toplanır");
+            {
+                std::string lg = l.lightGroup;
+                if (ImGui::InputTextWithHint("##lgrp", "ör. Key, Fill, Rim", &lg)) {
+                    undoPoint(*this, ImGui::GetID("lgrp"));
+                    l.lightGroup = lg;
+                    changed = true;
+                }
+            }
         }
         ui::EndProps();
+    }
+    if (ui::Section(ICON_LAYERS, "Işık ve gölge bağlama", !l.lightLink.isDefault())) {
+        std::vector<const SceneNode*> geoNodes;
+        std::function<void(const SceneNode&)> collectGeo = [&](const SceneNode& n) {
+            if (n.type == SceneNodeType::Mesh || n.type == SceneNodeType::Sphere) geoNodes.push_back(&n);
+            for (const auto& c : n.children) collectGeo(*c);
+        };
+        if (const SceneNode* root = m_s.graph.root()) collectGeo(*root);
+
+        auto drawLinkSet = [&](const char* idPrefix, const char* title, LightLinkSet::Mode& mode,
+                               std::vector<uint64_t>& uids) {
+            ImGui::PushID(idPrefix);
+            ImGui::TextColored(pal.textDim, "%s", title);
+            int m = static_cast<int>(mode);
+            const char* modes[] = {"Tümü", "Yalnız seçili", "Hariç tut"};
+            if (ui::Segmented("m", &m, modes, 3)) {
+                pushUndo();
+                mode = static_cast<LightLinkSet::Mode>(m);
+                changed = true;
+            }
+            if (mode != LightLinkSet::Mode::All) {
+                if (geoNodes.empty()) {
+                    ui::Hint("Sahnede bağlanabilecek nesne yok.");
+                } else {
+                    const float listH = std::min(120.0f, static_cast<float>(geoNodes.size()) * 24.0f + 8.0f);
+                    ImGui::BeginChild("nodes", ImVec2(0, listH), ImGuiChildFlags_Borders);
+                    for (const SceneNode* n : geoNodes) {
+                        auto it = std::find(uids.begin(), uids.end(), n->uid);
+                        bool inList = (it != uids.end());
+                        ImGui::PushID(static_cast<int>(n->uid & 0x7FFFFFFFull));
+                        if (ImGui::Checkbox(n->name.c_str(), &inList)) {
+                            pushUndo();
+                            if (inList) {
+                                if (it == uids.end()) uids.push_back(n->uid);
+                            } else if (it != uids.end()) {
+                                uids.erase(it);
+                            }
+                            changed = true;
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::EndChild();
+                }
+            }
+            ImGui::PopID();
+        };
+
+        drawLinkSet("ll", "Aydınlatma bağlama", l.lightLink.mode, l.lightLink.nodeUids);
+        ImGui::Spacing();
+        drawLinkSet("sl", "Gölge bağlama", l.lightLink.shadowMode, l.lightLink.shadowNodeUids);
     }
     ImGui::Spacing();
     if (ui::GhostButton(ICON_SPARKLES "  Parlamayı yerleştir (tıkla)", ImVec2(-FLT_MIN, 0))) {
@@ -1190,6 +1305,17 @@ void Application::drawCameraProps() {
         }
         if (m_s.savedCameras.empty()) ui::Hint("Beğendiğiniz bakış açılarını kaydedip tek tıkla geri dönebilirsiniz.");
     }
+    if (ui::Section(ICON_FILM, "Hareket bulanıklığı", m_s.settings.motionBlur)) {
+        if (ui::BeginProps("mblur")) {
+            ui::Prop("Motion Blur", "Kamera ve hareketli nesnelerde gerçek enstantane bulanıklığı");
+            ui::Toggle("mben", &m_s.settings.motionBlur);
+            if (m_s.settings.motionBlur) {
+                ui::Prop("Enstantane açısı", "180° = sinema standardı (kare süresinin yarısı)");
+                ui::SliderF("##shutter", &m_s.settings.shutterAngle, 0.0f, 360.0f, "%.0f°");
+            }
+            ui::EndProps();
+        }
+    }
     if (ui::Section(ICON_VIDEO, "Açılar ve hareket")) {
         const float bw = (ImGui::GetContentRegionAvail().x - 12.0f) / 4.0f;
         if (ui::GhostButton("Ön", ImVec2(bw, 0))) applyCameraPreset("front");
@@ -1315,6 +1441,26 @@ void Application::drawImageProps() {
                                        "(fiziksel olarak doğru); 5–20 arası kostik gürültüsünü bastırır");
             ui::SliderF("##clamp", &m_s.settings.clampIndirect, 0.0f, 100.0f, m_s.settings.clampIndirect > 0.0f ? "%.1f" : "kapalı",
                         ImGuiSliderFlags_Logarithmic);
+            ui::Prop("Path Guiding", "SD-Tree (Müller 2017) yol kılavuzluğu: zor dolaylı ışık ve kostiklerde gürültüyü azaltır");
+            ui::Toggle("pg", &m_s.settings.pathGuiding);
+            ui::Prop("GPU yürütme modu", "Vulkan yürütme stratejisi: Otomatik donanıma göre en hızlı yolu seçer");
+            {
+                struct ModeEntry { GpuMode mode; const char* label; };
+                static constexpr ModeEntry kGpuModes[] = {
+                    {GpuMode::Auto, "Otomatik"},
+                    {GpuMode::RayQuery, "Donanım RT"},
+                    {GpuMode::Wavefront, "Wavefront"},
+                    {GpuMode::Megakernel, "Compute"},
+                };
+                const char* curLabel = "Otomatik";
+                for (const auto& e : kGpuModes)
+                    if (e.mode == m_s.settings.gpuMode) curLabel = e.label;
+                if (ImGui::BeginCombo("##gpum", curLabel)) {
+                    for (const auto& e : kGpuModes)
+                        if (ImGui::Selectable(e.label, e.mode == m_s.settings.gpuMode)) m_s.settings.gpuMode = e.mode;
+                    ImGui::EndCombo();
+                }
+            }
             ui::EndProps();
         }
     }

@@ -23,6 +23,9 @@ public:
                  const Material* material);
 
     bool intersect(Ray& ray, SurfaceInteraction& isect) const override;
+    /// Yerel uzay BLAS BVH ile hızlandırılmış kesişim (MeshInstance + yerleşik BVH için).
+    bool intersectAccelerated(Ray& ray, SurfaceInteraction& isect) const;
+    bool intersectAnyAccelerated(const Ray& ray) const;
     AABB bounds() const override;
 
     size_t numTriangles() const { return m_indices.size() / 3; }
@@ -45,13 +48,16 @@ public:
     const Material* material() const { return m_material; }
 
 private:
+    struct BlasCache;
+
     std::vector<Vec3f> m_positions;
     std::vector<Vec3f> m_normals;
     std::vector<Vec2f> m_uvs;
     std::vector<uint32_t> m_indices;
     const Material* m_material;
-    
+
     AABB m_bounds;
+    std::shared_ptr<BlasCache> m_blas;
 
     void calculateNormals();
 };

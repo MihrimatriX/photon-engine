@@ -55,7 +55,12 @@ struct MaterialPreset {
     float scatterAnisotropy = 0.0f;
     float abbe = 0.0f;             ///< 0 = dispersiyon yok
 
-    // ── Gelişmiş: Principled ──
+    // ── Gelişmiş: Principled / Birleşik OpenPBR ──
+    float specularTransmission = 0.0f; ///< Birleşik OpenPBR speküler geçirgenlik (cam)
+    float coatIor = 1.5f;              ///< Vernik kırılma indisi
+    Color3f coatTint{1.0f};            ///< Vernik renk tonu
+    Color3f sheenColor{1.0f};          ///< Kumaş parlaması rengi
+    bool hasCustomSheenColor = false;
     float diffuseRoughness = 0.0f; ///< EON difüz pürüzlülüğü (0 = Lambert)
     float sheenRoughness = 0.3f;   ///< Charlie sheen lif dağınıklığı
     float subsurface = 0.0f;
