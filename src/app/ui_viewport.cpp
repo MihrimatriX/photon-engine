@@ -681,13 +681,16 @@ void Application::prepareRealtime(const AABB& box) {
     }
     rt.exposure = std::exp2(m_s.settings.exposure);
     whiteBalanceMatrix(m_s.imager.whiteBalanceK, m_s.imager.tint, rt.whiteBalance);
+    rt.imager = m_s.imager;
     rt.background = static_cast<int>(e.background.mode);
     rt.backgroundColor = e.background.color;
 
-    // Işıklar (+ fiziksel gökte güneş). Zeminin ışıklardan aldığı pay (alt yarıküre radyansı):
+    // Işıklar (+ fiziksel gökte güneş) + IES 1B profil atlası. Zeminin ışıklardan aldığı pay (alt yarıküre radyansı):
     // güneşsiz liste (güneş pişirilen ortamda zaten var), zeminde 9 noktanın ortalaması.
     static const RealtimeEnvironment kNoEnv;
     rt.lights = packRealtimeLights(m_s.lights, rt.env ? *rt.env : kNoEnv, box);
+    RealtimeIesAtlas atlas = buildIesAtlas(rt.lights);
+    rt.iesAtlas = atlas.slices > 0 ? std::make_shared<const RealtimeIesAtlas>(std::move(atlas)) : nullptr;
     rt.groundExtra = Color3f(0.0f);
     if (groundInEnv) {
         const auto noSun = packRealtimeLights(m_s.lights, kNoEnv, box);

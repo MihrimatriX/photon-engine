@@ -24,9 +24,11 @@
 #include "core/math/aabb.h"
 #include "core/math/mat.h"
 #include "core/math/vec.h"
+#include "lights/ies.h"
 #include "scene/document.h"
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace photon {
@@ -73,7 +75,28 @@ struct RealtimeLight {
     /// yarıçap (radyan; güneş ~0.0047, elle eklenen yönlü ışık 0 = keskin gölge, ışın izleyicideki gibi).
     float radius = 0.0f;
     bool castsShadow = false;
+    /// Dikdörtgen alan ışığı LTC yarı-eksenleri (merkezden kenara) ve birim yüzey radyansı L.
+    Vec3f areaU{0.5f, 0.0f, 0.0f};
+    Vec3f areaV{0.0f, 0.0f, 0.5f};
+    Color3f areaRadiance;
+    /// Spot IES fotometrik profili (buildIesAtlas sonrası iesSlice ≥ 0).
+    int iesSlice = -1;
+    std::shared_ptr<const IesProfile> ies;
 };
+
+/// Spot ışıklarının IES LM-63 profillerini GPU'ya 2B R32F atlas (181 × slices) olarak paketler.
+/// Her satır 0°..180° dikey γ açısındaki normalize [0, 1] şiddet eğrisidir.
+struct RealtimeIesAtlas {
+    int width = 181;
+    int slices = 0;
+    std::vector<float> data; ///< slices × width
+};
+
+/// IES profilli spot ışıkları için atlas oluşturur ve her ışığın @c iesSlice alanını doldurur.
+RealtimeIesAtlas buildIesAtlas(std::vector<RealtimeLight>& lights);
+
+/// GPU doğrusal örneklemesinin CPU karşılığı (0°..180° aralığında [0, 1]).
+float sampleIesAtlas(const RealtimeIesAtlas& atlas, int slice, float gammaDeg);
 
 /// Etkin ışıklar (+ fiziksel gök güneşi), sahne merkezine verdikleri ışınıma göre sıralı. Gölgeyi en
 /// güçlü @p maxShadows ışık alır; en güçlünün %5'inden sönükler (etkisi görünmez) ve kutunun içindeki

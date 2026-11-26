@@ -29,6 +29,7 @@
 #include "app/raster_view.h"
 #include "core/color/transfer.h"
 #include "core/math/transform.h"
+#include "scene/ltc_lut.h"
 
 #include <GLFW/glfw3.h>
 
@@ -54,11 +55,13 @@ using GLsizeiptr_ = std::ptrdiff_t;
 constexpr GLenum kArrayBuffer = 0x8892, kElementArrayBuffer = 0x8893, kStaticDraw = 0x88E4;
 constexpr GLenum kVertexShader = 0x8B31, kFragmentShader = 0x8B30, kCompileStatus = 0x8B81, kLinkStatus = 0x8B82;
 constexpr GLenum kFramebuffer = 0x8D40, kReadFramebuffer = 0x8CA8, kDrawFramebuffer = 0x8CA9, kRenderbuffer = 0x8D41;
-constexpr GLenum kColorAttachment0 = 0x8CE0, kDepthAttachment = 0x8D00, kDepthComponent24 = 0x81A6;
+constexpr GLenum kColorAttachment0 = 0x8CE0, kColorAttachment1 = 0x8CE1, kDepthAttachment = 0x8D00;
+constexpr GLenum kDepthComponent24 = 0x81A6;
 constexpr GLenum kFramebufferComplete = 0x8CD5, kMaxSamples = 0x8D57, kClampToEdge = 0x812F, kRgba8 = 0x8058;
 constexpr GLenum kTexture0 = 0x84C0, kTexture3D = 0x806F, kTextureWrapR = 0x8072, kRgb16f = 0x881B, kRgb8 = 0x8051;
-constexpr GLenum kSrgb8Alpha8 = 0x8C43, kTextureMaxLevel = 0x813D, kTextureCompareMode = 0x884C;
-constexpr GLenum kTextureCompareFunc = 0x884D, kCompareRefToTexture = 0x884E;
+constexpr GLenum kRgba16f = 0x881A, kRgba32f = 0x8814, kR32f = 0x822E, kRed = 0x1903;
+constexpr GLenum kSrgb8Alpha8 = 0x8C43, kTextureBaseLevel = 0x813C, kTextureMaxLevel = 0x813D;
+constexpr GLenum kTextureCompareMode = 0x884C, kTextureCompareFunc = 0x884D, kCompareRefToTexture = 0x884E;
 
 #define PHOTON_GL_FUNCS(X)                                                                              \
     X(void, glGenVertexArrays, (GLsizei, GLuint*))                                                      \
@@ -95,6 +98,7 @@ constexpr GLenum kTextureCompareFunc = 0x884D, kCompareRefToTexture = 0x884E;
     X(void, glFramebufferTexture2D, (GLenum, GLenum, GLenum, GLuint, GLint))                            \
     X(void, glFramebufferRenderbuffer, (GLenum, GLenum, GLenum, GLuint))                                \
     X(GLenum, glCheckFramebufferStatus, (GLenum))                                                       \
+    X(void, glDrawBuffers, (GLsizei, const GLenum*))                                                    \
     X(void, glGenRenderbuffers, (GLsizei, GLuint*))                                                     \
     X(void, glBindRenderbuffer, (GLenum, GLuint))                                                       \
     X(void, glDeleteRenderbuffers, (GLsizei, const GLuint*))                                            \
@@ -249,7 +253,8 @@ const char* kPbrFragmentSrc = R"(
 in vec3 vW;
 in vec3 vN;
 in vec2 vUV;
-out vec4 oColor;
+layout(location = 0) out vec4 oColor;
+layout(location = 1) out vec4 oNormRough;
 
 uniform vec3 uEye;
 uniform vec3 uBase;
@@ -271,13 +276,23 @@ uniform sampler2D tRough;
 uniform sampler2D tMetal;
 uniform sampler2D tNormal;
 uniform vec3 uSH[9];
+uniform int uHdrMode;      // 1 = v2 doğrusal HDR MRT boru hattı, 0 = eski ileri (forward) yedek yol
+
+// Heitz 2016 LTC tabloları ve Spot IES 1B atlası
+uniform sampler2D tLtc1;
+uniform sampler2D tLtc2;
+uniform sampler2D tIes;
+uniform int uIesSlices;
 
 #define MAXL 16
 uniform int uLightCount;
-uniform vec4 uLPos[MAXL];  // xyz konum, w tür (0 nokta, 1 spot, 2 alan, 3 yönlü)
-uniform vec4 uLDir[MAXL];  // xyz yön, w kaynak yarıçapı
+uniform vec4 uLPos[MAXL];     // xyz konum, w tür (0 nokta, 1 spot, 2 alan, 3 yönlü)
+uniform vec4 uLDir[MAXL];     // xyz yön, w kaynak yarıçapı
 uniform vec3 uLCol[MAXL];
-uniform vec4 uLCone[MAXL]; // cosInner, cosOuter (−2: koni yok), gölge yuvası (−1: gölgesiz)
+uniform vec4 uLCone[MAXL];    // cosInner, cosOuter (−2: koni yok), gölge yuvası (−1), IES dilimi (−1)
+uniform vec3 uLAreaU[MAXL];   // Dikdörtgen alan ışığı yarı-genişlik ekseni
+uniform vec3 uLAreaV[MAXL];   // Dikdörtgen alan ışığı yarı-yükseklik ekseni
+uniform vec3 uLAreaRad[MAXL]; // Dikdörtgen alan ışığı birim yüzey radyansı L
 uniform mat4 uShadowVP[4];
 uniform vec4 uShadowA[4];  // x: ortografik mi, y: yakın, z: uzak, w: harita uv'si / dünya birimi
 uniform vec4 uShadowB[4];  // x: ışık yarıçapı (konumlu: dünya, yönlü: açısal), y: normal yönünde kaydırma
@@ -329,6 +344,58 @@ float envLod(float rough) {
     float a = max(rough * rough, 1e-4);
     return clamp(log2(2.0 * a * uEnvWidth / (2.0 * PI)), 0.0, uEnvLevels - 1.0);
 }
+// Heitz 2016 LTC: ufuk (z >= 0) kırpma + Baum 1989 kenar vektör integrali.
+vec3 ltcEdgeVec(vec3 v1, vec3 v2) {
+    float x = clamp(dot(v1, v2), -1.0, 1.0);
+    float y = x < 0.9999 ? (acos(x) / sqrt(max(1.0 - x * x, 1e-10))) : 1.0;
+    return cross(v1, v2) * y;
+}
+int ltcClipHorizon(vec3 polyIn[5], int nIn, out vec3 polyOut[6]) {
+    int n = 0;
+    for (int i = 0; i < 5; ++i) {
+        if (i >= nIn) break;
+        vec3 a = polyIn[i];
+        vec3 b = polyIn[(i + 1 == nIn) ? 0 : (i + 1)];
+        bool aIn = a.z >= 0.0;
+        bool bIn = b.z >= 0.0;
+        if (aIn && n < 6) polyOut[n++] = a;
+        if (aIn != bIn && n < 6) {
+            float t = a.z / (a.z - b.z);
+            vec3 p = a + (b - a) * t;
+            p.z = 0.0;
+            polyOut[n++] = p;
+        }
+    }
+    return n;
+}
+float ltcEvaluateQuad(vec3 L[4], vec4 mInv) {
+    vec3 quadIn[5];
+    quadIn[0] = L[0]; quadIn[1] = L[1]; quadIn[2] = L[2]; quadIn[3] = L[3]; quadIn[4] = vec3(0.0);
+    vec3 geomClip6[6];
+    int nGeom = ltcClipHorizon(quadIn, 4, geomClip6);
+    if (nGeom < 3) return 0.0;
+    vec3 transIn[5];
+    for (int i = 0; i < 5; ++i) {
+        if (i >= nGeom) { transIn[i] = vec3(0.0); continue; }
+        vec3 g = geomClip6[i];
+        transIn[i] = vec3(mInv.x * g.x + mInv.y * g.z, mInv.z * g.y, mInv.w * g.x + g.z);
+    }
+    vec3 clipped[6];
+    int n = ltcClipHorizon(transIn, min(nGeom, 5), clipped);
+    if (n < 3) return 0.0;
+    for (int i = 0; i < 6; ++i) {
+        if (i >= n) break;
+        float len = length(clipped[i]);
+        if (len < 1e-8) return 0.0;
+        clipped[i] /= len;
+    }
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < 6; ++i) {
+        if (i >= n) break;
+        sum += ltcEdgeVec(clipped[i], clipped[(i + 1 == n) ? 0 : (i + 1)]);
+    }
+    return abs(sum.z) / (2.0 * PI);
+}
 // Harita derinliği → ışığa uzaklık (perspektifte GL derinliği doğrusal değil).
 float lightDistance(int slot, float d) {
     vec4 A = uShadowA[slot];
@@ -342,10 +409,6 @@ vec2 vogel(int i, int n, float phi) {
     float t = float(i) * 2.39996323 + phi;
     return r * vec2(cos(t), sin(t));
 }
-// PCSS (Fernando 2005): engelleyicilerin ortalama uzaklığından yarı gölge genişliği; temas
-// noktasında keskin, uzaklaştıkça yumuşayan gölge (büyük softbox'ta ışın izleyicideki gibi).
-// 2×2 atlas: yuva k'nin karosu (k & 1, k >> 1)·½; örnekler karonun içinde tutulur. Kadrajın
-// kenarına yaklaşırken gölge söner (sert bir kesim çizgisi kalmasın).
 float shadowAt(int slot, vec3 p, vec3 ng) {
     vec4 A = uShadowA[slot], B = uShadowB[slot];
     vec4 s = uShadowVP[slot] * vec4(p + ng * B.y, 1.0);
@@ -357,7 +420,7 @@ float shadowAt(int slot, vec3 p, vec3 ng) {
     vec2 uv0 = tile + c.xy * 0.5;
     float zR = lightDistance(slot, c.z);
     bool ortho = A.x > 0.5;
-    float uvw = 0.5 * (ortho ? A.w : A.w / zR);  // atlas uv'si / dünya birimi, alıcının düzleminde
+    float uvw = 0.5 * (ortho ? A.w : A.w / zR);
     const float texel = 1.0 / 4096.0;
     float phi = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     float searchW = ortho ? (zR - A.y) * B.x : B.x * (zR - A.y) / A.y;
@@ -378,7 +441,6 @@ float shadowAt(int slot, vec3 p, vec3 ng) {
     for (int i = 0; i < 32; ++i) sum += texture(tShadow, vec3(clamp(uv0 + vogel(i, 32, phi) * filterUV, lo, hi), c.z));
     return mix(1.0, sum / 32.0, edge);
 }
-// Camın gölgesi: ışığın ~%55'ini keser (geri kalanı kırılarak geçer). Opak gölgeyle çarpılır.
 float glassShadowAt(int slot, vec3 p, vec3 ng) {
     vec4 s = uShadowVP[slot] * vec4(p + ng * uShadowB[slot].y * 2.0, 1.0);
     vec3 c = s.xyz / s.w * 0.5 + 0.5;
@@ -391,8 +453,6 @@ float glassShadowAt(int slot, vec3 p, vec3 ng) {
         for (int j = -1; j <= 1; ++j) sum += texture(tGlassShadow, vec3(uv0 + vec2(i, j) * t, c.z));
     return 1.0 - 0.55 * (1.0 - sum / 9.0);
 }
-// Temas gölgesi: nesne izlerinin altında gökyüzü ışığı kapanır (eliptik Gauss, zeminden
-// yükseldikçe söner). Ekran uzayı AO'nun ucuz, titreşimsiz karşılığı.
 float footAO(vec3 p) {
     float ao = 1.0;
     for (int i = 0; i < uFootCount; ++i) {
@@ -403,7 +463,6 @@ float footAO(vec3 p) {
     }
     return ao;
 }
-// Teğetsiz normal haritası: türevlerden kotanjant çerçevesi (Schüler 2013).
 mat3 cotangentFrame(vec3 n, vec3 p, vec2 uv) {
     vec3 dp1 = dFdx(p), dp2 = dFdy(p);
     vec2 duv1 = dFdx(uv), duv2 = dFdy(uv);
@@ -432,8 +491,6 @@ void main() {
         vec3 a = abs(ng);
         uv = ((a.x >= a.y && a.x >= a.z) ? vW.zy : (a.y >= a.z ? vW.xz : vW.xy)) * uTexScale;
     }
-    // Kesik yüzey: ışın izleyicideki rastgele geçişin ekran uzayı karşılığı (alpha hashing,
-    // gürültü Jimenez 2014 IGN). Sıralama gerektirmez; yarı saydamlık ince bir doku gibi görünür.
     float alpha = uOpacity;
     if ((uMaps & 32) != 0) alpha *= texture(tOpacity, uv).r;
     if (alpha <= fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))))) discard;
@@ -460,17 +517,68 @@ void main() {
         diffC = base * (1.0 - metal);
     }
     if (uGlass == 1) {
-        // Geçirgenlik: arkadaki görüntü camın rengiyle çarpılır (ekran değerinde ≈ doğrusal^(1/2.2));
-        // (1 − F) payı yansıma geçişinin harmanlamasından gelir.
-        oColor = vec4(pow(max(uTint, vec3(0.0)), vec3(1.0 / 2.2)), 1.0);
+        vec3 tintOut = uHdrMode != 0 ? max(uTint, vec3(0.0)) : pow(max(uTint, vec3(0.0)), vec3(1.0 / 2.2));
+        oColor = vec4(tintOut, 1.0);
+        oNormRough = vec4(N, rough);
         return;
     }
     float ac = max(uCoatRough * uCoatRough, 0.002);
+
+    // LTC taban çerçevesi (T1 görüş düzleminde, N üstte)
+    vec3 ltcT1 = V - N * dot(V, N);
+    if (dot(ltcT1, ltcT1) < 1e-8) {
+        vec3 up = abs(N.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+        ltcT1 = cross(up, N);
+    }
+    ltcT1 = normalize(ltcT1);
+    vec3 ltcT2 = cross(N, ltcT1);
+    vec2 ltcUv = (vec2(clamp(rough, 0.0, 1.0), sqrt(clamp(1.0 - NoV, 0.0, 1.0))) * 63.0 + 0.5) / 64.0;
+    vec4 ltcMInv = texture(tLtc1, ltcUv);
+    vec2 ltcT2Val = texture(tLtc2, ltcUv).rg;
+    vec4 ltcCoatMInv = vec4(1.0, 0.0, 1.0, 0.0);
+    vec2 ltcCoatT2 = vec2(0.0);
+    if (coat > 0.0) {
+        vec2 cUv = (vec2(clamp(uCoatRough, 0.0, 1.0), sqrt(clamp(1.0 - NoV, 0.0, 1.0))) * 63.0 + 0.5) / 64.0;
+        ltcCoatMInv = texture(tLtc1, cUv);
+        ltcCoatT2 = texture(tLtc2, cUv).rg;
+    }
 
     vec3 direct = vec3(0.0), directFull = vec3(0.0);
     vec3 R = reflect(-V, N);
     for (int i = 0; i < uLightCount; ++i) {
         int type = int(uLPos[i].w + 0.5);
+        int slot = int(uLCone[i].z + 0.5);
+        float sh = uLCone[i].z >= -0.5 ? shadowAt(slot, vW, ng) * glassShadowAt(slot, vW, ng) : 1.0;
+
+        if (type == 2) {
+            // Heitz 2016 LTC analitik dikdörtgen alan ışığı
+            vec3 ctr = uLPos[i].xyz;
+            vec3 hu = uLAreaU[i];
+            vec3 hv = uLAreaV[i];
+            vec3 corners[4];
+            vec3 c0 = ctr - hu - hv - vW;
+            vec3 c1 = ctr + hu - hv - vW;
+            vec3 c2 = ctr + hu + hv - vW;
+            vec3 c3 = ctr - hu + hv - vW;
+            corners[0] = vec3(dot(c0, ltcT1), dot(c0, ltcT2), dot(c0, N));
+            corners[1] = vec3(dot(c1, ltcT1), dot(c1, ltcT2), dot(c1, N));
+            corners[2] = vec3(dot(c2, ltcT1), dot(c2, ltcT2), dot(c2, N));
+            corners[3] = vec3(dot(c3, ltcT1), dot(c3, ltcT2), dot(c3, N));
+            float specF = ltcEvaluateQuad(corners, ltcMInv);
+            float diffF = ltcEvaluateQuad(corners, vec4(1.0, 0.0, 1.0, 0.0));
+            vec3 specScale = f0 * ltcT2Val.x + (vec3(1.0) - f0) * ltcT2Val.y;
+            vec3 contrib = (diffC * diffF + specScale * specF) * uLAreaRad[i];
+            if (coat > 0.0) {
+                float cSpecF = ltcEvaluateQuad(corners, ltcCoatMInv);
+                float cScale = 0.04 * ltcCoatT2.x + 0.96 * ltcCoatT2.y;
+                float Fc = 0.04 + 0.96 * pow(1.0 - NoV, 5.0);
+                contrib = contrib * (1.0 - coat * Fc) + vec3(coat * cScale * cSpecF) * uLAreaRad[i];
+            }
+            direct += contrib * sh;
+            directFull += contrib;
+            continue;
+        }
+
         vec3 L, Ls, E;
         float aa = a, norm = 1.0;
         if (type == 3) {
@@ -483,16 +591,21 @@ void main() {
             float dist = sqrt(d2);
             L = d / dist;
             float k = 1.0;
-            if (type == 1 && uLCone[i].y > -1.5) {
+            if (type == 1) {
                 float c = dot(-L, uLDir[i].xyz);
-                k = uLCone[i].x > uLCone[i].y ? smoothstep(uLCone[i].y, uLCone[i].x, c) : step(uLCone[i].y, c);
+                if (uLCone[i].y > -1.5) {
+                    k *= uLCone[i].x > uLCone[i].y ? smoothstep(uLCone[i].y, uLCone[i].x, c) : step(uLCone[i].y, c);
+                }
+                if (uLCone[i].w >= -0.5 && uIesSlices > 0) {
+                    float gamma = acos(clamp(c, -1.0, 1.0)) / PI;
+                    float sliceV = (uLCone[i].w + 0.5) / float(uIesSlices);
+                    k *= texture(tIes, vec2(gamma, sliceV)).r;
+                }
             }
-            if (type == 2) k *= abs(dot(L, uLDir[i].xyz));
             E = uLCol[i] * (k / d2);
             Ls = L;
             float r = uLDir[i].w;
             if (r > 0.0) {
-                // Küre ışık (Karis 2013): yansıma ışınına en yakın kaynak noktası + lob genişletme.
                 vec3 c2r = dot(d, R) * R - d;
                 Ls = normalize(d + c2r * clamp(r / max(length(c2r), 1e-6), 0.0, 1.0));
                 aa = min(1.0, a + r / (2.0 * dist));
@@ -511,8 +624,6 @@ void main() {
             float acc = min(1.0, ac + (aa - a));
             c = c * (1.0 - coat * Fc) + vec3(coat * Fc * D_GGX(NoH, acc) * (ac / acc) * (ac / acc) * V_Smith(NoV, NoLs, acc) * NoLs);
         }
-        int slot = int(uLCone[i].z + 0.5);
-        float sh = uLCone[i].z >= -0.5 ? shadowAt(slot, vW, ng) * glassShadowAt(slot, vW, ng) : 1.0;
         direct += c * E * sh;
         directFull += c * E;
     }
@@ -524,29 +635,38 @@ void main() {
         amb = amb * (1.0 - coat * Fc) + coat * envRadiance(R, envLod(uCoatRough)) * envBrdf(vec3(0.04), uCoatRough, NoV);
     }
     if (uGround == 2) {
-        // Gölge yakalayıcı: gölgeli/gölgesiz aydınlanma oranı arka planı karartır (alfa ile).
         float full = lum(directFull + amb);
         float occ = full > 1e-8 ? clamp(1.0 - lum(direct + amb * ao) / full, 0.0, 1.0) : 0.0;
         oColor = vec4(0.0, 0.0, 0.0, occ);
+        oNormRough = vec4(0.0, 0.0, 0.0, 1.0);
         return;
     }
     if (uGlass == 2) {
-        // Ön çarpımlı bindirme: F·yansıma + (1 − F)·w·kırılan ortam; geri kalan (1 − a) arkadaki
-        // görüntüden gelir. Dolu camda kırılma kenarlara doğru büyür: w merkezde 0 (arkası görünür),
-        // kenarda 1 (bükülmüş ortam) — ekran uzayı kırılması olmadan camın kalın görünüşü.
         float F = clamp(F_Schlick(f0, NoV).r, 0.0, 1.0);
         vec3 Lr = envRadiance(R, envLod(rough)) + direct / max(F, 1e-3);
         vec3 T = refract(-V, N, 1.0 / uIor);
-        // Camın içinden görünen sonsuz: düz renk arka planda ışın izleyici o rengi gösterir.
         vec3 Lt = (uBgMode == 1 ? uBgColor : (dot(T, T) > 0.0 ? envRadiance(T, envLod(rough)) : Lr)) * uTint;
         float w = smoothstep(0.15, 0.85, 1.0 - NoV);
-        float a = F + (1.0 - F) * w;
-        oColor = vec4(F * display(Lr) + (1.0 - F) * w * display(Lt), a);
+        float ga = F + (1.0 - F) * w;
+        if (uHdrMode != 0) oColor = vec4(F * Lr + (1.0 - F) * w * Lt, ga);
+        else oColor = vec4(F * display(Lr) + (1.0 - F) * w * display(Lt), ga);
+        oNormRough = vec4(N, rough);
         return;
     }
-    vec3 col = display(direct + amb * ao + uEmit);
-    if (uSelected > 0.0) col = mix(col, uAccent, 0.06 + 0.4 * pow(1.0 - NoV, 2.0));
-    oColor = vec4(col, 1.0);
+    vec3 hdr = direct + amb * ao + uEmit;
+    if (uHdrMode != 0) {
+        if (uSelected > 0.0) {
+            float rim = 0.05 + 0.30 * pow(1.0 - NoV, 2.0);
+            hdr = mix(hdr, uAccent / max(uExposure, 1e-3), rim);
+        }
+        oColor = vec4(max(hdr, vec3(0.0)), 1.0);
+        oNormRough = vec4(N, rough);
+    } else {
+        vec3 col = display(hdr);
+        if (uSelected > 0.0) col = mix(col, uAccent, 0.06 + 0.4 * pow(1.0 - NoV, 2.0));
+        oColor = vec4(col, 1.0);
+        oNormRough = vec4(N, rough);
+    }
 }
 )";
 
@@ -580,16 +700,413 @@ void main() {
 )";
 const char* kBgFragmentSrc = R"(
 in vec2 vNdc;
-out vec4 oColor;
+layout(location = 0) out vec4 oColor;
+layout(location = 1) out vec4 oNormRough;
 uniform mat4 uInvViewProj;
 uniform vec3 uEye;
 uniform int uMode;
 uniform vec3 uColor;
+uniform int uHdrMode;
 void main() {
-    if (uMode == 1) { oColor = vec4(display(uColor), 1.0); return; }
-    vec4 w = uInvViewProj * vec4(vNdc, 1.0, 1.0);
-    vec3 d = normalize(w.xyz / w.w - uEye);
-    oColor = vec4(display(envRadiance(d, 0.0)), 1.0);
+    oNormRough = vec4(0.0, 0.0, 0.0, 1.0);
+    vec3 hdr;
+    if (uMode == 1) {
+        hdr = uColor;
+    } else {
+        vec4 w = uInvViewProj * vec4(vNdc, 1.0, 1.0);
+        vec3 d = normalize(w.xyz / w.w - uEye);
+        hdr = envRadiance(d, 0.0);
+    }
+    oColor = vec4(uHdrMode != 0 ? max(hdr, vec3(0.0)) : display(hdr), 1.0);
+}
+)";
+
+// ── Gerçek zamanlı v2 ekran uzayı geçişleri: GTAO, Bilateral Blur, Hi-Z, SSR, Bloom, Imager ──
+
+const char* kGtaoFragmentSrc = R"(#version 330 core
+in vec2 vNdc;
+out vec4 oAo;
+uniform sampler2D tDepth;
+uniform sampler2D tNormRough;
+uniform mat4 uInvProj;
+uniform mat4 uView;
+uniform vec2 uInvRes;
+uniform float uRadius;
+
+vec3 viewPosAt(vec2 uv, float d) {
+    vec4 clip = vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    vec4 v = uInvProj * clip;
+    return v.xyz / max(abs(v.w), 1e-6);
+}
+
+void main() {
+    vec2 uv = vNdc * 0.5 + 0.5;
+    float d0 = texture(tDepth, uv).r;
+    vec4 nr = texture(tNormRough, uv);
+    if (d0 >= 0.9999 || dot(nr.xyz, nr.xyz) < 0.25) {
+        oAo = vec4(1.0);
+        return;
+    }
+    vec3 P = viewPosAt(uv, d0);
+    vec3 Nv = normalize(mat3(uView) * normalize(nr.xyz));
+    vec3 V = normalize(-P);
+    float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    float screenR = clamp(uRadius / max(-P.z, 0.15), 0.008, 0.075);
+
+    float vis = 0.0;
+    const int kDirs = 4;
+    const int kSteps = 4;
+    for (int di = 0; di < kDirs; ++di) {
+        float ang = (float(di) + noise) * (3.14159265 / float(kDirs));
+        vec2 dir = vec2(cos(ang), sin(ang));
+        float h1 = -1.0, h2 = -1.0;
+        for (int si = 1; si <= kSteps; ++si) {
+            float frac = (float(si) - 0.35 * noise) / float(kSteps);
+            vec2 off = dir * (frac * screenR);
+            vec2 uvA = uv + off;
+            if (uvA.x > 0.0 && uvA.x < 1.0 && uvA.y > 0.0 && uvA.y < 1.0) {
+                float dA = texture(tDepth, uvA).r;
+                if (dA < 0.9999) {
+                    vec3 diff = viewPosAt(uvA, dA) - P;
+                    float dist = length(diff);
+                    if (dist > 1e-4) {
+                        float fall = clamp(1.0 - dist / max(uRadius * 1.8, 1e-3), 0.0, 1.0);
+                        h1 = max(h1, mix(-1.0, dot(diff / dist, V), fall));
+                    }
+                }
+            }
+            vec2 uvB = uv - off;
+            if (uvB.x > 0.0 && uvB.x < 1.0 && uvB.y > 0.0 && uvB.y < 1.0) {
+                float dB = texture(tDepth, uvB).r;
+                if (dB < 0.9999) {
+                    vec3 diff = viewPosAt(uvB, dB) - P;
+                    float dist = length(diff);
+                    if (dist > 1e-4) {
+                        float fall = clamp(1.0 - dist / max(uRadius * 1.8, 1e-3), 0.0, 1.0);
+                        h2 = max(h2, mix(-1.0, dot(diff / dist, V), fall));
+                    }
+                }
+            }
+        }
+        // Jimenez 2016: dilim düzlemine izdüşürülen normal açısı etrafında kosinüs integrali
+        vec3 sliceDir = normalize(vec3(dir, 0.0));
+        vec3 orthoDir = sliceDir - V * dot(sliceDir, V);
+        vec3 axis = cross(sliceDir, V);
+        vec3 projN = Nv - axis * dot(Nv, axis);
+        float projLen = max(length(projN), 1e-5);
+        float cosGamma = clamp(dot(projN, V) / projLen, -1.0, 1.0);
+        float gamma = sign(dot(projN, orthoDir)) * acos(cosGamma);
+        float t1 = -acos(clamp(h1, -1.0, 1.0));
+        float t2 =  acos(clamp(h2, -1.0, 1.0));
+        t1 = gamma + max(t1 - gamma, -1.5707963);
+        t2 = gamma + min(t2 - gamma,  1.5707963);
+        float arc = 0.25 * (-cos(2.0 * t1 - gamma) + cos(gamma) + 2.0 * t1 * sin(gamma))
+                  + 0.25 * (-cos(2.0 * t2 - gamma) + cos(gamma) + 2.0 * t2 * sin(gamma));
+        vis += projLen * clamp(arc, 0.0, 1.0);
+    }
+    float ao = clamp(vis / float(kDirs), 0.15, 1.0);
+    oAo = vec4(ao, ao, ao, 1.0);
+}
+)";
+
+const char* kAoBlurFragmentSrc = R"(#version 330 core
+in vec2 vNdc;
+out vec4 oAo;
+uniform sampler2D tAo;
+uniform sampler2D tDepth;
+uniform vec2 uInvRes;
+
+void main() {
+    vec2 uv = vNdc * 0.5 + 0.5;
+    float d0 = texture(tDepth, uv).r;
+    if (d0 >= 0.9999) { oAo = vec4(1.0); return; }
+    float sum = 0.0, wsum = 0.0;
+    for (int y = -2; y <= 2; ++y) {
+        for (int x = -2; x <= 2; ++x) {
+            vec2 suv = clamp(uv + vec2(float(x), float(y)) * uInvRes, vec2(0.0), vec2(1.0));
+            float d = texture(tDepth, suv).r;
+            float wSpatial = exp(-0.25 * float(x * x + y * y));
+            float wDepth = exp(-abs(d - d0) * 600.0);
+            float w = wSpatial * wDepth;
+            sum += texture(tAo, suv).r * w;
+            wsum += w;
+        }
+    }
+    float ao = wsum > 1e-5 ? (sum / wsum) : 1.0;
+    oAo = vec4(ao, ao, ao, 1.0);
+}
+)";
+
+const char* kHiZFragmentSrc = R"(#version 330 core
+in vec2 vNdc;
+out vec4 oDepth;
+uniform sampler2D tSrc;
+uniform int uCopy;
+uniform vec2 uSrcSize;
+
+void main() {
+    if (uCopy != 0) {
+        vec2 uv = vNdc * 0.5 + 0.5;
+        oDepth = vec4(texture(tSrc, uv).r, 0.0, 0.0, 1.0);
+        return;
+    }
+    ivec2 base = ivec2(gl_FragCoord.xy) * 2;
+    ivec2 mx = max(ivec2(uSrcSize) - ivec2(1), ivec2(0));
+    float d00 = texelFetch(tSrc, min(base + ivec2(0, 0), mx), 0).r;
+    float d10 = texelFetch(tSrc, min(base + ivec2(1, 0), mx), 0).r;
+    float d01 = texelFetch(tSrc, min(base + ivec2(0, 1), mx), 0).r;
+    float d11 = texelFetch(tSrc, min(base + ivec2(1, 1), mx), 0).r;
+    oDepth = vec4(min(min(d00, d10), min(d01, d11)), 0.0, 0.0, 1.0);
+}
+)";
+
+const char* kSsrFragmentSrc = R"(#version 330 core
+in vec2 vNdc;
+out vec4 oSsr;
+uniform sampler2D tColor;
+uniform sampler2D tNormRough;
+uniform sampler2D tDepth;
+uniform sampler2D tHiZ;
+uniform mat4 uView;
+uniform mat4 uProj;
+uniform mat4 uInvProj;
+uniform float uMaxDist;
+
+vec3 viewPosAt(vec2 uv, float d) {
+    vec4 clip = vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    vec4 v = uInvProj * clip;
+    return v.xyz / max(abs(v.w), 1e-6);
+}
+
+void main() {
+    vec2 uv = vNdc * 0.5 + 0.5;
+    float d0 = texture(tDepth, uv).r;
+    vec4 nr = texture(tNormRough, uv);
+    float rough = nr.w;
+    if (d0 >= 0.9999 || dot(nr.xyz, nr.xyz) < 0.25 || rough > 0.55) {
+        oSsr = vec4(0.0);
+        return;
+    }
+    vec3 P = viewPosAt(uv, d0);
+    vec3 Nv = normalize(mat3(uView) * normalize(nr.xyz));
+    vec3 V = normalize(-P);
+    vec3 R = reflect(-V, Nv);
+    if (R.z > 0.6) { oSsr = vec4(0.0); return; } // kameraya bakan ışınlar genelde ekran dışı
+
+    // Ekran uzayı ışın uç noktaları
+    float rayLen = uMaxDist;
+    if (P.z + R.z * rayLen > -0.05) rayLen = max(0.0, (-0.05 - P.z) / max(R.z, 1e-5));
+    vec3 P1 = P + R * rayLen;
+    vec4 c0 = uProj * vec4(P, 1.0);
+    vec4 c1 = uProj * vec4(P1, 1.0);
+    vec3 s0 = (c0.xyz / c0.w) * 0.5 + 0.5;
+    vec3 s1 = (c1.xyz / c1.w) * 0.5 + 0.5;
+    vec3 ds = s1 - s0;
+
+    // Hi-Z hızlandırmalı kaba yürüyüş + ikili (binary) ince ayar
+    const int kSteps = 28;
+    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    float tPrev = 0.0;
+    float tHit = -1.0;
+    vec2 hitUv = vec2(0.0);
+    float dt = 1.0 / float(kSteps);
+    for (int i = 1; i <= kSteps; ++i) {
+        float t = (float(i) - 0.5 * jitter) * dt;
+        vec3 cur = s0 + ds * t;
+        if (cur.x < 0.0 || cur.x > 1.0 || cur.y < 0.0 || cur.y > 1.0 || cur.z <= 0.0 || cur.z >= 1.0) break;
+        // Kaba Hi-Z erken atlama kontrolü
+        float hizMin = textureLod(tHiZ, cur.xy, 2.0).r;
+        if (cur.z < hizMin - 0.002) { tPrev = t; continue; }
+        float sceneD = texture(tDepth, cur.xy).r;
+        if (sceneD < 0.9999 && cur.z > sceneD + 0.0004) {
+            // İkili arama ile kesişim derinliğini netleştir
+            float lo = tPrev, hi = t;
+            for (int b = 0; b < 5; ++b) {
+                float mid = 0.5 * (lo + hi);
+                vec3 mp = s0 + ds * mid;
+                float md = texture(tDepth, mp.xy).r;
+                if (mp.z > md) hi = mid; else lo = mid;
+            }
+            vec3 fp = s0 + ds * hi;
+            float fd = texture(tDepth, fp.xy).r;
+            vec3 hitViewP = viewPosAt(fp.xy, fd);
+            vec3 rayViewP = viewPosAt(fp.xy, fp.z);
+            float thickness = max(0.04, abs(P.z) * 0.08);
+            if (abs(hitViewP.z - rayViewP.z) < thickness) {
+                tHit = hi;
+                hitUv = fp.xy;
+                break;
+            }
+        }
+        tPrev = t;
+    }
+    if (tHit < 0.0) { oSsr = vec4(0.0); return; }
+
+    vec2 edge = smoothstep(vec2(0.0), vec2(0.08), hitUv) * smoothstep(vec2(0.0), vec2(0.08), vec2(1.0) - hitUv);
+    float roughFade = 1.0 - smoothstep(0.08, 0.55, rough);
+    float fres = 0.04 + 0.96 * pow(1.0 - max(dot(Nv, V), 0.0), 5.0);
+    float conf = clamp(edge.x * edge.y * roughFade * fres * (1.0 - tHit * 0.4), 0.0, 0.85);
+    vec3 reflCol = texture(tColor, hitUv).rgb;
+    oSsr = vec4(max(reflCol, vec3(0.0)), conf);
+}
+)";
+
+const char* kBloomDownFragmentSrc = R"(#version 330 core
+in vec2 vNdc;
+out vec4 oBloom;
+uniform sampler2D tSrc;
+uniform vec2 uTexel;
+uniform int uFirst;
+uniform float uThreshold;
+uniform float uExposure;
+
+float lum3(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+vec3 softThreshold(vec3 c) {
+    float L = lum3(c) * uExposure;
+    float f = L > uThreshold ? (L - uThreshold) / max(L, 1e-6) : 0.0;
+    return max(c * f, vec3(0.0));
+}
+
+void main() {
+    vec2 uv = vNdc * 0.5 + 0.5;
+    // Jimenez 2014 13-dokunuşlu aşağı örnekleme (Karis ateşböceği ağırlığı ilk katmanda)
+    vec3 a = texture(tSrc, uv + uTexel * vec2(-2.0,  2.0)).rgb;
+    vec3 b = texture(tSrc, uv + uTexel * vec2( 0.0,  2.0)).rgb;
+    vec3 c = texture(tSrc, uv + uTexel * vec2( 2.0,  2.0)).rgb;
+    vec3 d = texture(tSrc, uv + uTexel * vec2(-2.0,  0.0)).rgb;
+    vec3 e = texture(tSrc, uv).rgb;
+    vec3 f = texture(tSrc, uv + uTexel * vec2( 2.0,  0.0)).rgb;
+    vec3 g = texture(tSrc, uv + uTexel * vec2(-2.0, -2.0)).rgb;
+    vec3 h = texture(tSrc, uv + uTexel * vec2( 0.0, -2.0)).rgb;
+    vec3 i = texture(tSrc, uv + uTexel * vec2( 2.0, -2.0)).rgb;
+    vec3 j = texture(tSrc, uv + uTexel * vec2(-1.0,  1.0)).rgb;
+    vec3 k = texture(tSrc, uv + uTexel * vec2( 1.0,  1.0)).rgb;
+    vec3 l = texture(tSrc, uv + uTexel * vec2(-1.0, -1.0)).rgb;
+    vec3 m = texture(tSrc, uv + uTexel * vec2( 1.0, -1.0)).rgb;
+    if (uFirst != 0) {
+        a = softThreshold(a); b = softThreshold(b); c = softThreshold(c);
+        d = softThreshold(d); e = softThreshold(e); f = softThreshold(f);
+        g = softThreshold(g); h = softThreshold(h); i = softThreshold(i);
+        j = softThreshold(j); k = softThreshold(k); l = softThreshold(l); m = softThreshold(m);
+        vec3 g0 = (a + b + d + e) * 0.25;
+        vec3 g1 = (b + c + e + f) * 0.25;
+        vec3 g2 = (d + e + g + h) * 0.25;
+        vec3 g3 = (e + f + h + i) * 0.25;
+        vec3 g4 = (j + k + l + m) * 0.25;
+        float w0 = 0.125 / (1.0 + lum3(g0));
+        float w1 = 0.125 / (1.0 + lum3(g1));
+        float w2 = 0.125 / (1.0 + lum3(g2));
+        float w3 = 0.125 / (1.0 + lum3(g3));
+        float w4 = 0.500 / (1.0 + lum3(g4));
+        oBloom = vec4((g0 * w0 + g1 * w1 + g2 * w2 + g3 * w3 + g4 * w4) / max(w0 + w1 + w2 + w3 + w4, 1e-5), 1.0);
+        return;
+    }
+    vec3 sum = e * 0.125 + (a + c + g + i) * 0.03125 + (b + d + f + h) * 0.0625 + (j + k + l + m) * 0.125;
+    oBloom = vec4(max(sum, vec3(0.0)), 1.0);
+}
+)";
+
+const char* kBloomUpFragmentSrc = R"(#version 330 core
+in vec2 vNdc;
+out vec4 oBloom;
+uniform sampler2D tSrc;
+uniform vec2 uTexel;
+uniform float uRadius;
+
+void main() {
+    vec2 uv = vNdc * 0.5 + 0.5;
+    vec2 d = uTexel * uRadius;
+    vec3 sum = texture(tSrc, uv + vec2(-d.x,  d.y)).rgb * 1.0
+             + texture(tSrc, uv + vec2( 0.0,  d.y)).rgb * 2.0
+             + texture(tSrc, uv + vec2( d.x,  d.y)).rgb * 1.0
+             + texture(tSrc, uv + vec2(-d.x,  0.0)).rgb * 2.0
+             + texture(tSrc, uv                   ).rgb * 4.0
+             + texture(tSrc, uv + vec2( d.x,  0.0)).rgb * 2.0
+             + texture(tSrc, uv + vec2(-d.x, -d.y)).rgb * 1.0
+             + texture(tSrc, uv + vec2( 0.0, -d.y)).rgb * 2.0
+             + texture(tSrc, uv + vec2( d.x, -d.y)).rgb * 1.0;
+    oBloom = vec4(sum * (1.0 / 16.0), 1.0);
+}
+)";
+
+const char* kPostFragmentSrc = R"(
+in vec2 vNdc;
+out vec4 oColor;
+uniform sampler2D tHdr;
+uniform sampler2D tNormRough;
+uniform sampler2D tAo;
+uniform sampler2D tSsr;
+uniform sampler2D tBloom;
+uniform vec2 uRes;
+uniform float uBloomIntensity;
+uniform float uCA;
+uniform float uContrast;
+uniform float uSaturation;
+uniform float uVignette;
+
+vec3 sampleSceneHdr(vec2 uv) {
+    vec3 c = texture(tHdr, uv).rgb;
+    vec4 nr = texture(tNormRough, uv);
+    if (dot(nr.xyz, nr.xyz) > 0.25) {
+        float ao = texture(tAo, uv).r;
+        c *= mix(1.0, ao, 0.50);
+        vec4 ssr = texture(tSsr, uv);
+        c = mix(c, ssr.rgb, ssr.a * 0.65);
+    }
+    return max(c, vec3(0.0));
+}
+
+void main() {
+    vec2 uv = vNdc * 0.5 + 0.5;
+    float alpha = texture(tHdr, uv).a;
+    vec3 hdr = sampleSceneHdr(uv);
+
+    // 1) Yanal renk sapması (imager.cpp ile birebir formül: kırmızı dışa, mavi içe)
+    if (uCA > 0.0) {
+        float k = uCA * 0.002;
+        vec2 duv = uv - vec2(0.5);
+        vec2 uvR = clamp(vec2(0.5) + duv * (1.0 + k), vec2(0.0), vec2(1.0));
+        vec2 uvB = clamp(vec2(0.5) + duv * (1.0 - k), vec2(0.0), vec2(1.0));
+        hdr.r = sampleSceneHdr(uvR).r;
+        hdr.b = sampleSceneHdr(uvB).b;
+    }
+
+    // 2) 5 aşamalı HDR Bloom eklemesi
+    if (uBloomIntensity > 0.0) {
+        hdr += max(texture(tBloom, uv).rgb, vec3(0.0)) * uBloomIntensity;
+    }
+
+    // 3) Bradford beyaz dengesi
+    hdr = max(uWB * hdr, vec3(0.0));
+
+    // 4) Pozlanmış orta gri (0.18) etrafında log-kontrast ve doygunluk (imager.cpp ile birebir)
+    if (abs(uContrast - 1.0) > 1e-4 || abs(uSaturation - 1.0) > 1e-4) {
+        float L = max(dot(hdr, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+        float L2 = L;
+        if (abs(uContrast - 1.0) > 1e-4 && L > 0.0) {
+            float Le = L * uExposure;
+            L2 = 0.18 * pow(Le / 0.18, uContrast) / max(uExposure, 1e-6);
+            hdr *= L2 / L;
+        }
+        if (abs(uSaturation - 1.0) > 1e-4) {
+            hdr = vec3(L2) + (hdr - vec3(L2)) * uSaturation;
+        }
+    }
+
+    // 5) Vinyet (köşegen yarısına göre normalize r², imager.cpp ile birebir)
+    if (uVignette > 0.0) {
+        vec2 px = (uv - vec2(0.5)) * uRes;
+        float halfDiag = 0.5 * length(uRes);
+        vec2 d = px / max(halfDiag, 1.0);
+        float r2 = dot(d, d);
+        hdr *= max(0.0, 1.0 - uVignette * r2 * r2 * 0.9 - uVignette * r2 * 0.1);
+    }
+
+    // 6) 64³ 3B ToneLut (WB zaten yukarıda uygulandığı için burada uExposure ile doğrudan LUT)
+    vec3 x = max(hdr * uExposure, vec3(1e-30));
+    vec3 s = clamp((log2(x) - uLut.x) / (uLut.y - uLut.x), 0.0, 1.0);
+    vec3 outRgb = texture(tLut, (s * (uLut.z - 1.0) + 0.5) / uLut.z).rgb;
+    oColor = vec4(outRgb, alpha);
 }
 )";
 
@@ -694,6 +1211,13 @@ bool RasterView::init() {
     m_progPbr = linkSources(kPbrVertexSrc, head + kRealtimeCommonSrc + kPbrFragmentSrc);
     m_progDepth = link(kDepthVertexSrc, kDepthFragmentSrc);
     m_progBg = linkSources(kBgVertexSrc, head + kRealtimeCommonSrc + kBgFragmentSrc);
+    m_progGtao = link(kBgVertexSrc, kGtaoFragmentSrc);
+    m_progAoBlur = link(kBgVertexSrc, kAoBlurFragmentSrc);
+    m_progHiZ = link(kBgVertexSrc, kHiZFragmentSrc);
+    m_progSsr = link(kBgVertexSrc, kSsrFragmentSrc);
+    m_progBloomDown = link(kBgVertexSrc, kBloomDownFragmentSrc);
+    m_progBloomUp = link(kBgVertexSrc, kBloomUpFragmentSrc);
+    m_progPost = linkSources(kBgVertexSrc, head + kRealtimeCommonSrc + kPostFragmentSrc);
     if (m_progPbr && m_progDepth && m_progBg) {
         // Birim zemin dörtgeni (konum, normal, uv); dünya dönüşümü GroundQuad'dan.
         const float q[4][8] = {{0, 0, 0, 0, 1, 0, 0, 0}, {1, 0, 0, 0, 1, 0, 1, 0}, {1, 0, 1, 0, 1, 0, 1, 1}, {0, 0, 1, 0, 1, 0, 0, 1}};
@@ -713,6 +1237,22 @@ bool RasterView::init() {
         }
         gl_glGenVertexArrays(1, &m_emptyVao);
         gl_glBindVertexArray(0);
+        // Heitz 2016 LTC1 & LTC2 64×64 RGBA32F tablolarını bir kez yükle
+        const LtcTables& ltc = getLtcTables();
+        auto uploadLtc = [](GLuint& tex, const std::vector<float>& data) {
+            glGenTextures(1, &tex);
+            glBindTexture(GL_TEXTURE_2D, tex);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+            glTexImage2D(GL_TEXTURE_2D, 0, kRgba32f, LtcTables::kSize, LtcTables::kSize, 0, GL_RGBA, GL_FLOAT, data.data());
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, kClampToEdge);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, kClampToEdge);
+            glBindTexture(GL_TEXTURE_2D, 0);
+        };
+        uploadLtc(m_ltc1Tex, ltc.ltc1);
+        uploadLtc(m_ltc2Tex, ltc.ltc2);
         // Gölge örnekleyicileri (dokular ilk gerçek zamanlı karede: ensureShadowTargets).
         gl_glGenSamplers(1, &m_sampCmp);
         gl_glSamplerParameteri(m_sampCmp, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -755,8 +1295,37 @@ bool RasterView::init() {
     return true;
 }
 
+void RasterView::releaseHdrTargets() {
+    if (m_hdrFbo) gl_glDeleteFramebuffers(1, &m_hdrFbo);
+    if (m_hdrColor) glDeleteTextures(1, &m_hdrColor);
+    if (m_hdrNormRough) glDeleteTextures(1, &m_hdrNormRough);
+    if (m_hdrDepth) glDeleteTextures(1, &m_hdrDepth);
+    if (m_aoFbo) gl_glDeleteFramebuffers(1, &m_aoFbo);
+    if (m_aoTex) glDeleteTextures(1, &m_aoTex);
+    if (m_aoBlurFbo) gl_glDeleteFramebuffers(1, &m_aoBlurFbo);
+    if (m_aoBlurTex) glDeleteTextures(1, &m_aoBlurTex);
+    if (m_hizTex) glDeleteTextures(1, &m_hizTex);
+    for (int i = 0; i < kHiZLevels; ++i) {
+        if (m_hizFbo[i]) gl_glDeleteFramebuffers(1, &m_hizFbo[i]);
+        m_hizFbo[i] = 0;
+    }
+    if (m_ssrFbo) gl_glDeleteFramebuffers(1, &m_ssrFbo);
+    if (m_ssrTex) glDeleteTextures(1, &m_ssrTex);
+    for (int i = 0; i < kBloomLevels; ++i) {
+        if (m_bloomFbo[i]) gl_glDeleteFramebuffers(1, &m_bloomFbo[i]);
+        if (m_bloomTex[i]) glDeleteTextures(1, &m_bloomTex[i]);
+        m_bloomFbo[i] = m_bloomTex[i] = 0;
+    }
+    m_hdrFbo = m_hdrColor = m_hdrNormRough = m_hdrDepth = 0;
+    m_aoFbo = m_aoTex = m_aoBlurFbo = m_aoBlurTex = 0;
+    m_hizTex = m_ssrFbo = m_ssrTex = 0;
+    m_hdrW = m_hdrH = 0;
+    m_hdrOk = false;
+}
+
 void RasterView::release() {
     if (!m_ready) return;
+    releaseHdrTargets();
     for (auto& [k, g] : m_meshes) {
         gl_glDeleteVertexArrays(1, &g.vao);
         gl_glDeleteBuffers(1, &g.vbo);
@@ -775,6 +1344,13 @@ void RasterView::release() {
     gl_glDeleteProgram(m_progPbr);
     gl_glDeleteProgram(m_progDepth);
     gl_glDeleteProgram(m_progBg);
+    gl_glDeleteProgram(m_progGtao);
+    gl_glDeleteProgram(m_progAoBlur);
+    gl_glDeleteProgram(m_progHiZ);
+    gl_glDeleteProgram(m_progSsr);
+    gl_glDeleteProgram(m_progBloomDown);
+    gl_glDeleteProgram(m_progBloomUp);
+    gl_glDeleteProgram(m_progPost);
     gl_glDeleteVertexArrays(1, &m_quadVao);
     gl_glDeleteBuffers(1, &m_quadVbo);
     gl_glDeleteBuffers(1, &m_quadIbo);
@@ -787,14 +1363,20 @@ void RasterView::release() {
     gl_glDeleteSamplers(1, &m_sampRaw);
     glDeleteTextures(1, &m_envTex);
     glDeleteTextures(1, &m_lutTex);
+    glDeleteTextures(1, &m_ltc1Tex);
+    glDeleteTextures(1, &m_ltc2Tex);
+    glDeleteTextures(1, &m_iesTex);
     for (auto& map : m_textures) {
         for (auto& [k, t] : map) glDeleteTextures(1, &t.tex);
         map.clear();
     }
     m_shadowFbo = m_shadowTex = m_glassFbo = m_glassTex = m_envTex = m_lutTex = 0;
+    m_ltc1Tex = m_ltc2Tex = m_iesTex = 0;
+    m_iesSlices = 0;
     m_shadowOk = false;
     m_envSource.reset();
     m_lutSource.reset();
+    m_iesSource.reset();
     m_ready = false;
 }
 
@@ -965,6 +1547,91 @@ bool RasterView::ensureTargets(int w, int h) {
     return ok;
 }
 
+bool RasterView::ensureHdrTargets(int w, int h) {
+    if (w == m_hdrW && h == m_hdrH && m_hdrFbo) return m_hdrOk;
+    releaseHdrTargets();
+    if (!m_progGtao || !m_progAoBlur || !m_progHiZ || !m_progSsr || !m_progBloomDown || !m_progBloomUp || !m_progPost)
+        return false;
+
+    auto makeTex2D = [](GLuint& tex, GLenum internalFmt, int tw, int th, GLenum fmt, GLenum type, GLenum filter) {
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(internalFmt), tw, th, 0, fmt, type, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, static_cast<GLint>(filter));
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, static_cast<GLint>(filter));
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, kClampToEdge);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, kClampToEdge);
+    };
+    auto checkFbo = [&]() { return gl_glCheckFramebufferStatus(kFramebuffer) == kFramebufferComplete; };
+
+    // 1) Ana MRT HDR hedefi: Color0=RGBA16F, Color1=RGBA16F (Normal+Rough), Depth=DEPTH24
+    makeTex2D(m_hdrColor, kRgba16f, w, h, GL_RGBA, GL_FLOAT, GL_LINEAR);
+    makeTex2D(m_hdrNormRough, kRgba16f, w, h, GL_RGBA, GL_FLOAT, GL_NEAREST);
+    makeTex2D(m_hdrDepth, kDepthComponent24, w, h, GL_DEPTH_COMPONENT, GL_FLOAT, GL_NEAREST);
+    gl_glGenFramebuffers(1, &m_hdrFbo);
+    gl_glBindFramebuffer(kFramebuffer, m_hdrFbo);
+    gl_glFramebufferTexture2D(kFramebuffer, kColorAttachment0, GL_TEXTURE_2D, m_hdrColor, 0);
+    gl_glFramebufferTexture2D(kFramebuffer, kColorAttachment1, GL_TEXTURE_2D, m_hdrNormRough, 0);
+    gl_glFramebufferTexture2D(kFramebuffer, kDepthAttachment, GL_TEXTURE_2D, m_hdrDepth, 0);
+    const GLenum mrt[2] = {kColorAttachment0, kColorAttachment1};
+    gl_glDrawBuffers(2, mrt);
+    bool ok = checkFbo();
+
+    // 2) Yarım çözünürlük GTAO + bilateral bulanıklık + SSR
+    const int hw = std::max(1, w / 2);
+    const int hh = std::max(1, h / 2);
+    auto makeSingleFbo = [&](GLuint& fbo, GLuint& tex, GLenum intFmt, int tw, int th, GLenum fmt, GLenum type) {
+        makeTex2D(tex, intFmt, tw, th, fmt, type, GL_LINEAR);
+        gl_glGenFramebuffers(1, &fbo);
+        gl_glBindFramebuffer(kFramebuffer, fbo);
+        gl_glFramebufferTexture2D(kFramebuffer, kColorAttachment0, GL_TEXTURE_2D, tex, 0);
+        return checkFbo();
+    };
+    ok = ok && makeSingleFbo(m_aoFbo, m_aoTex, kRgba8, hw, hh, GL_RGBA, GL_UNSIGNED_BYTE);
+    ok = ok && makeSingleFbo(m_aoBlurFbo, m_aoBlurTex, kRgba8, hw, hh, GL_RGBA, GL_UNSIGNED_BYTE);
+    ok = ok && makeSingleFbo(m_ssrFbo, m_ssrTex, kRgba16f, hw, hh, GL_RGBA, GL_FLOAT);
+
+    // 3) Hi-Z min-Z derinlik piramidi (R32F, 5 mip seviyesi)
+    glGenTextures(1, &m_hizTex);
+    glBindTexture(GL_TEXTURE_2D, m_hizTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, kClampToEdge);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, kClampToEdge);
+    glTexParameteri(GL_TEXTURE_2D, kTextureBaseLevel, 0);
+    glTexParameteri(GL_TEXTURE_2D, kTextureMaxLevel, kHiZLevels - 1);
+    int zw = hw, zh = hh;
+    for (int i = 0; i < kHiZLevels; ++i) {
+        m_hizW[i] = zw;
+        m_hizH[i] = zh;
+        glTexImage2D(GL_TEXTURE_2D, i, static_cast<GLint>(kR32f), zw, zh, 0, kRed, GL_FLOAT, nullptr);
+        gl_glGenFramebuffers(1, &m_hizFbo[i]);
+        gl_glBindFramebuffer(kFramebuffer, m_hizFbo[i]);
+        gl_glFramebufferTexture2D(kFramebuffer, kColorAttachment0, GL_TEXTURE_2D, m_hizTex, i);
+        ok = ok && checkFbo();
+        zw = std::max(1, zw / 2);
+        zh = std::max(1, zh / 2);
+    }
+
+    // 4) 5 seviyeli HDR Bloom zinciri
+    int bw = hw, bh = hh;
+    for (int i = 0; i < kBloomLevels; ++i) {
+        m_bloomW[i] = bw;
+        m_bloomH[i] = bh;
+        ok = ok && makeSingleFbo(m_bloomFbo[i], m_bloomTex[i], kRgba16f, bw, bh, GL_RGBA, GL_FLOAT);
+        bw = std::max(1, bw / 2);
+        bh = std::max(1, bh / 2);
+    }
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    gl_glBindFramebuffer(kFramebuffer, 0);
+    m_hdrW = w;
+    m_hdrH = h;
+    m_hdrOk = ok;
+    if (!ok) releaseHdrTargets();
+    return m_hdrOk;
+}
+
 unsigned int RasterView::render(const Frame& f, const std::vector<Item>& items, ViewMode mode, bool overlay) {
     if (!m_ready || f.width <= 0 || f.height <= 0) return 0;
     purge();
@@ -973,9 +1640,11 @@ unsigned int RasterView::render(const Frame& f, const std::vector<Item>& items, 
         if (!m_progPbr || !f.realtime || !ensureShadowTargets()) mode = ViewMode::Solid; // sürücü desteklemiyorsa Katı
         else {
             renderRealtime(f, items);
-            gl_glBindFramebuffer(kReadFramebuffer, m_msFbo);
-            gl_glBindFramebuffer(kDrawFramebuffer, m_fbo);
-            gl_glBlitFramebuffer(0, 0, f.width, f.height, 0, 0, f.width, f.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            if (!m_hdrOk) {
+                gl_glBindFramebuffer(kReadFramebuffer, m_msFbo);
+                gl_glBindFramebuffer(kDrawFramebuffer, m_fbo);
+                gl_glBlitFramebuffer(0, 0, f.width, f.height, 0, 0, f.width, f.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            }
             gl_glBindFramebuffer(kFramebuffer, 0);
             gl_glBindVertexArray(0);
             gl_glUseProgram(0);
@@ -1063,8 +1732,6 @@ unsigned int RasterView::render(const Frame& f, const std::vector<Item>& items, 
         glDepthMask(GL_FALSE);
         gl_glUseProgram(m_progFlat);
         setMat(m_progFlat, "uViewProj", viewProj);
-        // Izgara kameranın altında kalsın: hücreye yuvarlanmış konuma taşınır (çizgiler
-        // dünyada sabit görünür, kamera dolaşınca kaymaz), hücre boyuna ölçeklenir.
         Mat4f m = Transform::translate(Vec3f(std::floor(f.focus.x / f.gridStep) * f.gridStep, f.groundY,
                                              std::floor(f.focus.z / f.gridStep) * f.gridStep)).matrix();
         m(0, 0) = m(1, 1) = m(2, 2) = f.gridStep;
@@ -1092,7 +1759,9 @@ unsigned int RasterView::render(const Frame& f, const std::vector<Item>& items, 
 
 void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) {
     const Realtime& rt = *f.realtime;
-    // ── Ortam haritası ve ton eşleme LUT'u: yalnız değişince yüklenir ──
+    const bool useHdr = ensureHdrTargets(f.width, f.height);
+
+    // ── Ortam haritası, ton eşleme LUT'u ve IES 1B atlası: yalnız değişince yüklenir ──
     if (rt.env && m_envSource.lock() != rt.env) {
         if (!m_envTex) glGenTextures(1, &m_envTex);
         glBindTexture(GL_TEXTURE_2D, m_envTex);
@@ -1102,8 +1771,8 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         gl_glGenerateMipmap(GL_TEXTURE_2D);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);   // u sarılır
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, kClampToEdge); // kutuplar
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, kClampToEdge);
         m_envLevels = 1 + static_cast<int>(std::floor(std::log2(static_cast<float>(std::max(rt.env->width, rt.env->height)))));
         m_envSource = rt.env;
     }
@@ -1120,6 +1789,22 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         glTexParameteri(kTexture3D, kTextureWrapR, kClampToEdge);
         glBindTexture(kTexture3D, 0);
         m_lutSource = rt.lut;
+    }
+    if (rt.iesAtlas && rt.iesAtlas->slices > 0 && m_iesSource.lock() != rt.iesAtlas) {
+        if (!m_iesTex) glGenTextures(1, &m_iesTex);
+        glBindTexture(GL_TEXTURE_2D, m_iesTex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(kR32f), rt.iesAtlas->width, rt.iesAtlas->slices,
+                     0, kRed, GL_FLOAT, rt.iesAtlas->data.data());
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, kClampToEdge);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, kClampToEdge);
+        m_iesSlices = rt.iesAtlas->slices;
+        m_iesSource = rt.iesAtlas;
+    } else if (!rt.iesAtlas || rt.iesAtlas->slices == 0) {
+        m_iesSlices = 0;
     }
     glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -1153,7 +1838,6 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         slotOf[i] = k;
         const ShadowProjection sp = shadowProjection(L, box);
         shadowVP[k] = sp.viewProj;
-        // Normal yönünde kaydırma: alıcının düzleminde ~1.5 teksel (gölge sivilcesi olmasın).
         const float dist = sp.ortho ? 1.0f : std::max(1e-3f, (L.position - box.centroid()).length());
         const float texelWorld = dist / (sp.uvPerWorld * kShadowSize);
         shadowA[k * 4] = sp.ortho ? 1.0f : 0.0f;
@@ -1165,11 +1849,7 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         glViewport((k & 1) * kShadowSize, (k >> 1) * kShadowSize, kShadowSize, kShadowSize);
         setMat(m_progDepth, "uViewProj", shadowVP[k]);
         for (const Item& it : items) {
-            // Cam ışığı geçirir: ışın izleyicide gölgesi neredeyse yok (kostik bile düşer); opak
-            // gölge düşürmesi yanlış ve göze batan bir kama bırakırdı.
             if (it.material && it.material->glass) continue;
-            // ponytail: gölge haritası ikilidir: kesik 0.5'te eşiklenir, yarı saydam yüzey ya tam
-            // gölge ya hiç; kutu eşlemeli maske gölgede dolu kalır. Işın izleyici ikisini de doğru yapar.
             if (it.material && it.material->opacity < 0.5f) continue;
             GpuMesh* g = upload(it.mesh);
             if (!g) continue;
@@ -1185,7 +1865,6 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         }
     }
     set1i(m_progDepth, "uCutout", 0);
-    // Camların derinliği (aynı izdüşümler, ½ çözünürlüklü atlas): kısmi gölge.
     gl_glBindFramebuffer(kFramebuffer, m_glassFbo);
     glViewport(0, 0, kShadowSize, kShadowSize);
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -1202,13 +1881,17 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
     }
     glDisable(GL_POLYGON_OFFSET_FILL);
 
-    // ── 2. Arka plan ──
-    gl_glBindFramebuffer(kFramebuffer, m_msFbo);
+    // ── 2. Ana HDR MRT hedefi (veya yedek MSAA hedefi) + Arka plan ──
+    const GLenum mrtBoth[2] = {kColorAttachment0, kColorAttachment1};
+    const GLenum mrtColorOnly[1] = {kColorAttachment0};
+    gl_glBindFramebuffer(kFramebuffer, useHdr ? m_hdrFbo : m_msFbo);
+    if (useHdr) gl_glDrawBuffers(2, mrtBoth);
     glViewport(0, 0, f.width, f.height);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glClearColor(0.0f, 0.0f, 0.0f, rt.background == 2 ? 0.0f : 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (!m_envTex || !m_lutTex) return;
+
     gl_glActiveTexture(kTexture0);
     glBindTexture(GL_TEXTURE_2D, m_envTex);
     gl_glActiveTexture(kTexture0 + 1);
@@ -1222,16 +1905,23 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
     gl_glActiveTexture(kTexture0 + 8);
     glBindTexture(GL_TEXTURE_2D, m_glassTex);
     gl_glBindSampler(8, m_sampCmp);
-    auto setCommon = [&](GLuint p) {
-        gl_glUseProgram(p);
-        set1i(p, "tEnv", 0);
-        set1i(p, "tLut", 1);
-        set1f(p, "uEnvLevels", static_cast<float>(m_envLevels));
-        set1f(p, "uEnvWidth", static_cast<float>(rt.env ? rt.env->width : 1));
-        set3c(p, "uGroundExtra", rt.groundExtra);
-        set1f(p, "uExposure", rt.exposure);
-        gl_glUniformMatrix3fv(loc(p, "uWB"), 1, GL_TRUE, rt.whiteBalance);
-        gl_glUniform3f(loc(p, "uLut"), rt.lut->minLog2, rt.lut->maxLog2, static_cast<float>(rt.lut->size));
+    gl_glActiveTexture(kTexture0 + 10);
+    glBindTexture(GL_TEXTURE_2D, m_ltc1Tex);
+    gl_glActiveTexture(kTexture0 + 11);
+    glBindTexture(GL_TEXTURE_2D, m_ltc2Tex);
+    gl_glActiveTexture(kTexture0 + 12);
+    glBindTexture(GL_TEXTURE_2D, m_iesTex);
+
+    auto setCommon = [&](GLuint prog) {
+        gl_glUseProgram(prog);
+        set1i(prog, "tEnv", 0);
+        set1i(prog, "tLut", 1);
+        set1f(prog, "uEnvLevels", static_cast<float>(m_envLevels));
+        set1f(prog, "uEnvWidth", static_cast<float>(rt.env ? rt.env->width : 1));
+        set3c(prog, "uGroundExtra", rt.groundExtra);
+        set1f(prog, "uExposure", rt.exposure);
+        gl_glUniformMatrix3fv(loc(prog, "uWB"), 1, GL_TRUE, rt.whiteBalance);
+        gl_glUniform3f(loc(prog, "uLut"), rt.lut->minLog2, rt.lut->maxLog2, static_cast<float>(rt.lut->size));
     };
     if (rt.background != 2) {
         glDisable(GL_DEPTH_TEST);
@@ -1241,15 +1931,17 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         set3f(m_progBg, "uEye", f.eye);
         set1i(m_progBg, "uMode", rt.background);
         set3c(m_progBg, "uColor", rt.backgroundColor);
+        set1i(m_progBg, "uHdrMode", useHdr ? 1 : 0);
         gl_glBindVertexArray(m_emptyVao);
         glDrawArrays(GL_TRIANGLES, 0, 3);
         glDepthMask(GL_TRUE);
         glEnable(GL_DEPTH_TEST);
     }
 
-    // ── 3. Opak yüzeyler ──
+    // ── 3. Opak yüzeyler (LTC + IES + PCSS + SH9 + MRT Normal/Roughness) ──
     const GLuint p = m_progPbr;
     setCommon(p);
+    set1i(p, "uHdrMode", useHdr ? 1 : 0);
     setMat(p, "uViewProj", viewProj);
     set3f(p, "uEye", f.eye);
     set1i(p, "tShadow", 2);
@@ -1257,13 +1949,20 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
     set1i(p, "tRough", 4);
     set1i(p, "tMetal", 5);
     set1i(p, "tNormal", 6);
+    set1i(p, "tShadowDepth", 7);
+    set1i(p, "tGlassShadow", 8);
     set1i(p, "tOpacity", 9);
+    set1i(p, "tLtc1", 10);
+    set1i(p, "tLtc2", 11);
+    set1i(p, "tIes", 12);
+    set1i(p, "uIesSlices", m_iesSlices);
     float sh[27] = {};
     if (rt.env)
         for (int i = 0; i < 9; ++i)
             for (int c = 0; c < 3; ++c) sh[i * 3 + c] = rt.env->sh[i][c];
     gl_glUniform3fv(loc(p, "uSH"), 9, sh);
     float lpos[64] = {}, ldir[64] = {}, lcol[48] = {}, lcone[64] = {};
+    float lAreaU[48] = {}, lAreaV[48] = {}, lAreaRad[48] = {};
     for (int i = 0; i < lightCount; ++i) {
         const RealtimeLight& L = rt.lights[static_cast<size_t>(i)];
         const float pp[4] = {L.position.x, L.position.y, L.position.z, static_cast<float>(static_cast<int>(L.type))};
@@ -1276,6 +1975,16 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         lcone[i * 4] = L.cosInner;
         lcone[i * 4 + 1] = L.cosOuter;
         lcone[i * 4 + 2] = static_cast<float>(slotOf[i]);
+        lcone[i * 4 + 3] = static_cast<float>(L.iesSlice);
+        lAreaU[i * 3] = L.areaU.x;
+        lAreaU[i * 3 + 1] = L.areaU.y;
+        lAreaU[i * 3 + 2] = L.areaU.z;
+        lAreaV[i * 3] = L.areaV.x;
+        lAreaV[i * 3 + 1] = L.areaV.y;
+        lAreaV[i * 3 + 2] = L.areaV.z;
+        lAreaRad[i * 3] = L.areaRadiance.r;
+        lAreaRad[i * 3 + 1] = L.areaRadiance.g;
+        lAreaRad[i * 3 + 2] = L.areaRadiance.b;
     }
     set1i(p, "uLightCount", lightCount);
     if (lightCount > 0) {
@@ -1283,6 +1992,9 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         gl_glUniform4fv(loc(p, "uLDir"), lightCount, ldir);
         gl_glUniform3fv(loc(p, "uLCol"), lightCount, lcol);
         gl_glUniform4fv(loc(p, "uLCone"), lightCount, lcone);
+        gl_glUniform3fv(loc(p, "uLAreaU"), lightCount, lAreaU);
+        gl_glUniform3fv(loc(p, "uLAreaV"), lightCount, lAreaV);
+        gl_glUniform3fv(loc(p, "uLAreaRad"), lightCount, lAreaRad);
     }
     float vps[64];
     for (int k = 0; k < 4; ++k)
@@ -1291,8 +2003,6 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
     gl_glUniformMatrix4fv(loc(p, "uShadowVP"), 4, GL_TRUE, vps);
     gl_glUniform4fv(loc(p, "uShadowA"), 4, shadowA);
     gl_glUniform4fv(loc(p, "uShadowB"), 4, shadowB);
-    set1i(p, "tShadowDepth", 7);
-    set1i(p, "tGlassShadow", 8);
     const int fc = static_cast<int>(std::min<size_t>({rt.footprints.size(), rt.footprintGaps.size(), 32}));
     float foot[128] = {}, gaps[32] = {};
     for (int i = 0; i < fc; ++i) {
@@ -1377,6 +2087,7 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         setMat(p, "uNormal", m.inverse(), false);
         set1i(p, "uGround", rt.groundShadowOnly ? 2 : 1);
         if (rt.groundShadowOnly) {
+            if (useHdr) gl_glDrawBuffers(1, mrtColorOnly);
             glEnable(GL_BLEND);
             gl_glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
             glDepthMask(GL_FALSE);
@@ -1385,11 +2096,13 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
         glDisable(GL_BLEND);
         glDepthMask(GL_TRUE);
+        if (rt.groundShadowOnly && useHdr) gl_glDrawBuffers(2, mrtBoth);
         set1i(p, "uGround", 0);
     }
 
     // ── 5. Cam: arkadan öne; önce geçirgenlik (çarpım), sonra yansıma (ekleme) ──
     if (!glass.empty()) {
+        if (useHdr) gl_glDrawBuffers(1, mrtColorOnly); // cam normal tamponunu bozmasın
         auto distOf = [&](const Item* it) {
             const Vec3f c(it->model.data[0][3], it->model.data[1][3], it->model.data[2][3]);
             return (c - f.eye).lengthSquared();
@@ -1414,10 +2127,166 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         glDisable(GL_BLEND);
         set1i(p, "uGlass", 0);
     }
+
+    // ── 6. v2 Ekran Uzayı Geçişleri (GTAO → Bilateral Blur → Hi-Z → SSR → 5-Seviye Bloom → GPU Imager + ToneLut) ──
+    if (useHdr) {
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        glDisable(GL_BLEND);
+        gl_glBindVertexArray(m_emptyVao);
+
+        const int hw = std::max(1, f.width / 2);
+        const int hh = std::max(1, f.height / 2);
+        const Mat4f invProj = f.proj.inverse();
+        const float sceneDiag = box.pMin.x <= box.pMax.x ? (box.pMax - box.pMin).length() : 3.0f;
+
+        // 6a) GTAO (Jimenez 2016)
+        gl_glBindFramebuffer(kFramebuffer, m_aoFbo);
+        glViewport(0, 0, hw, hh);
+        gl_glUseProgram(m_progGtao);
+        gl_glActiveTexture(kTexture0);
+        glBindTexture(GL_TEXTURE_2D, m_hdrDepth);
+        gl_glActiveTexture(kTexture0 + 1);
+        glBindTexture(GL_TEXTURE_2D, m_hdrNormRough);
+        set1i(m_progGtao, "tDepth", 0);
+        set1i(m_progGtao, "tNormRough", 1);
+        setMat(m_progGtao, "uInvProj", invProj);
+        setMat(m_progGtao, "uView", f.view);
+        gl_glUniform2f(loc(m_progGtao, "uInvRes"), 1.0f / static_cast<float>(hw), 1.0f / static_cast<float>(hh));
+        set1f(m_progGtao, "uRadius", std::clamp(sceneDiag * 0.14f, 0.12f, 2.5f));
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
+        // 6b) Derinliğe duyarlı iki taraflı AO bulanıklığı
+        gl_glBindFramebuffer(kFramebuffer, m_aoBlurFbo);
+        glViewport(0, 0, hw, hh);
+        gl_glUseProgram(m_progAoBlur);
+        gl_glActiveTexture(kTexture0);
+        glBindTexture(GL_TEXTURE_2D, m_aoTex);
+        gl_glActiveTexture(kTexture0 + 1);
+        glBindTexture(GL_TEXTURE_2D, m_hdrDepth);
+        set1i(m_progAoBlur, "tAo", 0);
+        set1i(m_progAoBlur, "tDepth", 1);
+        gl_glUniform2f(loc(m_progAoBlur, "uInvRes"), 1.0f / static_cast<float>(hw), 1.0f / static_cast<float>(hh));
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
+        // 6c) Hi-Z min-Z derinlik piramidi (5 mip seviyesi)
+        gl_glUseProgram(m_progHiZ);
+        set1i(m_progHiZ, "tSrc", 0);
+        for (int lv = 0; lv < kHiZLevels; ++lv) {
+            gl_glBindFramebuffer(kFramebuffer, m_hizFbo[lv]);
+            glViewport(0, 0, m_hizW[lv], m_hizH[lv]);
+            gl_glActiveTexture(kTexture0);
+            if (lv == 0) {
+                glBindTexture(GL_TEXTURE_2D, m_hdrDepth);
+                set1i(m_progHiZ, "uCopy", 1);
+                gl_glUniform2f(loc(m_progHiZ, "uSrcSize"), static_cast<float>(f.width), static_cast<float>(f.height));
+            } else {
+                glBindTexture(GL_TEXTURE_2D, m_hizTex);
+                glTexParameteri(GL_TEXTURE_2D, kTextureBaseLevel, lv - 1);
+                glTexParameteri(GL_TEXTURE_2D, kTextureMaxLevel, lv - 1);
+                set1i(m_progHiZ, "uCopy", 0);
+                gl_glUniform2f(loc(m_progHiZ, "uSrcSize"), static_cast<float>(m_hizW[lv - 1]), static_cast<float>(m_hizH[lv - 1]));
+            }
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+        }
+        glBindTexture(GL_TEXTURE_2D, m_hizTex);
+        glTexParameteri(GL_TEXTURE_2D, kTextureBaseLevel, 0);
+        glTexParameteri(GL_TEXTURE_2D, kTextureMaxLevel, kHiZLevels - 1);
+
+        // 6d) Hi-Z hızlandırmalı Ekran Uzayı Yansımaları (SSR)
+        gl_glBindFramebuffer(kFramebuffer, m_ssrFbo);
+        glViewport(0, 0, hw, hh);
+        gl_glUseProgram(m_progSsr);
+        gl_glActiveTexture(kTexture0);
+        glBindTexture(GL_TEXTURE_2D, m_hdrColor);
+        gl_glActiveTexture(kTexture0 + 1);
+        glBindTexture(GL_TEXTURE_2D, m_hdrNormRough);
+        gl_glActiveTexture(kTexture0 + 2);
+        glBindTexture(GL_TEXTURE_2D, m_hdrDepth);
+        gl_glActiveTexture(kTexture0 + 3);
+        glBindTexture(GL_TEXTURE_2D, m_hizTex);
+        set1i(m_progSsr, "tColor", 0);
+        set1i(m_progSsr, "tNormRough", 1);
+        set1i(m_progSsr, "tDepth", 2);
+        set1i(m_progSsr, "tHiZ", 3);
+        setMat(m_progSsr, "uView", f.view);
+        setMat(m_progSsr, "uProj", f.proj);
+        setMat(m_progSsr, "uInvProj", invProj);
+        set1f(m_progSsr, "uMaxDist", std::clamp(sceneDiag * 1.25f, 1.0f, 30.0f));
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
+        // 6e) 5 aşamalı HDR Bloom (yalnız bloomIntensity > 0 ise)
+        const ImagerSettings& im = rt.imager;
+        if (im.bloomIntensity > 0.0f) {
+            gl_glUseProgram(m_progBloomDown);
+            set1i(m_progBloomDown, "tSrc", 0);
+            set1f(m_progBloomDown, "uThreshold", std::max(0.0f, im.bloomThreshold));
+            set1f(m_progBloomDown, "uExposure", rt.exposure);
+            for (int lv = 0; lv < kBloomLevels; ++lv) {
+                gl_glBindFramebuffer(kFramebuffer, m_bloomFbo[lv]);
+                glViewport(0, 0, m_bloomW[lv], m_bloomH[lv]);
+                gl_glActiveTexture(kTexture0);
+                glBindTexture(GL_TEXTURE_2D, lv == 0 ? m_hdrColor : m_bloomTex[lv - 1]);
+                const int sw = lv == 0 ? f.width : m_bloomW[lv - 1];
+                const int sh2 = lv == 0 ? f.height : m_bloomH[lv - 1];
+                gl_glUniform2f(loc(m_progBloomDown, "uTexel"), 1.0f / static_cast<float>(sw), 1.0f / static_cast<float>(sh2));
+                set1i(m_progBloomDown, "uFirst", lv == 0 ? 1 : 0);
+                glDrawArrays(GL_TRIANGLES, 0, 3);
+            }
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_ONE);
+            gl_glUseProgram(m_progBloomUp);
+            set1i(m_progBloomUp, "tSrc", 0);
+            const float bRad = std::clamp(im.bloomRadius * 28.0f, 0.5f, 3.0f);
+            set1f(m_progBloomUp, "uRadius", bRad);
+            for (int lv = kBloomLevels - 1; lv > 0; --lv) {
+                gl_glBindFramebuffer(kFramebuffer, m_bloomFbo[lv - 1]);
+                glViewport(0, 0, m_bloomW[lv - 1], m_bloomH[lv - 1]);
+                gl_glActiveTexture(kTexture0);
+                glBindTexture(GL_TEXTURE_2D, m_bloomTex[lv]);
+                gl_glUniform2f(loc(m_progBloomUp, "uTexel"), 1.0f / static_cast<float>(m_bloomW[lv]),
+                               1.0f / static_cast<float>(m_bloomH[lv]));
+                glDrawArrays(GL_TRIANGLES, 0, 3);
+            }
+            glDisable(GL_BLEND);
+        }
+
+        // 6f) Son birleştirme + GPU Imager (CA, Bloom, WB, Kontrast, Doygunluk, Vinyet) + 64³ ToneLut → m_fbo
+        gl_glBindFramebuffer(kFramebuffer, m_fbo);
+        glViewport(0, 0, f.width, f.height);
+        setCommon(m_progPost);
+        gl_glActiveTexture(kTexture0);
+        glBindTexture(GL_TEXTURE_2D, m_hdrColor);
+        gl_glActiveTexture(kTexture0 + 1);
+        glBindTexture(kTexture3D, m_lutTex);
+        gl_glActiveTexture(kTexture0 + 2);
+        glBindTexture(GL_TEXTURE_2D, m_hdrNormRough);
+        gl_glActiveTexture(kTexture0 + 3);
+        glBindTexture(GL_TEXTURE_2D, m_aoBlurTex);
+        gl_glActiveTexture(kTexture0 + 4);
+        glBindTexture(GL_TEXTURE_2D, m_ssrTex);
+        gl_glActiveTexture(kTexture0 + 5);
+        glBindTexture(GL_TEXTURE_2D, m_bloomTex[0]);
+        set1i(m_progPost, "tHdr", 0);
+        set1i(m_progPost, "tLut", 1);
+        set1i(m_progPost, "tNormRough", 2);
+        set1i(m_progPost, "tAo", 3);
+        set1i(m_progPost, "tSsr", 4);
+        set1i(m_progPost, "tBloom", 5);
+        gl_glUniform2f(loc(m_progPost, "uRes"), static_cast<float>(f.width), static_cast<float>(f.height));
+        set1f(m_progPost, "uBloomIntensity", im.bloomIntensity);
+        set1f(m_progPost, "uCA", im.chromaticAberration);
+        set1f(m_progPost, "uContrast", im.contrast);
+        set1f(m_progPost, "uSaturation", im.saturation);
+        set1f(m_progPost, "uVignette", im.vignette);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDepthMask(GL_TRUE);
+    }
+
     gl_glBindSampler(2, 0);
     gl_glBindSampler(7, 0);
     gl_glBindSampler(8, 0);
-    for (int u = 8; u >= 0; --u) {
+    for (int u = 12; u >= 0; --u) {
         gl_glActiveTexture(kTexture0 + static_cast<GLenum>(u));
         glBindTexture(GL_TEXTURE_2D, 0);
         if (u == 1) glBindTexture(kTexture3D, 0);
