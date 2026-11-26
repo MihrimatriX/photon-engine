@@ -108,6 +108,14 @@ float Film::relativeError(int x, int y) const {
     return std::sqrt(var / static_cast<float>(n)) / (std::max(mean, 0.0f) + 0.01f);
 }
 
+void Film::merge(const Film& other) {
+    if (other.m_width != m_width || other.m_height != m_height) return;
+    for (size_t i = 0; i < m_sum.size(); ++i) m_sum[i] += other.m_sum[i];
+    for (size_t i = 0; i < m_count.size(); ++i) m_count[i] += other.m_count[i];
+    for (size_t i = 0; i < m_sumSq.size(); ++i) m_sumSq[i] += other.m_sumSq[i];
+    m_rejected.fetch_add(other.rejectedSamples(), std::memory_order_relaxed);
+}
+
 Image Film::resolve() const {
     Image out(m_width, m_height);
     for (int y = 0; y < m_height; ++y) {

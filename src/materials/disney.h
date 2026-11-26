@@ -49,6 +49,12 @@ public:
     float specular() const { return m_specular; }
     float clearCoat() const { return m_clearCoat; }
     float clearCoatRoughness() const { return m_clearCoatRoughness; }
+    float ior() const { return m_ior; }
+    float specularTransmission() const { return m_specularTransmission; }
+    float coatIor() const { return m_coatIor; }
+    const Color3f& coatTint() const { return m_coatTint; }
+    const Color3f& sheenColor() const { return m_sheenColor; }
+    bool hasCustomSheenColor() const { return m_hasSheenColor; }
 
     void setBaseColor(const Color3f& c) { m_baseColor = c; }
     void setMetallic(float v) { m_metallic = v; }
@@ -56,6 +62,18 @@ public:
     void setSpecular(float v) { m_specular = v; }
     void setClearCoat(float v) { m_clearCoat = std::clamp(v, 0.0f, 1.0f); }
     void setClearCoatRoughness(float v) { m_clearCoatRoughness = std::max(0.001f, v); }
+    /// Birleşik OpenPBR: taban yalıtkan kırılma indisi (varsayılan 1.5 → F0 = 0.04).
+    void setIor(float v) { m_ior = std::clamp(v, 1.0001f, 3.0f); }
+    /// Birleşik OpenPBR / glTF KHR_materials_transmission: speküler cam kırılması ağırlığı [0, 1].
+    void setSpecularTransmission(float v) { m_specularTransmission = std::clamp(v, 0.0f, 1.0f); }
+    /// Birleşik OpenPBR: vernik katmanı kırılma indisi (varsayılan 1.5 → F0 = 0.04).
+    void setCoatIor(float v) { m_coatIor = std::clamp(v, 1.0001f, 3.0f); }
+    /// Birleşik OpenPBR: vernik katmanının altından geçen ışığa verdiği renk tonu (varsayılan beyaz).
+    void setCoatTint(const Color3f& c) { m_coatTint = c.clamp(0.0f, 1.0f); }
+    /// Birleşik OpenPBR / glTF KHR_materials_sheen: açık kumaş parlaması rengi.
+    void setSheenColor(const Color3f& c) { m_sheenColor = c.clamp(0.0f, 1.0f); m_hasSheenColor = true; }
+    void clearCustomSheenColor() { m_sheenColor = Color3f(1.0f); m_hasSheenColor = false; }
+    bool isVolumeBoundary() const override { return m_specularTransmission > 0.0f; }
     void setAnisotropy(float v) { m_anisotropy = std::clamp(v, 0.0f, 1.0f); }
     void setSheen(float v) { m_sheen = std::clamp(v, 0.0f, 1.0f); }
     /// Kumaş parlamasının (Charlie sheen) lif dağınıklığı: küçük → ince, keskin kenar parlaması
@@ -122,6 +140,9 @@ public:
     float sheen() const { return m_sheen; }
     float diffuseTransmission() const { return m_diffuseTransmission; }
     void setAlbedoImage(std::shared_ptr<Image> image) { m_albedoTex = std::move(image); }
+    void setNormalImage(std::shared_ptr<Image> image) { m_normalTex = std::move(image); }
+    void setRoughnessImage(std::shared_ptr<Image> image) { m_roughnessTex = std::move(image); }
+    void setMetalnessImage(std::shared_ptr<Image> image) { m_metalnessTex = std::move(image); }
 
     /// Opaklık çarpanı (doku varsa onunla çarpılır). opacity(si) noktadaki sonucu verir.
     void setOpacity(float v) { m_opacity = std::clamp(v, 0.0f, 1.0f); }
@@ -162,6 +183,12 @@ public:
         float specular = 0.5f;
         float clearCoat = 0.0f;
         float clearCoatRoughness = 0.03f;
+        float ior = 1.5f;
+        float specularTransmission = 0.0f;
+        float coatIor = 1.5f;
+        Color3f coatTint{1.0f};
+        Color3f sheenColor{1.0f};
+        bool hasCustomSheenColor = false;
         float anisotropy = 0.0f;
         float sheen = 0.0f;
         float sheenRoughness = 0.3f;
@@ -176,6 +203,7 @@ public:
         Color3f flakeColor{0.9f};
         Vec3f normal{0, 1, 0};
         Vec3f tangent{1, 0, 0};
+        bool frontFace = true;
     };
     ShadingParams resolve(const SurfaceInteraction& si) const;
 
@@ -188,6 +216,12 @@ private:
     float m_specular;
     float m_clearCoat = 0.0f;
     float m_clearCoatRoughness = 0.03f;
+    float m_ior = 1.5f;
+    float m_specularTransmission = 0.0f;
+    float m_coatIor = 1.5f;
+    Color3f m_coatTint{1.0f};
+    Color3f m_sheenColor{1.0f};
+    bool m_hasSheenColor = false;
     float m_anisotropy = 0.0f;
     float m_sheen = 0.0f;
     float m_sheenRoughness = 0.3f;

@@ -158,6 +158,12 @@ void MaterialLibrary::applyAdvanced(const MaterialPreset& p, Material& mat) {
         g->setAbbe(p.abbe);
     } else if (auto* d = dynamic_cast<DisneyMaterial*>(&mat)) {
         d->setOpacity(p.opacity);
+        d->setIor(p.ior);
+        d->setSpecularTransmission(p.specularTransmission);
+        d->setCoatIor(p.coatIor);
+        d->setCoatTint(p.coatTint);
+        if (p.hasCustomSheenColor) d->setSheenColor(p.sheenColor);
+        else d->clearCustomSheenColor();
         d->setDiffuseRoughness(p.diffuseRoughness);
         d->setSheenRoughness(p.sheenRoughness);
         d->setSubsurface(p.subsurface);
@@ -193,6 +199,11 @@ void presetAdvancedToJson(const MaterialPreset& p, json& j) {
         if (p.abbe > 0.0f) j["abbe"] = p.abbe;
         return;
     }
+    if (p.ior != def.ior) j["ior"] = p.ior;
+    if (p.specularTransmission > 0.0f) j["specularTransmission"] = p.specularTransmission;
+    if (p.coatIor != def.coatIor) j["coatIor"] = p.coatIor;
+    if (p.coatTint != def.coatTint) j["coatTint"] = colJson(p.coatTint);
+    if (p.hasCustomSheenColor) j["sheenColor"] = colJson(p.sheenColor);
     if (p.diffuseRoughness > 0.0f) j["diffuseRoughness"] = p.diffuseRoughness;
     if (p.sheenRoughness != def.sheenRoughness) j["sheenRoughness"] = p.sheenRoughness;
     if (p.subsurface > 0.0f)
@@ -207,6 +218,14 @@ void presetAdvancedToJson(const MaterialPreset& p, json& j) {
 
 void presetAdvancedFromJson(const json& j, MaterialPreset& p) {
     p.opacity = j.value("opacity", p.opacity);
+    p.ior = j.value("ior", p.ior);
+    p.specularTransmission = j.value("specularTransmission", p.specularTransmission);
+    p.coatIor = j.value("coatIor", p.coatIor);
+    p.coatTint = readColor(j, "coatTint", p.coatTint);
+    if (j.contains("sheenColor")) {
+        p.sheenColor = readColor(j, "sheenColor", p.sheenColor);
+        p.hasCustomSheenColor = true;
+    }
     if (auto a = j.find("absorption"); a != j.end() && a->is_object()) {
         p.absorbColor = readColor(*a, "color", p.absorbColor);
         p.absorbDistance = a->value("distance", p.absorbDistance);
@@ -265,6 +284,12 @@ MaterialPreset MaterialLibrary::presetFromMaterial(const Material& mat, const st
         p.specular = d->specular();
         p.clearCoat = d->clearCoat();
         p.clearCoatRoughness = d->clearCoatRoughness();
+        p.ior = d->ior();
+        p.specularTransmission = d->specularTransmission();
+        p.coatIor = d->coatIor();
+        p.coatTint = d->coatTint();
+        p.sheenColor = d->sheenColor();
+        p.hasCustomSheenColor = d->hasCustomSheenColor();
         p.anisotropy = d->anisotropy();
         p.sheen = d->sheen();
         p.diffuseTransmission = d->diffuseTransmission();

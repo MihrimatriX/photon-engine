@@ -49,6 +49,9 @@ public:
     /// n < 2 iken çok büyük döner.
     float relativeError(int x, int y) const;
 
+    /// Başka bir Film'in birikimini (ör. Hibrit GPU+CPU) bu filme ekler.
+    void merge(const Film& other);
+
     /// The averaged image.
     Image resolve() const;
 

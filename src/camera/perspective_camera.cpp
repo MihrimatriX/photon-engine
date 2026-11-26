@@ -39,4 +39,18 @@ Ray PerspectiveCamera::generateRay(float u, float v, const Vec2f& /*lensSample*/
     return Ray(m_position, direction);
 }
 
+CameraGpuDesc PerspectiveCamera::describeGpu() const {
+    CameraGpuDesc d;
+    d.position = m_position;
+    d.lowerLeft = m_lowerLeft;
+    d.horizontal = m_horizontal;
+    d.vertical = m_vertical;
+    d.u = m_u;
+    d.v = m_v;
+    d.forward = -m_w;
+    d.lensRadius = 0.0f;
+    d.orthographic = false;
+    return d;
+}
+
 } // namespace photon

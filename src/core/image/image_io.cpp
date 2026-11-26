@@ -142,11 +142,23 @@ bool saveImageEXR(const Image& img, const std::string& path) {
     // 1'in üstündeki değerler kırpılmaz, sonradan kompozisyon/renk düzeltmede kullanılabilir.
     // Image iç içe RGB tutar → burada kanal başına ayrı düzlemlere (planar) ayrılır.
     std::vector<float> r(n), g(n), b(n);
-    const float* px = img.data();
-    for (size_t i = 0; i < n; ++i) {
-        r[i] = px[i * 3 + 0];
-        g[i] = px[i * 3 + 1];
-        b[i] = px[i * 3 + 2];
+    if (!img.isCompact8()) {
+        const float* px = img.data();
+        for (size_t i = 0; i < n; ++i) {
+            r[i] = px[i * 3 + 0];
+            g[i] = px[i * 3 + 1];
+            b[i] = px[i * 3 + 2];
+        }
+    } else {
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                const Color3f c = img.getPixel(x, y);
+                const size_t i = static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x);
+                r[i] = c.r;
+                g[i] = c.g;
+                b[i] = c.b;
+            }
+        }
     }
 
     EXRHeader header;
@@ -188,7 +200,8 @@ bool saveImageEXR(const Image& img, const std::string& path) {
 }
 
 bool saveMultiLayerEXR(const std::string& path, const Image& beauty, const Image* alpha,
-                       const std::vector<ExrLayer>& layers) {
+                       const std::vector<ExrLayer>& layers,
+                       const std::vector<std::pair<std::string, std::string>>& stringAttributes) {
     const int w = beauty.width(), h = beauty.height();
     if (w <= 0 || h <= 0) return false;
     const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
@@ -201,8 +214,15 @@ bool saveMultiLayerEXR(const std::string& path, const Image& beauty, const Image
     auto addPlane = [&](const std::string& name, const Image& img, int c, bool full) {
         if (img.width() != w || img.height() != h) return;
         Channel ch{name, std::vector<float>(n), full};
-        const float* px = img.data();
-        for (size_t i = 0; i < n; ++i) ch.plane[i] = px[i * 3 + static_cast<size_t>(c)];
+        if (!img.isCompact8()) {
+            const float* px = img.data();
+            for (size_t i = 0; i < n; ++i) ch.plane[i] = px[i * 3 + static_cast<size_t>(c)];
+        } else {
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x)
+                    ch.plane[static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)] =
+                        img.getPixel(x, y)[c];
+        }
         channels.push_back(std::move(ch));
     };
     addPlane("R", beauty, 0, false);
@@ -210,8 +230,17 @@ bool saveMultiLayerEXR(const std::string& path, const Image& beauty, const Image
     addPlane("B", beauty, 2, false);
     if (alpha) addPlane("A", *alpha, 0, false);
     for (const ExrLayer& l : layers) {
-        if (!l.image) continue;
         const int count = static_cast<int>(std::strlen(l.suffixes));
+        if (l.rgba4 && l.rgba4->size() == n * 4) {
+            for (int c = 0; c < count && c < 4; ++c) {
+                Channel ch{l.name + "." + l.suffixes[c], std::vector<float>(n), l.fullFloat};
+                const float* src = l.rgba4->data();
+                for (size_t i = 0; i < n; ++i) ch.plane[i] = src[i * 4 + static_cast<size_t>(c)];
+                channels.push_back(std::move(ch));
+            }
+            continue;
+        }
+        if (!l.image) continue;
         for (int c = 0; c < count && c < 3; ++c) addPlane(l.name + "." + l.suffixes[c], *l.image, c, l.fullFloat);
     }
     // OpenEXR kanalları ada göre sıralı saklar; okuyucular sıralı başlık bekler.
@@ -239,6 +268,26 @@ bool saveMultiLayerEXR(const std::string& path, const Image& beauty, const Image
     header.pixel_types = pixelTypes.data();
     header.requested_pixel_types = stored.data();
     header.compression_type = TINYEXR_COMPRESSIONTYPE_ZIP;
+
+    // İsteğe bağlı metin üstverisi (Psyop Cryptomatte 1.2.0 manifest + hash başlıkları).
+    std::vector<EXRAttribute> attrs;
+    std::vector<std::vector<unsigned char>> attrStorage;
+    if (!stringAttributes.empty()) {
+        attrs.resize(stringAttributes.size());
+        attrStorage.resize(stringAttributes.size());
+        for (size_t i = 0; i < stringAttributes.size(); ++i) {
+            EXRAttribute& a = attrs[i];
+            std::memset(&a, 0, sizeof(EXRAttribute));
+            std::strncpy(a.name, stringAttributes[i].first.c_str(), sizeof(a.name) - 1);
+            std::strncpy(a.type, "string", sizeof(a.type) - 1);
+            const std::string& val = stringAttributes[i].second;
+            attrStorage[i].assign(val.begin(), val.end());
+            a.size = static_cast<int>(attrStorage[i].size());
+            a.value = attrStorage[i].empty() ? nullptr : attrStorage[i].data();
+        }
+        header.num_custom_attributes = static_cast<int>(attrs.size());
+        header.custom_attributes = attrs.data();
+    }
 
     // Belleğe yaz, sonra UTF-8 yolla dosyaya (Türkçe karakterli klasörler Windows'ta da çalışsın).
     unsigned char* mem = nullptr;
@@ -273,6 +322,33 @@ std::vector<std::string> readExrChannelNames(const std::string& path) {
     for (int i = 0; i < header.num_channels; ++i) names.emplace_back(header.channels[i].name);
     FreeEXRHeader(&header);
     return names;
+}
+
+std::vector<std::pair<std::string, std::string>> readExrStringAttributes(const std::string& path) {
+    std::vector<std::pair<std::string, std::string>> out;
+    std::ifstream in(pathFromUtf8(path), std::ios::binary);
+    if (!in) return out;
+    const std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    EXRVersion version;
+    if (ParseEXRVersionFromMemory(&version, bytes.data(), bytes.size()) != TINYEXR_SUCCESS || version.multipart)
+        return out;
+    EXRHeader header;
+    InitEXRHeader(&header);
+    const char* err = nullptr;
+    if (ParseEXRHeaderFromMemory(&header, &version, bytes.data(), bytes.size(), &err) != TINYEXR_SUCCESS) {
+        FreeEXRErrorMessage(err);
+        return out;
+    }
+    for (int i = 0; i < header.num_custom_attributes; ++i) {
+        const EXRAttribute& a = header.custom_attributes[i];
+        if (std::strcmp(a.type, "string") == 0) {
+            std::string val;
+            if (a.value && a.size > 0) val.assign(reinterpret_cast<const char*>(a.value), static_cast<size_t>(a.size));
+            out.emplace_back(a.name, std::move(val));
+        }
+    }
+    FreeEXRHeader(&header);
+    return out;
 }
 
 std::optional<Image> loadImageHDR(const std::string& path) {
@@ -375,22 +451,14 @@ std::optional<Image> loadImageEXR(const std::string& path) {
 
 namespace {
 
-// 8-bit değer yalnızca 256 farklı olabildiği için sRGB çözme (pow içerir) bir kez
-// 256 elemanlı arama tablosuna (LUT) hesaplanır; piksel başına pow çağrısı yapılmaz.
+// 8-bit LDR dokular kompakt 24-bit uint8 (U8Srgb / U8Linear) olarak saklanır (~4× RAM kazancı)
+// ve ışın konisi mipmap LOD için doğrusal ışıkta mipmap piramidi otomatik kurulur.
 std::optional<Image> imageFromRgb8(const uint8_t* data, int w, int h, TextureEncoding encoding) {
     if (!data || !imageDimsOk(w, h)) return std::nullopt;
-    float lut[256];
-    for (int i = 0; i < 256; ++i) {
-        const float v = static_cast<float>(i) / 255.0f;
-        lut[i] = encoding == TextureEncoding::SRGB ? srgbDecode(v) : v;
-    }
-    Image img(w, h);
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 3;
-            img.setPixel(x, y, Color3f(lut[data[idx + 0]], lut[data[idx + 1]], lut[data[idx + 2]]));
-        }
-    }
+    const Image::StorageFormat fmt =
+        encoding == TextureEncoding::SRGB ? Image::StorageFormat::U8Srgb : Image::StorageFormat::U8Linear;
+    Image img = Image::createCompact8(w, h, data, fmt);
+    img.buildMipmaps();
     return img;
 }
 

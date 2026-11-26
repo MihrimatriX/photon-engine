@@ -113,6 +113,10 @@ void Triangle::fillHit(const Ray& ray, float t, float u, float v, SurfaceInterac
     Vec2f deltaUV2 = m_uv2 - m_uv0;
 
     float r = deltaUV1.x * deltaUV2.y - deltaUV2.x * deltaUV1.y;
+    const float worldArea2 = edge1.cross(edge2).length();
+    isect.uvDensity = (worldArea2 > 1e-12f && std::abs(r) > 1e-12f)
+                          ? std::sqrt(std::abs(r) / worldArea2)
+                          : 0.0f;
     if (std::abs(r) < 1e-6f) {
         // Fallback tangent
         float sign = std::copysign(1.0f, isect.normal.z);

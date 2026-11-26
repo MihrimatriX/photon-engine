@@ -43,6 +43,7 @@ add_executable(photon_tests
     test_package.cpp
     test_live_link.cpp
     test_dcc_convert.cpp
+    test_texture_lod.cpp
     ${CMAKE_SOURCE_DIR}/src/app/live_link.cpp
 )
 

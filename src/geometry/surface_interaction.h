@@ -37,6 +37,10 @@ struct SurfaceInteraction {
     bool hasSmoothPoint = false;
     /// Kesişilen primitifin sırası (mesh içindeki üçgen); yoksa −1. Yayıcı mesh pdf'i için.
     int primIndex = -1;
+    /// Ray Cone yüzey ayak izi genişliği (dünya birimi; RTG §20 mipmap LOD için). 0 = kapalı.
+    float rayFootprint = 0.0f;
+    /// Üçgenin UV/dünya alan oranının karekökü (UV birimi / dünya birimi); LOD hesabı için.
+    float uvDensity = 1.0f;
 
     /// İki normal tutulur: 'normal' daima gelen ışına bakar (malzemeler tek yarıküreyle çalışsın),
     /// 'ng' ise çevrilmemiş dış normaldir. frontFace ışının dışarıdan mı içeriden mi geldiğini

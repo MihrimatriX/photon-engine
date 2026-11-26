@@ -150,10 +150,11 @@ bool makeShadowRay(const SurfaceInteraction& isect, const LightSample& ls, bool 
 /// Yüzey noktası bu ışın için "yok" mu? (alfa kesiği, Material::opacity)
 /// true dönerse çağıran ışını doğrultusunu bozmadan sürdürür: köşe sayılmaz, sekme harcanmaz.
 bool passesCutout(const SurfaceInteraction& isect, Sampler& sampler) {
-    // TODO(human): opaklığı α olan noktada ışın yüzeyi (1 − α) olasılıkla geçmeli.
-    (void)isect;
-    (void)sampler;
-    return false;
+    if (!isect.material) return false;
+    const float alpha = isect.material->opacity(isect);
+    if (alpha >= 1.0f) return false;
+    if (alpha <= 0.0f) return true;
+    return sampler.get1D() >= alpha;
 }
 
 /// Gölge ışınının geçirgenliği: ince duvarlı camlar ve kesik yüzeyler (doğrultu değiştirmeyen
@@ -385,6 +386,16 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
                 if (hit) primary->isect = isect;
             }
             firstSegment = false;
+
+            // Ray Cone (RTG §20): kesişim anındaki ışın konisi genişliği ve yüzey eğimine göre
+            // ayak izi (mipmap LOD). Koni yayılmıyorsa (test ışınları: coneSpread=0, coneWidth=0) 0 kalır.
+            float coneWidthAtHit = 0.0f;
+            if (hit && (currentRay.coneWidth > 0.0f || currentRay.coneSpread > 0.0f)) {
+                coneWidthAtHit = currentRay.coneWidth + currentRay.coneSpread * std::max(0.0f, isect.t);
+                const Vec3f nGeom = isect.ng.lengthSquared() > 0.0f ? isect.ng : isect.normal;
+                const float cosInc = std::max(0.15f, std::abs((-currentRay.direction).dot(nGeom)));
+                isect.rayFootprint = coneWidthAtHit / cosInc;
+            }
 
             // Işın bir cismin içinde ilerliyorsa: soğurma ve (varsa) saçılma.
             if (const Medium* med = media.current()) {
@@ -672,7 +683,12 @@ Color3f PathTracer::Li(const Ray& ray, const Scene& scene, Sampler& sampler, Pri
             }
         }
 
+        const float nextConeWidth = currentRay.coneWidth + currentRay.coneSpread * std::max(0.0f, isect.t);
+        const float nextConeSpread = currentRay.coneSpread + (bs.delta ? 0.0f : 0.12f);
         currentRay = spawnRay(isect, wi);
+        currentRay.coneWidth = nextConeWidth;
+        currentRay.coneSpread = nextConeSpread;
+        currentRay.time = ray.time;
         ++depth;
 
         // Rus ruleti (PBRT-v4): hayatta kalma olasılığı = throughput'un EN BÜYÜK bileşeni.

@@ -233,9 +233,35 @@ void applyAlphaMode(DisneyMaterial& disney, const cgltf_material& mat, std::opti
     if (texAlpha) disney.setOpacityImage(std::make_shared<Image>(std::move(*texAlpha)));
 }
 
-// glTF metallic-roughness → Disney: baseColor, metallic ve roughness doğrudan eşleşir.
-// Pürüzlülük 0.001'e kırpılır: α = r² → 0 olursa GGX D sonsuza gider (tam ayna delta'dır).
-// Son argüman specular = 0.5 → F0 = 0.08·0.5 = 0.04, glTF'in sabit dielektrik yansıması.
+std::optional<Image> loadGltfTexture(const cgltf_texture* tex, const std::filesystem::path& baseDir,
+                                     TextureEncoding encoding) {
+    if (!tex || !tex->image) return std::nullopt;
+    const cgltf_image* image = tex->image;
+    if (image->uri && std::strncmp(image->uri, "data:", 5) != 0) {
+        std::string uri = image->uri;
+        auto slash = uri.find_last_of('.');
+        std::string ext = slash == std::string::npos ? "" : uri.substr(slash);
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp") {
+            return loadImageLDR((baseDir / uri).string(), encoding);
+        }
+    }
+    if (image->buffer_view && image->buffer_view->buffer && image->buffer_view->buffer->data) {
+        const cgltf_buffer_view* view = image->buffer_view;
+        const cgltf_buffer* buf = view->buffer;
+        if (view->offset <= buf->size && view->size <= buf->size - view->offset
+            && view->size > 0 && view->size <= kMaxGltfFileBytes
+            && view->size <= static_cast<cgltf_size>(std::numeric_limits<int>::max())) {
+            const auto* bytes = static_cast<const unsigned char*>(buf->data) + view->offset;
+            return loadImageLDRMemory(bytes, static_cast<int>(view->size), encoding);
+        }
+    }
+    return std::nullopt;
+}
+
+// glTF 2.0 + KHR_materials_{ior,transmission,clearcoat,sheen,specular} → birleşik OpenPBR / Disney.
 std::shared_ptr<Material> makePbrMaterial(const cgltf_material& mat, const std::filesystem::path& baseDir) {
     if (mat.has_pbr_metallic_roughness) {
         const auto& pbr = mat.pbr_metallic_roughness;
@@ -244,6 +270,36 @@ std::shared_ptr<Material> makePbrMaterial(const cgltf_material& mat, const std::
         float roughness = std::max(0.001f, pbr.roughness_factor);
         auto disney = std::make_shared<DisneyMaterial>(base, metallic, roughness, 0.5f);
         applyAlphaMode(*disney, mat, tryBaseColor(*disney, mat, baseDir));
+        if (auto mr = loadGltfTexture(pbr.metallic_roughness_texture.texture, baseDir, TextureEncoding::Linear)) {
+            auto shared = std::make_shared<Image>(std::move(*mr));
+            disney->setRoughnessImage(shared);
+            disney->setMetalnessImage(shared);
+        }
+        if (auto nrm = loadGltfTexture(mat.normal_texture.texture, baseDir, TextureEncoding::Linear)) {
+            disney->setNormalImage(std::make_shared<Image>(std::move(*nrm)));
+        }
+        const Color3f emit(mat.emissive_factor[0], mat.emissive_factor[1], mat.emissive_factor[2]);
+        if (!emit.isBlack()) {
+            const float strength = mat.has_emissive_strength ? mat.emissive_strength.emissive_strength : 1.0f;
+            disney->setEmission(emit * std::max(0.0f, strength));
+        }
+        if (mat.has_ior) disney->setIor(mat.ior.ior);
+        if (mat.has_transmission) disney->setSpecularTransmission(mat.transmission.transmission_factor);
+        if (mat.has_clearcoat) {
+            disney->setClearCoat(mat.clearcoat.clearcoat_factor);
+            disney->setClearCoatRoughness(std::max(0.001f, mat.clearcoat.clearcoat_roughness_factor));
+        }
+        if (mat.has_sheen) {
+            const Color3f sc(mat.sheen.sheen_color_factor[0], mat.sheen.sheen_color_factor[1],
+                             mat.sheen.sheen_color_factor[2]);
+            const float sw = std::max({sc.r, sc.g, sc.b});
+            if (sw > 0.0f) {
+                disney->setSheen(std::clamp(sw, 0.0f, 1.0f));
+                disney->setSheenColor(sc / sw);
+                disney->setSheenRoughness(std::max(0.02f, mat.sheen.sheen_roughness_factor));
+            }
+        }
+        if (mat.has_specular) disney->setSpecular(std::clamp(0.5f * mat.specular.specular_factor, 0.0f, 1.0f));
         return disney;
     }
     return std::make_shared<Lambertian>(Color3f(0.8f));

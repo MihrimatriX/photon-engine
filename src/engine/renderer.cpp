@@ -79,6 +79,8 @@ PixelSample tracePixel(const Scene& scene, const Camera& camera, PathTracer& int
                                   width, height);
     Vec2f lensSample = sampler.get2D();
     Ray ray = camera.generateRay(screen.x, screen.y, lensSample);
+    ray.coneWidth = camera.pixelConeWidth(height);
+    ray.coneSpread = camera.pixelConeSpread(height);
 
     PixelSample out;
     const Background& bg = scene.background();

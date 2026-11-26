@@ -18,6 +18,7 @@ public:
                       float vFovDegrees, float aspectRatio);
 
     Ray generateRay(float u, float v, const Vec2f& lensSample) const override;
+    CameraGpuDesc describeGpu() const override;
     /// Lens kaydırma (shift), kare yüksekliği cinsinden: görüntü düzlemi kamera yönü değişmeden
     /// kayar. Dikey kaydırma mimaride dikeyleri paralel tutar (iki noktalı perspektif; tilt-shift
     /// objektif gibi). 0.1 = karenin %10'u yukarı/sağa.

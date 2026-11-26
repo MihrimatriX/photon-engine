@@ -14,6 +14,7 @@ target_sources(photon_core PRIVATE
     image/film.cpp
     image/image.cpp
     image/image_io.cpp
+    image/cryptomatte.cpp
     image/tone_mapping.cpp
     image/imager.cpp
     image/pixel_filter.cpp
