@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """tests/data/golden/ altındaki altın görüntüleri Mitsuba 3 ile üretir (F2.8).
 
-  python3 bench/reference/make_golden.py [--spp 65536]
+  python3 bench/reference/make_golden.py [--spp 65536] [--only shape_lights]
 
 Her referans sahnesinin küçük çözünürlüklü kopyası (en uzun kenar 64–96 piksel) için:
   <sahne>.photon        PhotonEngine projesi (HDRI, depodaki assets/ dosyasını göreli yolla gösterir)
@@ -21,7 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import refscenes as rs  # noqa: E402
 from compare import render_mitsuba  # noqa: E402
 
-GOLDEN_RES = {"cornell_diffuse": (64, 64), "cornell_specular": (64, 64), "hdri_materials": (96, 48)}
+GOLDEN_RES = {"cornell_diffuse": (64, 64), "cornell_specular": (64, 64), "hdri_materials": (96, 48),
+              "shape_lights": (96, 64)}
 
 
 def main():
@@ -30,11 +31,14 @@ def main():
     ap.add_argument("--chunk", type=int, default=4096)
     ap.add_argument("--out", default=os.path.join(rs.REPO, "tests", "data", "golden"))
     ap.add_argument("--scenes-only", action="store_true", help="yalnız .photon ve .usda (Mitsuba render'ı yok)")
+    ap.add_argument("--only", default="", help="virgülle ayrılmış sahne adları (boş = hepsi)")
     args = ap.parse_args()
+    only = {x for x in args.only.split(",") if x}
+    wanted = {k: v for k, v in GOLDEN_RES.items() if not only or k in only}
     if args.scenes_only:
         for sc in rs.scenes():
-            if sc.name in GOLDEN_RES:
-                sc = dataclasses.replace(sc, res=GOLDEN_RES[sc.name])
+            if sc.name in wanted:
+                sc = dataclasses.replace(sc, res=wanted[sc.name])
                 env = os.path.join(rs.REPO, sc.env["hdr"]) if sc.env else None
                 rs.to_photon(sc, args.out, env)
                 rs.to_usd(sc, args.out, env)
@@ -46,9 +50,9 @@ def main():
     tmp = os.path.join(args.out, "_tmp")
     os.makedirs(tmp, exist_ok=True)
     for sc in rs.scenes():
-        if sc.name not in GOLDEN_RES:
+        if sc.name not in wanted:
             continue
-        sc = dataclasses.replace(sc, res=GOLDEN_RES[sc.name])
+        sc = dataclasses.replace(sc, res=wanted[sc.name])
         env_p = env_m = None
         if sc.env:
             env_p = os.path.join(rs.REPO, sc.env["hdr"])  # Photon: depodaki .hdr (stb ile aynı çözüm)

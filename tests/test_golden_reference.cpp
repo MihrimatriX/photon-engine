@@ -182,8 +182,12 @@ void runGoldenUsd(const GoldenCase& gc) {
     } else {
         EXPECT_TRUE(data.environment.hdrPath.empty()) << ".photon'da HDRI var, USD'de kubbe yok";
     }
-    EXPECT_TRUE(extras.lights.empty());
-    renderAndCompare(gc, std::string(gc.name) + " (USD)", graph, {}, env,
+    // Işıklar (UsdLux) .photon'dakilerle aynı sayıda gelmeli. UsdLux'ta standart bir kamera görünürlüğü
+    // yok; içe aktarıcı ışıkları kameraya görünmez alır (stüdyo varsayılanı). Mitsuba'da yayıcılar hep
+    // görünür olduğundan burada .photon'daki ayar uygulanır: test geometriyi, birimleri ve yönü sınar.
+    ASSERT_EQ(extras.lights.size(), data.lights.size());
+    for (size_t i = 0; i < extras.lights.size(); ++i) extras.lights[i].visibleToCamera = data.lights[i].visibleToCamera;
+    renderAndCompare(gc, std::string(gc.name) + " (USD)", graph, extras.lights, env,
                      [&](float aspect) {
                          return std::make_shared<PerspectiveCamera>(key.eye, key.target, Vec3f(0, 1, 0), key.fovDeg,
                                                                     aspect);
@@ -209,6 +213,12 @@ constexpr double kHdriExpectedRatio = 1.0112;
 TEST(GoldenReference, HdriMaterialsMatchesMitsuba) {
     runGolden({"hdri_materials", 256, 0.006, 0.025, 0.12, kHdriExpectedRatio});
 }
+// Şekilli ışıklar (F2.17): tavanın hemen altında aşağı bakan tek yüzlü panel (çift yüzlü ışısaydı
+// tavanı yakardı), eğik disk, kameranın gördüğü küre ve tüp. Mitsuba'da aynı şekiller tek yüzlü
+// area emitter'dır. Bozulursa: yanlış pdf/MIS (enerji), tek yüzlülük (tavan), şekil kesişimi (kenarlar).
+// Ölçüm (2026-11-27, GCC 13): oran 1.0002, medyan 0.0027, p95 0.0092. Panel ve disk çift yüzlü ışısaydı
+// oran 1.105 olurdu.
+TEST(GoldenReference, ShapeLightsMatchesMitsuba) { runGolden({"shape_lights", 256, 0.005, 0.008, 0.03}); }
 
 #ifdef PHOTON_HAS_USD
 // Aynı sahneler OpenUSD'den içe aktarılarak, .photon kollarıyla aynı eşiklerle. Küreler UsdGeomSphere'dir
@@ -223,4 +233,7 @@ TEST(GoldenReference, CornellSpecularUsdMatchesMitsuba) { runGoldenUsd({"cornell
 TEST(GoldenReference, HdriMaterialsUsdMatchesMitsuba) {
     runGoldenUsd({"hdri_materials", 1024, 0.006, 0.025, 0.12, kHdriExpectedRatio});
 }
+// UsdLux Rect/Disk/Sphere/CylinderLight → motorun aynı şekilli, tek yüzlü ışıkları (birim, yön, eksen).
+// Ölçüm: oran 1.0002, medyan 0.0031, p95 0.0104.
+TEST(GoldenReference, ShapeLightsUsdMatchesMitsuba) { runGoldenUsd({"shape_lights", 256, 0.005, 0.008, 0.03}); }
 #endif

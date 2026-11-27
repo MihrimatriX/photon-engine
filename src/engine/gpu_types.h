@@ -40,12 +40,15 @@ struct alignas(16) GpuUniforms {
 };
 static_assert(sizeof(GpuUniforms) == 19 * 16, "GpuUniforms layout");
 
-/// binding = 1 (SSBO): Üçgen ya da küre ilkeli.
+/// binding = 1 (SSBO): Üçgen, küre, disk ya da açık silindir ilkeli.
 /// e1_flags.w (uint):
-///   bit 0: 0=triangle, 1=sphere
+///   bit 0: küre (p0 = merkez, e1.x = yarıçap)
 ///   bit 1: cameraInvisible
 ///   bit 2: shadowCatcher
 ///   bit 3: hasMotion (p0, e1, e2 yerel uzayda; motionIdx ile t ∈ [0,1] dönüştürülür)
+///   bit 4: disk/elips (p0 = merkez, e1/e2 = yarı eksenler, n0/n1 = ters eksenler ex/|ex|², ng = normal)
+///   bit 5: açık silindir (p0 = merkez, e1 = birim eksen, e2.x = yarıçap, e2.y = yarı boy, n0/n1 = dik taban)
+///   bit 0, 4, 5 hiçbiri yoksa üçgen. Analitik şekiller ray-query modunda ikincil BVH'dedir.
 ///   bit 8..12: visibilityMask (5 bit)
 ///   bit 16..23: linkSlot (0..63, Light/Shadow Linking 64-bit bitmask yuvası)
 struct alignas(16) GpuPrim {
@@ -77,13 +80,19 @@ struct alignas(16) GpuMaterial {
     Vec4 coat_cr_ci_sheen;///< x=clearcoat, y=clearcoatRoughness, z=coatIor, w=sheen
     Vec4 coatTint_opacity;///< rgb=coatTint, w=opacity
     Vec4 sheenCol_type;   ///< rgb=sheenColor, w=uintBitsToFloat(type: 0=Disney,1=Lambert,2=Glass,3=Mirror)
-    Vec4 emit_flags;      ///< rgb=emission, w=uintBitsToFloat(flags: 0:thinWalled,1:boxMap,2:transmitsShadow)
+    Vec4 emit_flags;      ///< rgb=emission, w=uintBitsToFloat(flags: 0:thinWalled,1:boxMap,2:transmitsShadow,3:oneSidedEmission)
     Vec4 tex0;            ///< intBitsToFloat: x=albedo, y=rough, z=metal, w=normal (-1=yok)
     Vec4 tex1;            ///< x=intBitsToFloat(opacity), y=texScale, z=sheenTint, w=anisotropic
 };
 static_assert(sizeof(GpuMaterial) == 8 * 16, "GpuMaterial layout");
 
-/// binding = 4 (SSBO): Işık kaynağı (Area, Point, Directional, Spot, Triangle).
+/// binding = 4 (SSBO): Işık kaynağı. Tür (pos_type.w & 0xFF) ve alanların anlamı:
+///   0 dikdörtgen: pos = köşe, u/v kenarlar, u.w alan, v.w 1 = tek yüzlü, norm = normal
+///   1 nokta, 2 yönlü, 3 spot, 4 üçgen (mesh ışığı)
+///   5 disk/elips: pos = merkez, u/v yarı eksenler, u.w alan, v.w 1 = tek yüzlü, norm = normal
+///   6 küre: pos = merkez, u.x yarıçap, u.w alan
+///   7 tüp: pos = merkez, u = birim eksen (u.w yan alan), v.xyz/norm.xyz eksene dik taban,
+///          v.w yarıçap, rad.w yarı boy
 struct alignas(16) GpuLight {
     Vec4 pos_type;   ///< xyz=pos (Directional: travelDir), w=uintBitsToFloat(type | (group<<8) | (lightIdx<<16))
     Vec4 u_area;     ///< xyz=u (Spot: axisDir), w=area

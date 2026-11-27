@@ -99,6 +99,7 @@ float AreaLight::solidAngle(const Vec3f& ref) const {
 }
 
 float AreaLight::importance(const Vec3f& p, const Vec3f& n) const {
+    if (!facing(p)) return 0.0f;
     const Vec3f c = m_position + (m_u + m_v) * 0.5f;
     const Vec3f d = c - p;
     const float dist2 = d.lengthSquared();
@@ -114,6 +115,7 @@ float AreaLight::importance(const Vec3f& p, const Vec3f& n) const {
 
 LightSample AreaLight::sampleLi(const SurfaceInteraction& si, const Vec2f& sample) const {
     LightSample ls;
+    if (!facing(si.point)) return ls;
 
     if (m_rectangle) {
         const SphericalRect r = setupSphericalRect(si.point, m_position, m_u, m_v);
@@ -140,7 +142,7 @@ LightSample AreaLight::sampleLi(const SurfaceInteraction& si, const Vec2f& sampl
     if (ls.distance > 0.0f) {
         ls.wi = toLight / ls.distance;
 
-        // ponytail: two-sided; one-sided needs an explicit flag later
+        // |cos θl|: iki yüzlüde arka yüz de ışır; tek yüzlüde alıcı zaten ön taraftadır (facing).
         float cosThetaL = std::abs(ls.wi.dot(m_normal));
         float pdf = areaSolidAnglePdf(distSq, cosThetaL, m_area);
 
@@ -163,6 +165,7 @@ LightSample AreaLight::sampleLi(const SurfaceInteraction& si, const Vec2f& sampl
 // içinde mi diye bakılır: d = s·u + t·v eşitliği u ve v ile skaler çarpılınca 2×2 sistem
 // [uu uv; uv vv]·[s t]ᵀ = [du dv]ᵀ çıkar, Cramer kuralıyla çözülür (u ⟂ v olmasa da çalışır).
 float AreaLight::pdfLi(const Vec3f& ref, const Vec3f& pLight) const {
+    if (!facing(ref)) return 0.0f;
     Vec3f d = pLight - m_position;
     float scale = std::max(m_u.length() + m_v.length(), 1.0f);
     if (std::abs(d.dot(m_normal)) > 1e-3f * scale) return 0.0f;
@@ -193,8 +196,8 @@ float AreaLight::pdfLi(const Vec3f& ref, const Vec3f& pLight) const {
 }
 
 Color3f AreaLight::power() const {
-    // Lambert yayıcı: Φ = L · A · π (yarıküre üzerinde ∫ cos θ dω = π). Tek yüz için.
-    return m_radiance * m_area * PI;
+    // Lambert yayıcı: Φ = L · A · π (yarıküre üzerinde ∫ cos θ dω = π) her ışıyan yüz için.
+    return m_radiance * (m_area * PI * (m_twoSided ? 2.0f : 1.0f));
 }
 
 TriangleLight::TriangleLight(const Vec3f& p0, const Vec3f& p1, const Vec3f& p2, const Color3f& radiance)
@@ -268,7 +271,7 @@ bool AreaLight::bounds(LightBounds& out) const {
     out.phi = std::max(0.0f, m_radiance.luminance()) * m_area * PI;
     out.cosThetaO = 1.0f;
     out.cosThetaE = 0.0f;
-    out.twoSided = true; // sampleLi iki yüzlü (|cos θl|)
+    out.twoSided = m_twoSided;
     return true;
 }
 

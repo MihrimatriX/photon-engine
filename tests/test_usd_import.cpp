@@ -555,15 +555,32 @@ def SphereLight "Warm"
 {
     bool inputs:enableColorTemperature = true
     float inputs:colorTemperature = 2700
-    bool inputs:treatAsPoint = true
+    bool treatAsPoint = true
+}
+def DiskLight "Disc"
+{
+    float inputs:radius = 0.25
+    float inputs:intensity = 2
+    double3 xformOp:translate = (0, 4, 0)
+    float xformOp:rotateX = -90
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateX"]
+}
+def CylinderLight "Tube"
+{
+    float inputs:length = 2
+    float inputs:radius = 0.05
+    float inputs:intensity = 7
+    double3 xformOp:translate = (0, 1, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
 }
 )");
     ImportExtras ex;
     std::string err;
-    auto g = importModelFile(path, &err, {}, nullptr, &ex);
+    std::vector<std::string> warnings;
+    auto g = importModelFile(path, &err, {}, &warnings, &ex);
     ASSERT_NE(g, nullptr) << err;
     transformImportExtras(ex, g->localTransform);
-    ASSERT_EQ(ex.lights.size(), 5u);
+    ASSERT_EQ(ex.lights.size(), 7u);
     auto find = [&](const char* n) -> const LightDesc* {
         for (const LightDesc& l : ex.lights)
             if (l.name == n) return &l;
@@ -577,6 +594,8 @@ def SphereLight "Warm"
     EXPECT_NEAR(box->position.y, 3.0f, 1e-5f);
     EXPECT_LT((box->target - box->position).normalized().y, -0.999f); // −Z yerel → aşağı
     EXPECT_NEAR(box->width * box->height, 1.0f, 1e-5f);
+    EXPECT_EQ(box->areaShape, LightDesc::AreaShape::Rectangle);
+    EXPECT_FALSE(box->twoSided); // UsdLux dikdörtgeni yalnız −Z yönüne ışır
     const LightDesc* norm = find("Normalized");
     ASSERT_NE(norm, nullptr);
     EXPECT_NEAR(norm->intensity, 8.0f, 1e-4f); // normalize: 8 / alan 1
@@ -585,6 +604,7 @@ def SphereLight "Warm"
     EXPECT_EQ(bulb->type, LightDesc::Type::Point);
     EXPECT_NEAR(bulb->intensity, 100.0f * PI * 0.01f, 1e-3f); // I = L · π r²
     EXPECT_LT((bulb->position - Vec3f(1, 2, 3)).length(), 1e-5f);
+    EXPECT_NEAR(bulb->radius, 0.1f, 1e-6f); // gerçek küre ışığı
     const LightDesc* sun = find("Sun");
     ASSERT_NE(sun, nullptr);
     EXPECT_EQ(sun->type, LightDesc::Type::Directional);
@@ -593,6 +613,25 @@ def SphereLight "Warm"
     const LightDesc* warm = find("Warm");
     ASSERT_NE(warm, nullptr);
     EXPECT_GT(warm->color.r, warm->color.b * 1.5f); // 2700 K: sıcak
+    EXPECT_FLOAT_EQ(warm->radius, 0.0f);            // treatAsPoint: nokta ışık
+    const LightDesc* disc = find("Disc");
+    ASSERT_NE(disc, nullptr);
+    EXPECT_EQ(disc->type, LightDesc::Type::Area);
+    EXPECT_EQ(disc->areaShape, LightDesc::AreaShape::Disk);
+    EXPECT_FALSE(disc->twoSided);
+    EXPECT_NEAR(disc->width, 0.5f, 1e-5f); // çap
+    EXPECT_NEAR(disc->height, 0.5f, 1e-5f);
+    EXPECT_NEAR(disc->intensity, 2.0f, 1e-5f);
+    EXPECT_LT((disc->target - disc->position).normalized().y, -0.999f);
+    const LightDesc* tube = find("Tube");
+    ASSERT_NE(tube, nullptr);
+    EXPECT_EQ(tube->type, LightDesc::Type::Area);
+    EXPECT_EQ(tube->areaShape, LightDesc::AreaShape::Tube);
+    EXPECT_NEAR(tube->width, 2.0f, 1e-5f);  // boy
+    EXPECT_NEAR(tube->height, 0.1f, 1e-5f); // çap
+    EXPECT_NEAR(tube->intensity, 7.0f, 1e-5f);
+    EXPECT_GT(std::abs((tube->target - tube->position).normalized().x), 0.999f); // eksen USD'nin X'i
+    for (const std::string& w : warnings) EXPECT_EQ(w.find("küre ışığı"), std::string::npos) << w;
 }
 
 TEST(UsdImport, LightUnitsSurviveCentimetreStage) {
@@ -623,6 +662,7 @@ def RectLight "Panel"
     for (const LightDesc& l : ex.lights) {
         if (l.name == "Bulb") {
             EXPECT_NEAR(l.intensity, 100.0f * PI * 0.1f * 0.1f, 1e-3f); // L · π r², r = 0.1 m
+            EXPECT_NEAR(l.radius, 0.1f, 1e-6f);
             EXPECT_NEAR(l.position.y, 2.0f, 1e-5f);
         } else {
             EXPECT_NEAR(l.intensity, 4.0f, 1e-5f); // radyans birimden bağımsız

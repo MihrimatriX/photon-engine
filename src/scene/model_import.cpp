@@ -121,6 +121,7 @@ void collectExtras(const ImportedModel& model, ImportExtras& out) {
             case ImportedLight::Type::Point:
                 d.type = LightDesc::Type::Point;
                 d.position = pos;
+                d.radius = l.radius * s;
                 break;
             case ImportedLight::Type::Spot:
                 d.type = LightDesc::Type::Spot;
@@ -131,6 +132,10 @@ void collectExtras(const ImportedModel& model, ImportExtras& out) {
                 break;
             case ImportedLight::Type::Area:
                 d.type = LightDesc::Type::Area;
+                d.areaShape = l.areaShape == ImportedLight::AreaShape::Disk ? LightDesc::AreaShape::Disk
+                            : l.areaShape == ImportedLight::AreaShape::Tube ? LightDesc::AreaShape::Tube
+                                                                            : LightDesc::AreaShape::Rectangle;
+                d.twoSided = l.twoSided;
                 d.position = pos;
                 d.target = aim;
                 d.width = l.width * s;
@@ -184,6 +189,7 @@ void transformImportExtras(ImportExtras& extras, const Transform& toWorld) {
         d.target = toWorld.transformPoint(d.target);
         d.width *= s;
         d.height *= s;
+        d.radius *= s;
         if (d.type == LightDesc::Type::Point || d.type == LightDesc::Type::Spot) d.intensity *= s * s;
         if (d.type == LightDesc::Type::Directional) {
             const Vec3f f = toWorld.transformVector(from).normalized();

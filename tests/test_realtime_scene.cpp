@@ -199,6 +199,47 @@ TEST(RealtimeLights, SameRadiometryAsPathTracer) {
     EXPECT_NEAR(eRt / ePath, 1.0, 0.02);
 }
 
+// Şekilli ışıkların önizleme yaklaşığı aynı gücü taşır: disk aynı alanlı dikdörtgen (LTC), tüp yandan
+// görülen şiddeti I = L · 2 r ℓ olan yarıçaplı nokta, yarıçaplı nokta ışık aynı I; tek yüzlülük geçer.
+TEST(RealtimeLights, ShapedLightsKeepPowerInPreview) {
+    LightDesc disk;
+    disk.type = LightDesc::Type::Area;
+    disk.areaShape = LightDesc::AreaShape::Disk;
+    disk.position = Vec3f(0, 3, 0);
+    disk.target = Vec3f(0, 0, 0);
+    disk.width = 0.8f;
+    disk.height = 0.5f;
+    disk.intensity = 10.0f;
+    disk.twoSided = false;
+    LightDesc tube = disk;
+    tube.areaShape = LightDesc::AreaShape::Tube;
+    tube.width = 1.2f;  // boy
+    tube.height = 0.1f; // çap
+    LightDesc bulb;
+    bulb.type = LightDesc::Type::Point;
+    bulb.position = Vec3f(1, 1, 1);
+    bulb.intensity = 5.0f;
+    bulb.radius = 0.2f;
+    const auto rt = packRealtimeLights({disk, tube, bulb}, RealtimeEnvironment{}, AABB(Vec3f(-1), Vec3f(1)));
+    ASSERT_EQ(rt.size(), 3u);
+    const RealtimeLight* d = nullptr;
+    const RealtimeLight* t = nullptr;
+    const RealtimeLight* b = nullptr;
+    for (const RealtimeLight& l : rt) {
+        if (l.type == RealtimeLight::Type::Area) d = &l;
+        else if (std::abs(l.position.y - 3.0f) < 1e-5f) t = &l;
+        else b = &l;
+    }
+    ASSERT_TRUE(d && t && b);
+    EXPECT_NEAR(d->intensity.r, 10.0f * PI * 0.4f * 0.25f, 1e-3f); // L · elips alanı
+    EXPECT_NEAR(4.0f * d->areaU.length() * d->areaV.length(), PI * 0.4f * 0.25f, 1e-4f);
+    EXPECT_FALSE(d->twoSided);
+    EXPECT_EQ(t->type, RealtimeLight::Type::Point);
+    EXPECT_NEAR(t->intensity.r, 10.0f * 1.2f * 0.1f, 1e-4f);
+    EXPECT_NEAR(b->intensity.r, 5.0f, 1e-5f);
+    EXPECT_NEAR(b->radius, 0.2f, 1e-6f);
+}
+
 TEST(RealtimeLights, ConesShadowCasterAndOrder) {
     LightDesc spot;
     spot.type = LightDesc::Type::Spot;

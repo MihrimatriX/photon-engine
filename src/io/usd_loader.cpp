@@ -1431,46 +1431,52 @@ void addLight(const UsdPrim& prim, Ctx& ctx) {
     const float coneDeg = prim.HasAPI<UsdLuxShapingAPI>() ? attrOr<float>(shaping.GetShapingConeAngleAttr(), 90.0f, t) : 90.0f;
     const float softness = prim.HasAPI<UsdLuxShapingAPI>() ? attrOr<float>(shaping.GetShapingConeSoftnessAttr(), 0.0f, t) : 0.0f;
 
-    if (UsdLuxRectLight rect{prim}) {
-        const float w = attrOr<float>(rect.GetWidthAttr(), 1.0f, t), h = attrOr<float>(rect.GetHeightAttr(), 1.0f, t);
-        if (normalize) L /= std::max(1e-12f, w * stageLen(f.stageWorld, Vec3f(1, 0, 0)) * h * stageLen(f.stageWorld, Vec3f(0, 1, 0)));
+    // Dikdörtgen ve diskte motor genişliği yataya koyar (up × n): USD'nin X ekseni dikeyse kenarlar
+    // yer değiştirir. İkisi de USD'de tek yüzlüdür (−Z yönüne ışır).
+    auto orientPlanar = [&](float w, float h) {
         l.type = ImportedLight::Type::Area;
+        l.twoSided = false;
         l.width = w * f.x.length();
         l.height = h * f.y.length();
-        // Motorun alan ışığı genişliği yataya koyar (up × n): USD'nin X ekseni dikeyse kenarlar yer değiştirir.
-        Vec3f n = fwd;
+        const Vec3f n = fwd;
         const Vec3f up = std::abs(n.y) > 0.95f ? Vec3f(1, 0, 0) : Vec3f(0, 1, 0);
         const Vec3f u = up.cross(n).normalized(), v = n.cross(u).normalized();
         const Vec3f xa = f.x.lengthSquared() > 0.0f ? f.x.normalized() : u;
         if (std::abs(xa.dot(v)) > std::abs(xa.dot(u))) std::swap(l.width, l.height);
+    };
+    if (UsdLuxRectLight rect{prim}) {
+        const float w = attrOr<float>(rect.GetWidthAttr(), 1.0f, t), h = attrOr<float>(rect.GetHeightAttr(), 1.0f, t);
+        if (normalize) L /= std::max(1e-12f, w * stageLen(f.stageWorld, Vec3f(1, 0, 0)) * h * stageLen(f.stageWorld, Vec3f(0, 1, 0)));
+        orientPlanar(w, h);
         l.intensity = L;
     } else if (UsdLuxDiskLight d{prim}) {
         const float r = attrOr<float>(d.GetRadiusAttr(), 0.5f, t);
         if (normalize) L /= std::max(1e-12f, PI * r * r * stageLen(f.stageWorld, Vec3f(1, 0, 0)) * stageLen(f.stageWorld, Vec3f(0, 1, 0)));
-        // Motorda disk alan ışığı yok: aynı alanlı kare (aynı güç ve yaklaşık aynı yumuşaklık).
-        l.type = ImportedLight::Type::Area;
-        const float side = std::sqrt(PI) * r;
-        l.width = side * f.x.length();
-        l.height = side * f.y.length();
+        orientPlanar(2.0f * r, 2.0f * r); // ölçek eksenlerde farklıysa elips
+        l.areaShape = ImportedLight::AreaShape::Disk;
         l.intensity = L;
-        ++ctx.approxLights;
     } else if (UsdLuxSphereLight s{prim}) {
         const float r = attrOr<float>(s.GetRadiusAttr(), 0.5f, t);
         const float rs = r * avgScale(f.stageWorld);
         const float rm = r * (f.x.length() + f.y.length() + f.z.length()) / 3.0f;
         if (normalize && rs > 0.0f) L /= 4.0f * PI * rs * rs;
-        // Küre ışığı motorda nokta ışık: uzaktan görülen yoğunluk I = L · π r² (W/sr).
+        // Uzaktan görülen şiddet I = L · π r² (W/sr); motorun küre ışığı aynı I'yı radius ile taşır.
         l.intensity = rm > 0.0f ? L * PI * rm * rm : (normalize ? L * 0.25f : L);
-        if (rm > 0.0f && !attrOr<bool>(s.GetTreatAsPointAttr(), false, t)) ++ctx.approxLights;
+        const bool point = rm <= 0.0f || attrOr<bool>(s.GetTreatAsPointAttr(), false, t);
         l.type = coneDeg < 89.9f ? ImportedLight::Type::Spot : ImportedLight::Type::Point;
+        if (!point && l.type == ImportedLight::Type::Point) l.radius = rm;
+        if (!point && l.type == ImportedLight::Type::Spot) ++ctx.approxLights; // şekillendirilmiş küre: nokta spot
     } else if (UsdLuxCylinderLight c{prim}) {
         const float len = attrOr<float>(c.GetLengthAttr(), 1.0f, t), r = attrOr<float>(c.GetRadiusAttr(), 0.5f, t);
         const float ls = len * stageLen(f.stageWorld, Vec3f(1, 0, 0)), rs = r * stageLen(f.stageWorld, Vec3f(0, 1, 0));
         if (normalize) L /= std::max(1e-12f, 2.0f * PI * rs * ls);
-        // Yandan görülen izdüşüm alanı 2 r ℓ: nokta ışık yaklaşığı.
-        l.type = ImportedLight::Type::Point;
-        l.intensity = L * 2.0f * r * f.y.length() * len * f.x.length();
-        ++ctx.approxLights;
+        // Ekseni ışığın X'i; motorda tüpün ekseni konumdan hedefe uzanır. Uçlar ışımaz (USD ile aynı).
+        l.type = ImportedLight::Type::Area;
+        l.areaShape = ImportedLight::AreaShape::Tube;
+        l.direction = f.x.lengthSquared() > 0.0f ? f.x.normalized() : Vec3f(1, 0, 0);
+        l.width = len * f.x.length();
+        l.height = 2.0f * r * 0.5f * (f.y.length() + f.z.length());
+        l.intensity = L;
     } else if (UsdLuxDistantLight dl{prim}) {
         const float angle = attrOr<float>(dl.GetAngleAttr(), 0.53f, t);
         const float thetaMax = std::clamp(0.5f * angle * DEG_TO_RAD, 0.0f, PI);
@@ -1815,7 +1821,7 @@ void summarize(Ctx& ctx) {
     if (ctx.emissionTextures) w.push_back(std::to_string(ctx.emissionTextures) + " emisyon dokusu ortalama renge indirildi");
     if (ctx.uvConflicts) w.push_back(std::to_string(ctx.uvConflicts) + " dokunun UV dönüşümü malzemenin ilk dokusununkiyle değiştirildi");
     if (ctx.colorSpecular) w.push_back(std::to_string(ctx.colorSpecular) + " malzemenin renkli speküleri griye indirildi");
-    if (ctx.approxLights) w.push_back(std::to_string(ctx.approxLights) + " ışık en yakın motor ışığıyla yaklaşıklandı (disk → kare, küre/silindir → nokta)");
+    if (ctx.approxLights) w.push_back(std::to_string(ctx.approxLights) + " şekillendirilmiş (ShapingAPI) küre ışığı yarıçapsız spot olarak alındı");
     if (ctx.unsupportedDome) w.push_back("Kubbe ışığı biçimi desteklenmiyor (yalnız eşdikdörtgen)");
     if (ctx.domeTilted) w.push_back("Kubbe ışığının eğimi yok sayıldı (yalnız Y etrafında dönüş)");
     if (ctx.skippedInstances) w.push_back(std::to_string(ctx.skippedInstances) + " PointInstancer örneği sınırı aştığı için atlandı");

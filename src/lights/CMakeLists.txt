@@ -1,9 +1,10 @@
-# src/lights/CMakeLists.txt — photon_lights: ışık kaynakları (nokta, yönlü, alan/mesh, ortam/HDRI).
+# src/lights/CMakeLists.txt — photon_lights: ışık kaynakları (nokta, yönlü, alan/disk/küre/tüp/mesh, ortam/HDRI).
 # Integrator doğrudan aydınlatma (next-event estimation) için bunların sampleLi/pdfLi'sini çağırır.
 add_library(photon_lights STATIC
     point_light.cpp
     directional_light.cpp
     area_light.cpp
+    shape_lights.cpp
     light_bounds.cpp
     light_sampler.cpp
     environment_light.cpp

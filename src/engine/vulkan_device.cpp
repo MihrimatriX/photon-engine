@@ -4,7 +4,10 @@
 
 #include "core/image/cryptomatte.h"
 #include "core/math/constants.h"
+#include "core/math/frame.h"
 #include "core/math/quat.h"
+#include "geometry/cylinder.h"
+#include "geometry/disk.h"
 #include "geometry/mesh.h"
 #include "geometry/mesh_instance.h"
 #include "geometry/sphere.h"
@@ -13,6 +16,7 @@
 #include "lights/directional_light.h"
 #include "lights/environment_light.h"
 #include "lights/point_light.h"
+#include "lights/shape_lights.h"
 #include "lights/spot_light.h"
 #include "materials/dielectric.h"
 #include "materials/disney.h"
@@ -1548,6 +1552,56 @@ void VulkanDevice::rebuildGeometryAndBvh(bool keepBlasCache) {
             secondaryIndices.push_back(static_cast<uint32_t>(prims.size()));
             prims.push_back(gp);
             primBounds.push_back(sph->bounds());
+        } else if (const auto* disk = dynamic_cast<const Disk*>(sp.get())) {
+            // Disk (disk ışığının yüzeyi): merkez, iki yarı eksen, normal ve ters eksenler
+            // (düzlemdeki noktanın elips koordinatları için). Küreler gibi ikincil BVH'de.
+            const Material* mat = disk->material();
+            const uint32_t matIdx = regMat(mat);
+            const float cMat = getMatCrypto(mat);
+            const uint32_t matIdHash = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mat) & 0xFFFFFFFFu);
+            const uint32_t flags = 16u | (camInv ? 2u : 0u) | (catcher ? 4u : 0u) |
+                                   (static_cast<uint32_t>(vis) << 8u) | ((slot & 0xFFu) << 16u);
+            const uint32_t emitP1 = emitBase >= 0 ? static_cast<uint32_t>(emitBase + 1) : 0u;
+            const Vec3f ex = disk->ex(), ey = disk->ey();
+            const float ex2 = ex.lengthSquared(), ey2 = ey.lengthSquared();
+
+            gpu::GpuPrim gp{};
+            gp.p0_mat = makeV4(disk->center(), u32ToF32(matIdx));
+            gp.e1_flags = makeV4(ex, u32ToF32(flags));
+            gp.e2_meta = makeV4(ey, u32ToF32(emitP1 & 0xFFFFu));
+            gp.n0_u0 = makeV4(ex2 > 0.0f ? ex / ex2 : Vec3f(0.0f), 0.0f);
+            gp.n1_v0 = makeV4(ey2 > 0.0f ? ey / ey2 : Vec3f(0.0f), 0.0f);
+            gp.ng_v1 = makeV4(disk->normal(), 0.0f);
+            gp.uv2_crypto = gpu::Vec4{0.0f, 0.0f, cObj, cMat};
+            gp.objColor_p = makeC4(objCol, u32ToF32(matIdHash));
+
+            secondaryIndices.push_back(static_cast<uint32_t>(prims.size()));
+            prims.push_back(gp);
+            primBounds.push_back(disk->bounds());
+        } else if (const auto* cyl = dynamic_cast<const Cylinder*>(sp.get())) {
+            // Açık silindir (tüp ışığının yan yüzeyi): merkez, birim eksen, yarıçap ve yarı boy;
+            // n0/n1 eksene dik taban (uv açısı için).
+            const Material* mat = cyl->material();
+            const uint32_t matIdx = regMat(mat);
+            const float cMat = getMatCrypto(mat);
+            const uint32_t matIdHash = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mat) & 0xFFFFFFFFu);
+            const uint32_t flags = 32u | (camInv ? 2u : 0u) | (catcher ? 4u : 0u) |
+                                   (static_cast<uint32_t>(vis) << 8u) | ((slot & 0xFFu) << 16u);
+            const uint32_t emitP1 = emitBase >= 0 ? static_cast<uint32_t>(emitBase + 1) : 0u;
+            const Frame f(cyl->axis());
+
+            gpu::GpuPrim gp{};
+            gp.p0_mat = makeV4(cyl->center(), u32ToF32(matIdx));
+            gp.e1_flags = makeV4(cyl->axis(), u32ToF32(flags));
+            gp.e2_meta = gpu::Vec4{cyl->radius(), cyl->halfLength(), 0.0f, u32ToF32(emitP1 & 0xFFFFu)};
+            gp.n0_u0 = makeV4(f.s, 0.0f);
+            gp.n1_v0 = makeV4(f.t, 0.0f);
+            gp.uv2_crypto = gpu::Vec4{0.0f, 0.0f, cObj, cMat};
+            gp.objColor_p = makeC4(objCol, u32ToF32(matIdHash));
+
+            secondaryIndices.push_back(static_cast<uint32_t>(prims.size()));
+            prims.push_back(gp);
+            primBounds.push_back(cyl->bounds());
         }
     }
 
@@ -1700,7 +1754,8 @@ void VulkanDevice::rebuildMaterialsAndTextures() {
             const Color3f emit = l->emitted(dummySi);
             gm.base_metallic = makeC4(l->albedo(), 0.0f);
             gm.sheenCol_type = gpu::Vec4{1.0f, 1.0f, 1.0f, u32ToF32(1u)};
-            gm.emit_flags = makeC4(emit, 0.0f);
+            // bit 3: tek yüzlü yayım (tek yüzlü alan/disk ışığı, küre ve tüp): arka yüz ışımaz.
+            gm.emit_flags = makeC4(emit, u32ToF32(l->oneSidedEmission() ? 8u : 0u));
         } else if (const auto* g = dynamic_cast<const Dielectric*>(mat)) {
             uint32_t mf = (g->thinWalled() ? 1u : 0u) | (g->transmitsShadows() ? 4u : 0u);
             gm.base_metallic = makeC4(g->tint(), 0.0f);
@@ -1737,9 +1792,30 @@ void VulkanDevice::rebuildLightsAndLinks() {
             type = 0u;
             gl.pos_type = makeV4(al->position(), 0.0f);
             gl.u_area = makeV4(al->u(), al->area());
-            gl.v_cosIn = makeV4(al->v(), 0.0f);
+            gl.v_cosIn = makeV4(al->v(), al->twoSided() ? 0.0f : 1.0f); // w: tek yüzlü
             gl.rad_cosOut = makeC4(al->radiance(), 0.0f);
             gl.norm_power = makeV4(al->normal(), al->power().luminance());
+        } else if (const auto* dk = dynamic_cast<const DiskLight*>(l)) {
+            type = 5u;
+            gl.pos_type = makeV4(dk->center(), 0.0f);
+            gl.u_area = makeV4(dk->ex(), dk->area());
+            gl.v_cosIn = makeV4(dk->ey(), dk->twoSided() ? 0.0f : 1.0f);
+            gl.rad_cosOut = makeC4(dk->radiance(), 0.0f);
+            gl.norm_power = makeV4(dk->normal(), dk->power().luminance());
+        } else if (const auto* sk = dynamic_cast<const SphereLight*>(l)) {
+            type = 6u;
+            gl.pos_type = makeV4(sk->center(), 0.0f);
+            gl.u_area = gpu::Vec4{sk->radius(), 0.0f, 0.0f, 4.0f * PI * sk->radius() * sk->radius()};
+            gl.rad_cosOut = makeC4(sk->radiance(), 0.0f);
+            gl.norm_power = gpu::Vec4{0, 1, 0, sk->power().luminance()};
+        } else if (const auto* ck = dynamic_cast<const CylinderLight*>(l)) {
+            type = 7u;
+            const Frame f(ck->axis());
+            gl.pos_type = makeV4(ck->center(), 0.0f);
+            gl.u_area = makeV4(ck->axis(), ck->area());
+            gl.v_cosIn = makeV4(f.s, ck->radius());
+            gl.rad_cosOut = makeC4(ck->radiance(), ck->halfLength());
+            gl.norm_power = makeV4(f.t, ck->power().luminance());
         } else if (const auto* tl = dynamic_cast<const TriangleLight*>(l)) {
             type = 4u;
             gl.pos_type = makeV4(tl->p0(), 0.0f);
@@ -1996,6 +2072,8 @@ SampleBatchResult VulkanDevice::render(const Camera& camera, const RenderSetting
                 if (inst->mesh()) regMatName(inst->mesh()->material());
             } else if (const auto* mesh = dynamic_cast<const TriangleMesh*>(sp.get())) regMatName(mesh->material());
             else if (const auto* sph = dynamic_cast<const Sphere*>(sp.get())) regMatName(sph->material());
+            else if (const auto* dsk = dynamic_cast<const Disk*>(sp.get())) regMatName(dsk->material());
+            else if (const auto* cyl = dynamic_cast<const Cylinder*>(sp.get())) regMatName(cyl->material());
             else if (const auto* tri = dynamic_cast<const Triangle*>(sp.get())) regMatName(tri->material());
         }
     }

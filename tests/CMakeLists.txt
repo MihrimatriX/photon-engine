@@ -10,6 +10,7 @@ add_executable(photon_tests
     test_bvh.cpp
     test_disney.cpp
     test_area_light.cpp
+    test_shape_lights.cpp
     test_environment.cpp
     test_dielectric.cpp
     test_mesh_uv.cpp

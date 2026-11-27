@@ -16,8 +16,9 @@ Bilinen ve kasıtlı model farkları (rapor bunları ayrıca açıklar):
     pürüzlülükte ve sıyırma açılarında birkaç yüzde.
   * Çoklu saçılma: Photon'un Disney metali Kulla–Conty enerji telafisi yapar (beyaz metal fırında
     ≈ 1 yansıtır), Mitsuba'nın tek saçılmalı GGX'i pürüzlülükle enerji kaybeder.
-  * Işık yayan yüzeyler: Photon'da Lambert ışıması çift yüzlü, Mitsuba'da tek yüzlü. Sahneler,
-    ışık kaynaklarının arka yüzü boşluğa bakacak biçimde kuruldu.
+  * Işık yayan yüzeyler: Photon'da Lambert ışıması (mesh yayıcı) çift yüzlü, Mitsuba'da tek yüzlü.
+    Sahneler, ışık kaynaklarının arka yüzü boşluğa bakacak biçimde kuruldu. Gerçek ışıklar
+    (Scene.lights: tek yüzlü dikdörtgen, disk, küre, tüp) iki motorda da aynı tek yüzlü modeldir.
   * HDRI texel kuralı: Mitsuba texel'leri ızgara noktası sayar, Photon piksel merkezi. Mitsuba'ya
     verilen ortam haritası bu yüzden resample_for_mitsuba ile 4× yoğun ızgarada yeniden örneklenir.
 
@@ -49,6 +50,24 @@ class Obj:
 
 
 @dataclass
+class Light:
+    """Motorun şekilli ışığı; Mitsuba'da aynı şekil + area emitter (siyah difüz yüzey).
+
+    rect/disk: center merkez, aim ışıdığı yön (normal), width × height (disk: çap); tek yüzlü.
+    tube: center merkez, aim eksen yönü, width boy, height çap (açık silindir, uçlar ışımaz).
+    sphere: center merkez, radius yarıçap (Photon'da yarıçaplı nokta ışık).
+    """
+    kind: str
+    center: tuple
+    radiance: tuple
+    aim: tuple = (0, -1, 0)
+    width: float = 1.0
+    height: float = 1.0
+    radius: float = 0.0
+    name: str = ""
+
+
+@dataclass
 class Scene:
     name: str
     title: str
@@ -58,6 +77,7 @@ class Scene:
     objects: list
     env: dict | None = None    # None → siyah; {"hdr": yol} → HDRI
     res: tuple = (320, 240)
+    lights: list = field(default_factory=list)
     notes: str = ""
     extra: dict = field(default_factory=dict)
 
@@ -145,7 +165,57 @@ def scenes():
                      res=(384, 192),
                      notes="HDRI önem örneklemesi ve eşleme, GGX iletken (Kulla–Conty farkı beklenir), "
                            "pürüzsüz ve pürüzlü cam, zemine düşen yumuşak gölgeler."))
+
+    # Şekilli ışıklar: tavanın hemen altında aşağı bakan tek yüzlü dikdörtgen (arka yüzü ışısaydı
+    # üstündeki tavanı yakardı), duvardan sahneye eğik bakan disk, kameranın gördüğü küre ve tüp.
+    W = 0.6
+    room = [
+        quad((-3, 0, 3), (3, 0, 3), (3, 0, -2), (-3, 0, -2), diffuse(W), "zemin"),
+        quad((-3, 0, -2), (3, 0, -2), (3, 3, -2), (-3, 3, -2), diffuse(W), "arka duvar"),
+        quad((-3, 2.6, -2), (3, 2.6, -2), (3, 2.6, 3), (-3, 2.6, 3), diffuse(W), "tavan"),
+        sphere((-0.7, 0.45, -0.2), 0.45, diffuse((0.75, 0.75, 0.75)), "küre"),
+        sphere((0.75, 0.3, 0.5), 0.3, diffuse((0.7, 0.45, 0.3)), "küçük küre"),
+    ]
+    lights = [
+        Light("rect", (0.6, 2.35, -0.5), (6.0, 6.0, 6.0), aim=(0, -1, 0), width=1.2, height=0.7, name="tavan paneli"),
+        Light("disk", (-1.9, 1.5, 0.3), (9.0, 7.0, 5.0), aim=(1, -0.35, -0.15), width=0.7, height=0.7,
+              name="disk"),
+        Light("sphere", (1.5, 0.85, -0.3), (14.0, 11.0, 8.0), radius=0.14, name="ampul"),
+        Light("tube", (-0.2, 1.85, -1.6), (10.0, 12.0, 16.0), aim=(1, 0.08, 0.1), width=1.8, height=0.08,
+              name="tüp"),
+    ]
+    out.append(Scene("shape_lights", "Şekilli ışıklar: tek yüzlü panel, disk, küre, tüp", eye=(0, 1.15, 4.4),
+                     target=(0, 0.95, 0), fov=40.0, objects=room, lights=lights, res=(288, 192),
+                     notes="Disk/küre/tüp ışıklarının NEE örneklemesi ve BSDF isabeti MIS'i, tek yüzlü ışıma, "
+                           "kameranın gördüğü analitik ışık yüzeyleri."))
     return out
+
+
+def area_frame(aim):
+    """document.cpp buildLights ile aynı taban: n ışıdığı yön, u = up × n (genişlik), v = n × u."""
+    n = np.array(aim, dtype=np.float64)
+    n /= np.linalg.norm(n)
+    up = np.array([1.0, 0.0, 0.0]) if abs(n[1]) > 0.95 else np.array([0.0, 1.0, 0.0])
+    u = np.cross(up, n)
+    u /= np.linalg.norm(u)
+    v = np.cross(n, u)
+    v /= np.linalg.norm(v)
+    return n, u, v
+
+
+def _unit(a):
+    a = np.array(a, dtype=np.float64)
+    return a / np.linalg.norm(a)
+
+
+def _axis_frame(axis):
+    """Sağ elli (X = eksen, Y, Z) tabanı: X × Y = Z."""
+    x = _unit(axis)
+    helper = np.array([0.0, 1.0, 0.0]) if abs(x[1]) < 0.9 else np.array([1.0, 0.0, 0.0])
+    z = np.cross(x, helper)
+    z /= np.linalg.norm(z)
+    y = np.cross(z, x)
+    return x, y, z
 
 
 # ─────────────────────────────── geometri ───────────────────────────────
@@ -267,6 +337,21 @@ def _photon_material(m):
     raise ValueError(t)
 
 
+def _photon_light(l: Light) -> dict:
+    """Photon proje ışığı. Renk en büyük kanala bölünür, şiddet = o kanal (radyans = renk × şiddet).
+    Küre: yarıçaplı nokta ışık, şiddet I = L · π r² (motor radyansı I / (π r²) olarak kurar)."""
+    lum = max(l.radiance)
+    c = np.array(l.center, dtype=np.float64)
+    base = {"name": l.name or l.kind, "enabled": True, "color": [x / lum for x in l.radiance],
+            "position": c.tolist(), "visibleToCamera": True, "azimuth": 45.0, "elevation": 45.0}
+    if l.kind == "sphere":
+        return {**base, "type": "point", "intensity": lum * math.pi * l.radius ** 2, "target": c.tolist(),
+                "width": 1.0, "height": 1.0, "radius": l.radius}
+    shape = {"rect": "rectangle", "disk": "disk", "tube": "tube"}[l.kind]
+    return {**base, "type": "area", "shape": shape, "twoSided": False, "intensity": lum,
+            "target": (c + _unit(l.aim)).tolist(), "width": l.width, "height": l.height}
+
+
 def to_photon(scene: Scene, outdir: str, env_exr: str | None) -> str:
     mats, nodes = [], []
     for o in scene.objects:
@@ -294,7 +379,8 @@ def to_photon(scene: Scene, outdir: str, env_exr: str | None) -> str:
         env = {"hdr": "", "zenith": [0, 0, 0], "horizon": [0, 0, 0], "rotation": 0.0, "intensity": 0.0,
                "background": {"mode": "color", "color": [0, 0, 0]},
                "ground": {"enabled": False, "color": [0, 0, 0], "roughness": 1.0, "shadowCatcher": False}}
-    proj = {"format": "photon-project", "version": 2, "camera": cam, "environment": env, "lights": [],
+    proj = {"format": "photon-project", "version": 2, "camera": cam, "environment": env,
+            "lights": [_photon_light(l) for l in scene.lights],
             "materials": mats, "nodes": nodes,
             "render": {"denoise": False, "exposure": 0.0, "maxBounces": 64, "toneMap": 0, "pixelFilter": "box",
                        "filterWidth": 1.0}}
@@ -342,6 +428,39 @@ def _usd_material(path, m):
             f"            token {conn}.connect = <{path}/Surface.{port}>\n"
             f'            def Shader "Surface"\n            {{\n{body}\n'
             f"            }}\n        }}\n")
+
+
+def _usd_light(k: int, l: Light) -> str:
+    """UsdLux ışığı (yerelde −Z'ye ışır; tüpün ekseni X). Dikdörtgen/disk dönüşümü X = v, Y = u,
+    Z = −n (sağ elli): USD genişliği (X) motorun yüksekliğidir, içe aktarıcı kenarları geri çevirir."""
+    def f3(v):
+        return "(" + ", ".join(f"{float(x):.9g}" for x in v) + ")"
+
+    lum = max(l.radiance)
+    color = f3([x / lum for x in l.radiance])
+    c = np.array(l.center, dtype=np.float64)
+    head = [f"float inputs:intensity = {lum:.9g}", f"color3f inputs:color = {color}"]
+    if l.kind == "sphere":
+        kind, attrs = "SphereLight", [f"float inputs:radius = {l.radius:.9g}"]
+        xf = [f"double3 xformOp:translate = {f3(c)}", 'uniform token[] xformOpOrder = ["xformOp:translate"]']
+    else:
+        if l.kind == "tube":
+            x, y, z = _axis_frame(l.aim)
+            kind = "CylinderLight"
+            attrs = [f"float inputs:length = {l.width:.9g}", f"float inputs:radius = {0.5 * l.height:.9g}"]
+        else:
+            n, u, v = area_frame(l.aim)
+            x, y, z = v, u, -n
+            if l.kind == "rect":
+                kind = "RectLight"
+                attrs = [f"float inputs:width = {l.height:.9g}", f"float inputs:height = {l.width:.9g}"]
+            else:
+                kind, attrs = "DiskLight", [f"float inputs:radius = {0.5 * l.width:.9g}"]
+        xf = [f"matrix4d xformOp:transform = {_usd_matrix([[*x, 0], [*y, 0], [*z, 0], [*c, 1]])}",
+              'uniform token[] xformOpOrder = ["xformOp:transform"]']
+    body = "".join(f"        {a}\n" for a in head + attrs + xf)
+    doc = (l.name or l.kind).replace('"', "'")
+    return f'    def {kind} "L{k}" (\n        doc = "{doc}"\n    )\n    {{\n{body}    }}\n'
 
 
 def _usd_matrix(rows):
@@ -404,6 +523,7 @@ def to_usd(scene: Scene, outdir: str, env_hdr: str | None) -> str:
            f"        float2 clippingRange = (0.01, 1000)\n"
            f"        matrix4d xformOp:transform = {_usd_matrix([[*r, 0], [*u, 0], [*(-f), 0], [*e, 1]])}\n"
            f'        uniform token[] xformOpOrder = ["xformOp:transform"]\n    }}\n')
+    lights = "".join(_usd_light(k, l) for k, l in enumerate(scene.lights))
     dome = ""
     if env_hdr:
         rel = os.path.relpath(env_hdr, outdir).replace(os.sep, "/")
@@ -418,7 +538,7 @@ def to_usd(scene: Scene, outdir: str, env_hdr: str | None) -> str:
             f'    doc = "PhotonEngine referans sahnesi {scene.name} (bench/reference/refscenes.py, to_usd)"\n'
             '    defaultPrim = "World"\n    metersPerUnit = 1\n    upAxis = "Y"\n)\n\n'
             'def Xform "World"\n{\n    def Scope "Looks"\n    {\n' + "".join(mats) + "    }\n\n" +
-            "".join(prims) + cam + dome + "}\n")
+            "".join(prims) + lights + cam + dome + "}\n")
     path = os.path.join(outdir, scene.name + ".usda")
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
@@ -463,9 +583,34 @@ def to_mitsuba(scene: Scene, outdir: str, env_exr_mitsuba: str | None, spp: int,
         if o.mat["type"] == "emitter":
             s["emitter"] = {"type": "area", "radiance": {"type": "rgb", "value": o.mat["radiance"]}}
         d[f"obj{k}"] = s
+    for k, l in enumerate(scene.lights):
+        d[f"light{k}"] = _mitsuba_light(l)
     if env_exr_mitsuba:
         d["env"] = {"type": "envmap", "filename": env_exr_mitsuba, "scale": 1.0}
     return d
+
+
+def _mitsuba_light(l: Light) -> dict:
+    """Şekil + tek yüzlü area emitter (normal yönüne ışır), yüzey siyah difüz. Mitsuba'nın silindiri
+    de uçları açık bir tüptür."""
+    import mitsuba as mi
+    black = {"type": "diffuse", "reflectance": {"type": "rgb", "value": [0, 0, 0]}}
+    em = {"type": "area", "radiance": {"type": "rgb", "value": list(l.radiance)}}
+    c = np.array(l.center, dtype=np.float64)
+    if l.kind == "sphere":
+        return {"type": "sphere", "center": c.tolist(), "radius": l.radius, "bsdf": black, "emitter": em}
+    if l.kind == "tube":
+        a = _unit(l.aim) * (0.5 * l.width)
+        return {"type": "cylinder", "p0": (c - a).tolist(), "p1": (c + a).tolist(), "radius": 0.5 * l.height,
+                "bsdf": black, "emitter": em}
+    n, u, v = area_frame(l.aim)
+    m = np.eye(4)
+    m[:3, 0] = u * (0.5 * l.width)
+    m[:3, 1] = v * (0.5 * l.height)
+    m[:3, 2] = n
+    m[:3, 3] = c
+    shape = "rectangle" if l.kind == "rect" else "disk"
+    return {"type": shape, "to_world": mi.ScalarTransform4f(m.tolist()), "bsdf": black, "emitter": em}
 
 
 def _mi_look_at(eye, target):

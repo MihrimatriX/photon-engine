@@ -1,4 +1,5 @@
-// area_light.h — Alan ışıkları: dikdörtgen (AreaLight) ve yayıcı üçgen (TriangleLight).
+// area_light.h — Alan ışıkları: dikdörtgen (AreaLight) ve yayıcı üçgen (TriangleLight). Disk, küre ve
+// silindir ışıkları shape_lights.h içinde.
 // Delta ışıkların aksine yüzeyleri vardır: ışınlar onlara çarpabilir, yumuşak gölge verirler.
 // Yüzeyde düzgün (uniform) alan örneklemesi yapılır, pdf katı açıya çevrilir. pdfLi aynı pdf'i
 // verir ki BSDF örneklemesi ışığa çarptığında MIS ağırlığı hesaplanabilsin.
@@ -13,11 +14,12 @@
 
 namespace photon {
 
-/// @brief Rectangular area light. Radiance leaves both sides of the quad.
+/// @brief Rectangular area light. Radiance leaves the side the normal u × v points to, or both
+/// sides when two-sided (the engine's historical default; KeyShot/V-Ray/Cycles lights are one-sided).
 class AreaLight : public Light {
 public:
-    AreaLight(const Vec3f& position, const Vec3f& u, const Vec3f& v, const Color3f& radiance)
-        : m_position(position), m_u(u), m_v(v), m_radiance(radiance) {
+    AreaLight(const Vec3f& position, const Vec3f& u, const Vec3f& v, const Color3f& radiance, bool twoSided = true)
+        : m_position(position), m_u(u), m_v(v), m_radiance(radiance), m_twoSided(twoSided) {
         // u × v: uzunluğu paralelkenarın alanı (|u||v| sin θ), yönü yüzey normali.
         Vec3f normal = u.cross(v);
         m_area = normal.length();
@@ -56,13 +58,19 @@ public:
     float area() const { return m_area; }
     const Color3f& radiance() const { return m_radiance; }
     void setRadiance(const Color3f& r) { m_radiance = r; }
+    /// İki yüzlü mü? Tek yüzlüde ışık yalnız normalin baktığı yarı uzaya ışır.
+    bool twoSided() const { return m_twoSided; }
 
 private:
+    /// Tek yüzlü ışıkta alıcı normalin arkasındaysa ışık onu hiç görmez.
+    bool facing(const Vec3f& ref) const { return m_twoSided || (ref - m_position).dot(m_normal) > 0.0f; }
+
     Vec3f m_position;
     Vec3f m_u;
     Vec3f m_v;
     Color3f m_radiance;
-    
+    bool m_twoSided = true;
+
     Vec3f m_normal;
     float m_area;
     bool m_rectangle = false;

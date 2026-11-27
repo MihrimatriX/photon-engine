@@ -219,6 +219,7 @@ std::vector<RealtimeLight> packRealtimeLights(const std::vector<LightDesc>& desc
             case LightDesc::Type::Point:
                 l.type = RealtimeLight::Type::Point;
                 l.intensity = L;
+                l.radius = std::max(0.0f, d.radius);
                 break;
             case LightDesc::Type::Spot:
                 l.type = RealtimeLight::Type::Spot;
@@ -234,10 +235,21 @@ std::vector<RealtimeLight> packRealtimeLights(const std::vector<LightDesc>& desc
                 }
                 break;
             case LightDesc::Type::Area: {
+                if (d.areaShape == LightDesc::AreaShape::Tube) {
+                    // Önizlemede tüp yarıçaplı nokta ışık: yandan görülen şiddet I = L · 2 r ℓ.
+                    const float len = std::max(1e-4f, d.width), dia = std::max(1e-4f, d.height);
+                    l.type = RealtimeLight::Type::Point;
+                    l.intensity = L * (len * dia);
+                    l.radius = std::sqrt(len * dia * INV_PI);
+                    break;
+                }
                 l.type = RealtimeLight::Type::Area;
                 l.direction = aim;
-                const float w = std::max(1e-4f, d.width);
-                const float h = std::max(1e-4f, d.height);
+                l.twoSided = d.twoSided;
+                // Disk: aynı alanlı dikdörtgen (LTC dörtgen integrali); kenarlar √π / 2 oranında.
+                const float k = d.areaShape == LightDesc::AreaShape::Disk ? 0.5f * std::sqrt(PI) : 1.0f;
+                const float w = std::max(1e-4f, d.width) * k;
+                const float h = std::max(1e-4f, d.height) * k;
                 const float area = w * h;
                 l.intensity = L * area;
                 l.radius = std::sqrt(area * INV_PI);

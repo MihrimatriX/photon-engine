@@ -365,20 +365,49 @@ void Application::drawSelectionOutline(const ImVec2& origin, const ImVec2& size)
         const LightDesc& l = m_s.lights[static_cast<size_t>(m_s.selLight)];
         const ImU32 col = ui::col(pal.warning, 0.9f);
         ImVec2 a, b;
+        // Dünyada c + ea·cos t + eb·sin t elipsi (disk kenarı, tüp ucu, küre çevresi).
+        const auto ring = [&](const Vec3f& c, const Vec3f& ea, const Vec3f& eb, ImU32 rc, float thick) {
+            ImVec2 prev;
+            bool havePrev = false;
+            for (int i = 0; i <= 48; ++i) {
+                const float t = TWO_PI * static_cast<float>(i) / 48.0f;
+                ImVec2 q;
+                const bool ok = project(vp, c + ea * std::cos(t) + eb * std::sin(t), origin, size, q);
+                if (ok && havePrev) dl->AddLine(prev, q, rc, thick);
+                prev = q;
+                havePrev = ok;
+            }
+        };
         if (l.type == LightDesc::Type::Area) {
             // buildLights ile aynı taban: n hedefe bakar, u ve v dörtgenin kenarları.
             Vec3f n = (l.target - l.position);
             n = n.lengthSquared() > 0.0f ? n.normalized() : Vec3f(0, -1, 0);
             const Vec3f up = std::abs(n.y) > 0.95f ? Vec3f(1, 0, 0) : Vec3f(0, 1, 0);
-            const Vec3f u = up.cross(n).normalized() * (l.width * 0.5f);
-            const Vec3f v = n.cross(up.cross(n).normalized()).normalized() * (l.height * 0.5f);
-            const Vec3f q[4] = {l.position - u - v, l.position + u - v, l.position + u + v, l.position - u + v};
-            ImVec2 s[4];
-            bool ok = true;
-            for (int i = 0; i < 4; ++i) ok = project(vp, q[i], origin, size, s[i]) && ok;
-            if (ok) {
-                dl->AddQuadFilled(s[0], s[1], s[2], s[3], ui::col(pal.warning, 0.12f));
-                dl->AddQuad(s[0], s[1], s[2], s[3], col, 1.5f);
+            const Vec3f u1 = up.cross(n).normalized(), v1 = n.cross(u1).normalized();
+            if (l.areaShape == LightDesc::AreaShape::Tube) {
+                // Tüp: ekseni n boyunca, boy = genişlik, çap = yükseklik. İki uç çemberi + dört kenar çizgisi.
+                const Vec3f h = n * (0.5f * l.width);
+                const float r = 0.5f * l.height;
+                ring(l.position - h, u1 * r, v1 * r, col, 1.5f);
+                ring(l.position + h, u1 * r, v1 * r, col, 1.5f);
+                for (int k = 0; k < 4; ++k) {
+                    const float t = 0.5f * PI * static_cast<float>(k);
+                    const Vec3f o = (u1 * std::cos(t) + v1 * std::sin(t)) * r;
+                    if (project(vp, l.position - h + o, origin, size, a) && project(vp, l.position + h + o, origin, size, b))
+                        dl->AddLine(a, b, col, 1.5f);
+                }
+            } else if (l.areaShape == LightDesc::AreaShape::Disk) {
+                ring(l.position, u1 * (0.5f * l.width), v1 * (0.5f * l.height), col, 1.5f);
+            } else {
+                const Vec3f u = u1 * (l.width * 0.5f), v = v1 * (l.height * 0.5f);
+                const Vec3f q[4] = {l.position - u - v, l.position + u - v, l.position + u + v, l.position - u + v};
+                ImVec2 s[4];
+                bool ok = true;
+                for (int i = 0; i < 4; ++i) ok = project(vp, q[i], origin, size, s[i]) && ok;
+                if (ok) {
+                    dl->AddQuadFilled(s[0], s[1], s[2], s[3], ui::col(pal.warning, 0.12f));
+                    dl->AddQuad(s[0], s[1], s[2], s[3], col, 1.5f);
+                }
             }
             if (project(vp, l.position, origin, size, a) && project(vp, l.target, origin, size, b)) {
                 dl->AddLine(a, b, ui::col(pal.warning, 0.45f), 1.0f);
@@ -388,6 +417,14 @@ void Application::drawSelectionOutline(const ImVec2& origin, const ImVec2& size)
             if (project(vp, l.position, origin, size, a)) {
                 dl->AddCircle(a, 9.0f, col, 24, 1.5f);
                 dl->AddCircleFilled(a, 3.0f, col);
+            }
+            if (l.radius > 0.0f) {
+                // Kürenin kameradan görülen çevresi (bakış yönüne dik çember).
+                Vec3f w = m_s.camera.position() - l.position;
+                w = w.lengthSquared() > 0.0f ? w.normalized() : Vec3f(0, 0, 1);
+                const Vec3f up = std::abs(w.y) > 0.95f ? Vec3f(1, 0, 0) : Vec3f(0, 1, 0);
+                const Vec3f e1 = up.cross(w).normalized(), e2 = w.cross(e1);
+                ring(l.position, e1 * l.radius, e2 * l.radius, ui::col(pal.warning, 0.7f), 1.25f);
             }
         } else if (l.type == LightDesc::Type::Spot) {
             // Konum noktası + hedefe çizgi + hedefte koninin kesiti (taban çemberi).
