@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cmath>
 #include <filesystem>
@@ -142,8 +143,12 @@ std::shared_ptr<const Image> EnvironmentCache::get(const std::string& path) {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_images.find(path);
     if (it != m_images.end()) return it->second;
-    std::optional<Image> img = loadImageHDR(path);
-    if (!img) img = loadImageEXR(path);
+    // Uzantıya göre doğru yükleyici önce denenir; aksi halde .exr için HDR yükleyicisi sahte
+    // bir "HDR Load Error" basıyordu. Uzantısı yanlış dosyalar için diğeri yedek kalır.
+    std::string ext = pathToUtf8(pathFromUtf8(path).extension());
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::optional<Image> img = ext == ".exr" ? loadImageEXR(path) : loadImageHDR(path);
+    if (!img) img = ext == ".exr" ? loadImageHDR(path) : loadImageEXR(path);
     if (!img) return nullptr;
     auto shared = std::make_shared<const Image>(std::move(*img));
     m_images[path] = shared;
@@ -337,7 +342,10 @@ std::shared_ptr<Scene> buildRenderScene(const SceneGraph& graph, const std::vect
         }
     }
     for (const auto& l : buildLights(lights)) scene->addLight(l);
-    scene->setEnvironment(buildEnvironment(env, cache));
+    // Yoğunluğu 0 olan ortam hiç ışık vermez ve görünmez (eval · 0): sahneye eklenmez. Eklenirse
+    // ışık seçicideki düzgün pay yüzünden NEE örneklerinin bir kısmı boşa gider ve kaçan her ışın
+    // siyah bir harita için atan2/acos + çift doğrusal okuma öder (Cornell tipi kapalı sahneler).
+    if (env.intensity > 0.0f) scene->setEnvironment(buildEnvironment(env, cache));
     scene->setBackground(env.background);
     scene->buildAccelerator();
     return scene;

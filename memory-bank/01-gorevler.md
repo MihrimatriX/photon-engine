@@ -1,7 +1,8 @@
 # Yapılacaklar
 
 Nasıl okunur:
-- `- [ ]` açık görev, `- [x]` bitti.
+- `- [ ]` açık görev, `- [x]` bitti, `- [~]` kısmen yapıldı (notta kalan iş), `- [-]` geçersiz (başka yolla çözüldü ya da gereksizleşti).
+- 2026-11-27: kutucuklar M1–M6 commit'lerine (v0.4–v0.5) göre gözden geçirildi; kanıt her maddenin notunda.
 - Köşeli parantezdeki kimlikler, ör. `[engine-1]`, `02-bulgular.md`'deki ayrıntılı bulguya gider (dosya:satır ve düzeltme önerisi orada).
 - **[SEN]** işaretli parçayı sen yazarsın; kodda `TODO(human)` olarak bırakılır.
 - Efor tam zaman varsayımıyla verildi. Faz 0–9 toplamı ~27–36 hafta.
@@ -129,14 +130,17 @@ Nasıl okunur:
 - [x] **F2.5** `photon_app --smoke`: gizli pencere, örnek sahne, 16 spp, PNG yazar, 0 koduyla çıkar.
 - [x] **F2.6** (2026-10-29: `test_bsdf_verification` FurnaceNeverGainsEnergy + kayıpsız malzemeler ≈ 1) `test_furnace`: her malzeme × pürüzlülük. Bugünkü clearcoat ve pürüzlü cam hatalarını yakalamalı. `[materials-14]` `[lighting-16]` `[build-10]` **[SEN]** tahminci Σ f·|cos|/pdf.
 - [x] **F2.7** (2026-10-29: Bonferroni düzeltmeli, `Chi2SamplingMatchesPdf`) `test_chi2`: `sample()` ile `pdf()` 2D histogramda tutarlı.
-- [ ] **F2.8** 64×64 golden görüntüler ve relMSE eşiği.
+- [x] **F2.8** (2026-11-27: referans bağımsız motordan, Mitsuba 3; `tests/test_golden_reference.cpp`, `tests/data/golden/`, üreten `bench/reference/make_golden.py`) 64×64 golden görüntüler ve relMSE eşiği.
 - [ ] **F2.9** Determinizm: 1, 4 ve 8 thread ile bit bit aynı görüntü; tohumlar karo boyutuna bağlı olmaz. `[core-12]` `[engine-16]`
 - [ ] **F2.10** BVH testi: rastgele sahnede kaba kuvvetle karşılaştırma, `intersectAny`, ölçek durumları. `[geometry-15]`
 - [ ] **F2.11** Renk testleri: transfer fonksiyonları, ton eşlemede orta gri, export parlaklığı. `[color-14]`
 - [ ] **F2.12** Tracy profil bölgeleri: `renderSamplePass`, `BVH::intersect`, Disney sample/eval, denoise.
-- [ ] **F2.13** `bench/scenes/` altında 5 sahne (krom küre + softbox, cam şişe, plastik ürün, pürüzlü metal, iç mekân) ve `bench/BASELINE.md` (Mrays/s, spp/s, 64 spp varyans).
-- [ ] **F2.14** (İsteğe bağlı) Mitsuba 3 referansı: ortak malzemelerde relMSE.
+- [~] **F2.13** (2026-11-27: ürün sahneleri `bench/scenes/` (7 sahne); referans ve verim sahneleri `bench/reference/`. Kalan: BASELINE'ı GPU ve yeni donanımla yeniden ölçmek) `bench/scenes/` altında 5 sahne (krom küre + softbox, cam şişe, plastik ürün, pürüzlü metal, iç mekân) ve `bench/BASELINE.md` (Mrays/s, spp/s, 64 spp varyans).
+- [x] **F2.14** (2026-11-27: Mitsuba 3.9 referansı, `bench/reference/` ve `bench/reference/REPORT.md`) (İsteğe bağlı) Mitsuba 3 referansı: ortak malzemelerde relMSE.
 - [ ] **F2.15** Faz 3–7'nin sırasını gerçek ölçümlere göre gözden geçir.
+- [ ] **F2.16** (2026-11-27, `bench/reference/REPORT.md`) Kostikli Cornell'de Cycles eşit örnekte %30 daha az gürültülü. Rus ruleti politikası (3. sekmeden, yalnız throughput, üst sınırsız; Mitsuba η² + %95 sınır) ve path guiding varsayılanı ölçülerek denenir. Kanıt: `efficiency.py` kostik satırında verim oranı ≥ 2.
+- [ ] **F2.17** Tek yüzlü ışık seçeneği: Lambert ışıması bugün hep çift yüzlü (KeyShot/V-Ray/Cycles'ta seçilebilir). Malzemede `emitTwoSided`, NEE pdf'i ve MIS buna uyar; referans sahnede ışık tavanın altına indirilince Mitsuba ile oran 1.000 kalır.
+- [ ] **F2.18** CPU verimi: Mitsuba 3 LLVM wavefront basit sahnelerde örnek başına ~2.5× hızlı. Sıradaki profil kalemleri: Disney lob değerlendirmesi, gölgelendirme çerçevesi, ortam CDF araması (alias tablosu), Kulla–Conty tablo okuması. SIMD wavefront kararı yol haritası Adım 3 ile birlikte.
 - **Öğrenme:** PBRT bölüm 2 (Monte Carlo integrasyonu, varyans, önem örnekleme); chi-kare testinin mantığı.
 
 ## Faz 3 — Anında tepki: etkileşim ve gürültü giderme (2–3 hafta)
@@ -191,7 +195,7 @@ Nasıl okunur:
   
   `[ui-3]` `[ui-2]` **[SEN]** imlece doğru zoom matematiği.
 - [x] **F4.4** ImGuizmo: taşı/döndür/ölçekle ve ViewManipulate küpü, undo'ya bağlı. Sürüklerken path-traced görüntü de güncellenir. `[app-11]` `[io-m5]`
-- [ ] **F4.5** Komut paleti (Ctrl+K), kısayollarıyla.
+- [x] **F4.5** (2026-11-27: M6, `app/ui_command_palette.cpp`) Komut paleti (Ctrl+K), kısayollarıyla.
 - [x] **F4.6** HDRI döndürme ve yoğunluk; arka plan aydınlatmadan ayrılır (HDRI, renk ya da şeffaf). `[lighting-13]`
 - [x] **F4.7** Işık listesi: dönüşüm, renk, boyut; ışıklar sahne ağacında görünür.
 - [x] **F4.8** Fiziksel kamera temeli:
@@ -263,14 +267,14 @@ Nasıl okunur:
 
 ## Faz 6 — Ham hız: hızlandırma yapıları (3 hafta)
 
-- [ ] **F6.1** Yaprak sıralı üçgen tamponu; kesişim yalnız (t, u, v, primId) döner; `SurfaceInteraction` isabetten sonra bir kez kurulur. `[geometry-2]`
+- [~] **F6.1** (2026-11-27: üretimde Embree kesişimi kullanılıyor; `bvh.cpp` yalnız referans/öğrenme. Öğrenme için açık bırakılabilir) Yaprak sıralı üçgen tamponu; kesişim yalnız (t, u, v, primId) döner; `SurfaceInteraction` isabetten sonra bir kez kurulur. `[geometry-2]`
 - [ ] **F6.2** Bölmesiz slab testi; BVH'nin zaten hesapladığı `invDir` kullanılır. `[core-7]` `[geometry-3]`
 - [ ] **F6.3** Watertight ışın-üçgen kesişimi (Woop 2013). **[SEN]** kesme (shear) adımı.
 - [ ] **F6.4** Yakın/uzak çocuk ayıklama ve sabit boyutlu yığın; iç içe çağrıda yığın paylaşımı hatası. `[geometry-7]` `[geometry-14]`
 - [ ] **F6.5** Paralel binned SAH: prefix/suffix tarama, arena düğümleri, yaprak ≤ 4–8. `[geometry-13]` **[SEN]** SAH bölme seçimi.
-- [ ] **F6.6** BLAS/TLAS ve örnekleme (instancing); dönüşüm düzenlemesi yalnız TLAS'ı yeniden kurar. `[geometry-6]`
+- [x] **F6.6** (2026-11-27: M2, Embree 4 BLAS/TLAS ve örnekleme; `engine/embree_accel.*`) BLAS/TLAS ve örnekleme (instancing); dönüşüm düzenlemesi yalnız TLAS'ı yeniden kurar. `[geometry-6]`
 - [ ] **F6.7** Vertex kaynaklama, kopyasız taşıma, bake edilmiş kopyaların kalkması, açıya göre otomatik yumuşatma. `[geometry-11]` `[io-11]`
-- [ ] **F6.8** Gölge any-hit: alfa/kesik desteği; ışığın kendi primitifi atlanır. `[geometry-12]`
+- [x] **F6.8** (2026-11-27: alfa kesikleri 2026-11-06, `Material::opacity`; gölge ışınlarında geçirgen yürüyüş) Gölge any-hit: alfa/kesik desteği; ışığın kendi primitifi atlanır. `[geometry-12]`
 - [x] **F6.9** Embree 4.4 (resmi derlenmiş paket, `scripts/fetch_deps.ps1`; vcpkg portu ~1 saat sürüyor). `PHOTON_ENABLE_EMBREE` bayrağı; `bvh.cpp` referans test olarak kalır.
 - [ ] **F6.10** Global `/arch:AVX2`'nin faydası ölçülür; gerekirse varsayılan SSE4.2 olur. `[core-9]` `[build-12]`
 - [ ] **F6.11** Küre kesişim hassasiyeti (pbrt-v4 diskriminant formu). `[core-13]`
@@ -284,18 +288,18 @@ Nasıl okunur:
 - [x] **F7.3** F82-tint iletken Fresnel ve metal presetleri (altın, gümüş, bakır, alüminyum, krom).
 - [x] **F7.4** (2026-10-29: Kulla–Conty albedo ölçekleme; LTC yerine Charlie sheen + albedo tablosu; EON difüz) Enerji koruyan kaplama (taban zayıflatma) ve LTC sheen.
 - [x] **F7.5** Beer–Lambert soğurma ve ortam takibi; cam rengi yansımaları boyamaz. `[materials-13]`
-- [ ] **F7.6** Doku depolama 8-bit + LUT, makul boyut sınırı; mipmap ve ışın konisi (RTG bölüm 20). `[color-13]`
+- [x] **F7.6** (2026-11-27: M1, 8-bit kompakt mipmap dokular + ışın konisi LOD; `tests/test_texture_lod.cpp`) Doku depolama 8-bit + LUT, makul boyut sınırı; mipmap ve ışın konisi (RTG bölüm 20). `[color-13]`
 - [ ] **F7.7** MikkTSpace ya da glTF `TANGENT`, handedness ile. `[geometry-10]`
 - [ ] **F7.8** Faktör × doku çarpımı, ORM kanal seçimi, alfa/opaklık. `[materials-11]` `[color-12]`
-- [ ] **F7.9** glTF:
+- [~] **F7.9** (2026-11-27: M1, KHR_materials_{ior,transmission,clearcoat,sheen,specular} okunuyor. Kalan: volume, emissive_strength, texture_transform, TANGENT, sparse/Draco/meshopt — yol haritası Adım 2) glTF:
   - malzemeler eksiksiz okunur ve uzantılar desteklenir: transmission, ior, volume, clearcoat, sheen, specular, emissive_strength, texture_transform,
   - aynı doku primitive başına yeniden decode edilmez,
   - sparse accessor desteği; Draco/meshopt için sessiz bozulma yerine açık hata.
   
   `[io-8]` `[io-9]` `[io-13]`
-- [ ] **F7.10** OpenPBR Surface'e geçiş. Disney referans olarak kalır; her lob fırın ve chi-kare kapısından geçer.
+- [~] **F7.10** (2026-11-27: M1, `DisneyMaterial` OpenPBR tarzı katmanlarla birleşti (taban IOR, iletim, vernik IOR/tonu, sheen rengi, EON difüz). Kalan: OpenPBR şartnamesinin parametre adlarıyla birebir giriş/çıkış ve MaterialX — yol haritası Adım 2) OpenPBR Surface'e geçiş. Disney referans olarak kalır; her lob fırın ve chi-kare kapısından geçer.
 - [x] **F7.11** (2026-10-24: integratörde, Cycles bevel benzeri) Yuvarlatılmış kenar (bevel) gölgelendiricisi.
-- [ ] **F7.12** Disney'de eksik loblar (specTrans, IOR) OpenPBR ile gelir.
+- [x] **F7.12** (2026-11-27: M1, `setIor`, `setSpecularTransmission`) Disney'de eksik loblar (specTrans, IOR) OpenPBR ile gelir.
 - **Öğrenme:** PBRT bölüm 9–10; SIGGRAPH "Physically Based Shading" notları; Heitz 2018; OpenPBR şartnamesi.
 - **Kanıt:** fırın testinde beyaz pürüzlü metal her pürüzlülükte ≈ 1; ortak malzemelerde Mitsuba relMSE %1'in altında.
 
@@ -312,15 +316,15 @@ Nasıl okunur:
 
 ## Faz 9 — GPU: GTX 1080'de CUDA (6–10 hafta)
 
-- [ ] **F9.1** CUDA 12.x kurulur; VS 18 host derleyici uyumu doğrulanır (gerekirse v143 araç seti).
-- [ ] **F9.2** `PHOTON_HD` makrosu; sanal çağrı yerine `switch`.
-- [ ] **F9.3** SoA cihaz tamponları, CUDA texture nesneleri.
-- [ ] **F9.4** TinyBVH CWBVH CPU'da kurulur; gezinme çekirdeği CUDA'ya taşınır.
-- [ ] **F9.5** Önce megakernel; profil diverjans gösterirse wavefront.
-- [ ] **F9.6** CUDA–GL interop ile viewport.
+- [-] **F9.1** (2026-11-27: M4'te GPU yolu CUDA yerine sıfır-SDK Vulkan 1.1 compute + VK_KHR_ray_query, megakernel/wavefront/hybrid olarak yapıldı (`engine/shaders/`)) CUDA 12.x kurulur; VS 18 host derleyici uyumu doğrulanır (gerekirse v143 araç seti).
+- [-] **F9.2** (2026-11-27: M4'te GPU yolu CUDA yerine sıfır-SDK Vulkan 1.1 compute + VK_KHR_ray_query, megakernel/wavefront/hybrid olarak yapıldı (`engine/shaders/`)) `PHOTON_HD` makrosu; sanal çağrı yerine `switch`.
+- [-] **F9.3** (2026-11-27: M4'te GPU yolu CUDA yerine sıfır-SDK Vulkan 1.1 compute + VK_KHR_ray_query, megakernel/wavefront/hybrid olarak yapıldı (`engine/shaders/`)) SoA cihaz tamponları, CUDA texture nesneleri.
+- [-] **F9.4** (2026-11-27: M4'te GPU yolu CUDA yerine sıfır-SDK Vulkan 1.1 compute + VK_KHR_ray_query, megakernel/wavefront/hybrid olarak yapıldı (`engine/shaders/`)) TinyBVH CWBVH CPU'da kurulur; gezinme çekirdeği CUDA'ya taşınır.
+- [-] **F9.5** (2026-11-27: M4'te GPU yolu CUDA yerine sıfır-SDK Vulkan 1.1 compute + VK_KHR_ray_query, megakernel/wavefront/hybrid olarak yapıldı (`engine/shaders/`)) Önce megakernel; profil diverjans gösterirse wavefront.
+- [-] **F9.6** (2026-11-27: M4'te GPU yolu CUDA yerine sıfır-SDK Vulkan 1.1 compute + VK_KHR_ray_query, megakernel/wavefront/hybrid olarak yapıldı (`engine/shaders/`)) CUDA–GL interop ile viewport.
 - [x] **F9.7** (2026-10-29: `engine/render_device.*` + `engine/render_session.*`; viewport, son render, turntable ve CLI aynı yoldan; GPU sorgusu `gpu_probe.*`; update(delta) için sahne sürüm sayacı, gerçek delta GPU cihazıyla) `RenderDevice {upload, update(delta), renderPass, cancel}` arayüzü; CPU cihazı yedek kalır.
-- [ ] **F9.8** CPU–GPU eşleşme testi ve GPU bench.
-- [ ] **F9.9** RTX gelince OptiX 9.x ve OIDN CUDA cihazı.
+- [~] **F9.8** (2026-11-27: M4, `tests/test_gpu_v2.cpp`. Kalan: GPU bench satırı (GPU'lu makinede)) CPU–GPU eşleşme testi ve GPU bench.
+- [ ] **F9.9** RTX gelince OptiX 9.x ve OIDN CUDA cihazı. (2026-11-27: kullanıcı donanımı yükseltecek; yol haritası Adım 3'te Vulkan RT ana yol, OptiX isteğe bağlı arka uç.)
 - **Öğrenme:** CUDA Programming Guide; "Accelerated Ray Tracing in One Weekend in CUDA"; Laine 2013; Ylitie 2017.
 
 ## Faz 10 — İleri konular (seçmeli)
@@ -331,13 +335,13 @@ Nasıl okunur:
 - [ ] Süre sınırıyla biten render'da AOV'li gürültü giderme (CLI `--time`).
 
 - [x] Hacimler ve random-walk SSS. (2026-10-24)
-- [ ] Path guiding (Open PGL, Apache).
+- [x] Path guiding. (M3: kendi SD-Tree uygulaması, `integrators/path_guiding.*`; Open PGL yerine.)
 - [x] Spektral mod ve dispersiyon (2026-10-24: yol başına tek λ, dispersiyonlu ilk yüzeyde; hero wavelength yok).
 - [ ] MNEE ve referans için BDPT.
 - [ ] Fiziksel kamera (f-stop, enstantane, ISO) ve bokeh şekli. (2026-10-24: çokgen bokeh ve görüntüleyici yapıldı; enstantane/ISO açık)
-- [ ] AOV'ler, ışık grupları, shadow catcher, çok katmanlı EXR, Cryptomatte. (2026-10-24: shadow catcher; 2026-10-29: lob × doğrudan/dolaylı ışık geçişleri, veri geçişleri, çok katmanlı EXR yapıldı; ışık grupları ve Cryptomatte açık)
-- [ ] Turntable (DoF ve denoise ile), anahtar kare, hareket bulanıklığı.
-- [ ] Güneş/gökyüzü, spot ve IES ışıklar, ışık bağlama, görünürlük bayrakları. (2026-10-24: gök + güneş, spot + IES, kamera görünürlüğü yapıldı; ışık bağlama ve yansıma görünürlüğü açık)
+- [x] AOV'ler, ışık grupları, shadow catcher, çok katmanlı EXR, Cryptomatte. (M3: Cryptomatte 1.2.0 ve LG_* ışık grupları; 2026-10-24: shadow catcher; 2026-10-29: lob × doğrudan/dolaylı ışık geçişleri, veri geçişleri, çok katmanlı EXR yapıldı; ışık grupları ve Cryptomatte açık)
+- [~] Turntable (DoF ve denoise ile), anahtar kare, hareket bulanıklığı. (M2: kamera/nesne hareket bulanıklığı; deformasyon bulanıklığı açık.)
+- [x] Güneş/gökyüzü, spot ve IES ışıklar, ışık bağlama, görünürlük bayrakları. (M2: ışık/gölge bağlama ve ışın görünürlüğü; 2026-10-24: gök + güneş, spot + IES, kamera görünürlüğü yapıldı; ışık bağlama ve yansıma görünürlüğü açık)
 
 ## Ürünleşme eki (karar bekliyor)
 

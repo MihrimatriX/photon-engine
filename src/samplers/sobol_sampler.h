@@ -37,6 +37,7 @@ private:
     uint64_t m_seed;
     uint32_t m_pixelHash = 0;
     uint32_t m_index = 0;
+    uint32_t m_revIndex = 0; ///< reverseBits(m_index): örnek başına bir kez
     uint32_t m_dimension = 0;
 };
 

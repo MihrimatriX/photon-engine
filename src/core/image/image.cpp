@@ -95,14 +95,6 @@ void Image::setPixel(int x, int y, const Color3f& color) {
     }
 }
 
-Color3f Image::getPixel(int x, int y) const {
-    const size_t idx = pixelIndex(x, y);
-    if (m_format == StorageFormat::Float32) {
-        return Color3f(m_data[idx + 0], m_data[idx + 1], m_data[idx + 2]);
-    }
-    return decodeU8(m_dataU8[idx + 0], m_dataU8[idx + 1], m_dataU8[idx + 2]);
-}
-
 Color3f Image::sampleBilinear(float u, float v) const {
     return sampleLevel(0, u, v);
 }

@@ -40,3 +40,17 @@ relMSE 0.0024. Düzgün örneklemenin 347 spp'deki beklenen değeri (160 spp öl
 ve bulanık cam, dispersiyon), `materials_metal` (ölçülmüş metaller, ince film, pullar), `sky_shadow_catcher`,
 `spot_ies`, `bokeh_imager`, `features_misc` (yuvarlatılmış kenar, sabun köpüğü, ince pencere).
 1200×500, 320 spp, 12 sekme, gürültü giderme kapalı render'ları `docs/img/v2-*.jpg`. 4 iş parçacığında süreler: `materials_volume` 174 sn, `materials_metal` 162 sn, `features_misc` 205 sn.
+
+## Linux bulut kabı, Embree 4.4.1 (2026-11-27, Adım 1)
+
+Makine: 4 vCPU Intel Xeon @ 2.3 GHz (AVX2), GCC 13.3, Embree 4.4.1 + OIDN 2.5.1 (`scripts/fetch_deps.sh`).
+`--threads 4 --no-denoise --filter box --bounces 64` (vitrin: projedeki 8 sekme), M örnek/sn, iki ölçüm ortalaması.
+
+| Sahne | Çözünürlük, spp | `main` (v0.5.0) | örnekleyici + Lambert + satır içi getPixel + 0 ortam |
+|---|---|---|---|
+| referans Cornell, difüz | 256², 256 | 1.88 | **2.58** (+%37) |
+| referans Cornell, kostik | 256², 256 | 1.89 | **2.56** (+%35) |
+| referans HDRI malzemeleri | 384×192, 256 | 3.44 | **4.24** (+%23) |
+| `showcase.photon` | 480×270, 64 | 1.83 | **2.13** (+%17) |
+
+Doğruluk (Mitsuba 3) ve verim (Cycles) ölçümleri: [`reference/REPORT.md`](reference/REPORT.md).

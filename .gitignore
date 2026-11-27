@@ -75,3 +75,7 @@ dist/
 # Python (integrations/ betiklerinin derleme önbelleği)
 __pycache__/
 *.pyc
+
+# Referans karşılaştırma çıktıları (bench/reference/compare.py, efficiency.py)
+bench/reference/out/
+__pycache__/

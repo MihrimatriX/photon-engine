@@ -8,19 +8,21 @@ namespace photon {
 
 namespace {
 
-/// 32 bitin sırasını ters çevirir (bit 0 ↔ bit 31, ...). Böl-ve-yönet: önce komşu
-/// bitler, sonra 2'li, 4'lü, 8'li, 16'lı gruplar yer değiştirir.
+/// 32 bitin sırasını ters çevirir (bit 0 ↔ bit 31, ...). Böl-ve-yönet: baytların sırası
+/// ters çevrilir (bswap), sonra her bayt içinde 4'lü, 2'li ve komşu bit grupları yer değiştirir.
+/// Grup takasları birbirinden bağımsız olduğu için sıra sonucu değiştirmez.
 uint32_t reverseBits(uint32_t x) {
+#if defined(__GNUC__) || defined(__clang__)
+    x = __builtin_bswap32(x); // 8'li ve 16'lı grupların takası tek komutta
+#else
+    x = ((x >> 8) & 0x00FF00FFu) | ((x & 0x00FF00FFu) << 8);
+    x = (x >> 16) | (x << 16);
+#endif
     x = ((x >> 1) & 0x55555555u) | ((x & 0x55555555u) << 1);
     x = ((x >> 2) & 0x33333333u) | ((x & 0x33333333u) << 2);
     x = ((x >> 4) & 0x0F0F0F0Fu) | ((x & 0x0F0F0F0Fu) << 4);
-    x = ((x >> 8) & 0x00FF00FFu) | ((x & 0x00FF00FFu) << 8);
-    return (x >> 16) | (x << 16);
+    return x;
 }
-
-/// Sobol boyut 0 = van der Corput dizisi: indeksin bitlerini ikili noktanın
-/// sağına aynalamak (0.b0 b1 b2 ...). Üreteç matrisi birim matrisin tersidir.
-uint32_t sobolDim0(uint32_t index) { return reverseBits(index); }
 
 /// Sobol boyut 1. İlkel polinom x + 1, yön sayıları v_k = v_{k-1} ^ (v_{k-1} >> 1),
 /// v_0 = 2^31. Bu, Pascal üçgeninin mod 2 hali olan üreteç matrisidir
@@ -34,6 +36,25 @@ uint32_t sobolDim1(uint32_t index) {
     return result;
 }
 
+/// reverseBits(sobolDim1(i)) bayt tablolarıyla. Sobol üreteci GF(2) üzerinde doğrusaldır
+/// (s(a ^ b) = s(a) ^ s(b)), bit ters çevirme de öyle; bu yüzden 32 bitlik indeks dört bayta
+/// bölünür ve her baytın katkısı önceden hesaplanmış tablodan XOR'lanır. Karıştırılmış indeks
+/// rastgele 32 bit olduğu için döngü her çağrıda ~32 tur ve tahmin edilemez dallanma demekti
+/// (profilde örnekleyici render süresinin ~%28'iydi).
+struct ReversedSobolDim1Table {
+    uint32_t t[4][256];
+    ReversedSobolDim1Table() {
+        for (int k = 0; k < 4; ++k)
+            for (uint32_t b = 0; b < 256; ++b) t[k][b] = reverseBits(sobolDim1(b << (8 * k)));
+    }
+};
+
+inline uint32_t reversedSobolDim1(uint32_t index) {
+    static const ReversedSobolDim1Table tab;
+    return tab.t[0][index & 0xFFu] ^ tab.t[1][(index >> 8) & 0xFFu] ^ tab.t[2][(index >> 16) & 0xFFu] ^
+           tab.t[3][index >> 24];
+}
+
 /// Laine–Karras permütasyonu (Burley 2020'nin iyileştirilmiş sabitleri). Çift sayılarla
 /// çarpıp XOR'lamak, çıktının k. bitinin yalnızca girdinin ≤ k bitlerine bağlı olmasını
 /// sağlar. Bit sırası ters çevrilmiş bir sayıda bu tam olarak Owen karıştırmasıdır:
@@ -45,12 +66,6 @@ uint32_t laineKarras(uint32_t x, uint32_t seed) {
     x ^= x * 0xc7afe638u;
     x ^= x * 0x8d22f6e6u;
     return x;
-}
-
-/// İç içe düzgün karıştırma (nested uniform scramble = Owen karıştırması):
-/// ters çevir → Laine–Karras → geri ters çevir.
-uint32_t nestedUniformScramble(uint32_t x, uint32_t seed) {
-    return reverseBits(laineKarras(reverseBits(x), seed));
 }
 
 /// lowbias32 (C. Wellons): iyi çığ etkili 32-bit tamsayı karması.
@@ -86,17 +101,27 @@ SobolSampler::SobolSampler(uint64_t seed) : m_seed(seed) {
 ///     ((0,2)-ağı). Farklı boyutlar farklı karıştırma aldığı için birbirinden bağımsızdır.
 ///  3) Sobol boyut 0 ve 1'i hesapla, her koordinatı kendi tohumuyla Owen-karıştır.
 ///     Owen karıştırması ağ özelliğini korur ama sonucu rastgele (yansız) yapar.
+///
+/// Uygulama, iç içe düzgün karıştırmanın tanımını (NUS(x) = rev(LK(rev(x)))) açarak gereksiz
+/// bit ters çevirmelerini sadeleştirir; sonuç tanımla bit bit aynıdır (test_sobol.cpp
+/// MatchesReferenceDefinitionBitExact):
+///   index = NUS(m_index)          = rev(LK(rev(m_index), seed))    — rev(m_index) örnek başına bir kez
+///   x     = NUS(sobol0(index))    = rev(LK(index, s0))             — sobol0 = rev, rev∘rev = birim
+///   y     = NUS(sobol1(index))    = rev(LK(rev(sobol1(index)), s1)) — rev∘sobol1 bayt tablolarından
 Vec2f SobolSampler::get2D() {
-    uint32_t seed = hashCombine(m_pixelHash, m_dimension++);
-    uint32_t index = nestedUniformScramble(m_index, seed);
-    uint32_t x = nestedUniformScramble(sobolDim0(index), hashCombine(seed, 0x0u));
-    uint32_t y = nestedUniformScramble(sobolDim1(index), hashCombine(seed, 0x1u));
+    const uint32_t seed = hashCombine(m_pixelHash, m_dimension++);
+    const uint32_t index = reverseBits(laineKarras(m_revIndex, seed));
+    const uint32_t x = reverseBits(laineKarras(index, hashCombine(seed, 0x0u)));
+    const uint32_t y = reverseBits(laineKarras(reversedSobolDim1(index), hashCombine(seed, 0x1u)));
     return {toUnitFloat(x), toUnitFloat(y)};
 }
 
 float SobolSampler::get1D() {
-    // ponytail: 1B istek de bir 2B boyut harcar ve y'yi atar; 1B'ye özel yol gereksiz.
-    return get2D().x;
+    // 1B istek de bir 2B boyut harcar (boyut numaralaması değişmesin) ama y hiç hesaplanmaz:
+    // değer get2D().x ile bit bit aynıdır.
+    const uint32_t seed = hashCombine(m_pixelHash, m_dimension++);
+    const uint32_t index = reverseBits(laineKarras(m_revIndex, seed));
+    return toUnitFloat(reverseBits(laineKarras(index, hashCombine(seed, 0x0u))));
 }
 
 std::unique_ptr<Sampler> SobolSampler::clone(uint64_t seed) const {
@@ -110,11 +135,13 @@ void SobolSampler::startPixel(int x, int y) {
     h = hashCombine(h, static_cast<uint32_t>(x));
     m_pixelHash = hashCombine(h, static_cast<uint32_t>(y));
     m_index = 0;
+    m_revIndex = 0;
     m_dimension = 0;
 }
 
 void SobolSampler::startSample(int sampleIndex) {
     m_index = static_cast<uint32_t>(sampleIndex);
+    m_revIndex = reverseBits(m_index);
     m_dimension = 0;
 }
 
