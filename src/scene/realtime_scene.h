@@ -79,6 +79,8 @@ struct RealtimeLight {
     Vec3f areaU{0.5f, 0.0f, 0.0f};
     Vec3f areaV{0.0f, 0.0f, 0.5f};
     Color3f areaRadiance;
+    /// Alan: iki yüzlü mü? Tek yüzlüde yalnız areaU × areaV yönündeki yarı uzay aydınlanır.
+    bool twoSided = true;
     /// Spot IES fotometrik profili (buildIesAtlas sonrası iesSlice ≥ 0).
     int iesSlice = -1;
     std::shared_ptr<const IesProfile> ies;

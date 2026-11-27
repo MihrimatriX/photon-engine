@@ -344,21 +344,70 @@ bool intersectPrim(uint idx, vec3 ro, vec3 rd, float tMin, float tMax, float ray
     if (camRay && ((flags & 2u) != 0u)) return false;
 
     if ((flags & 1u) != 0u) {
-        // Küre
+        // Küre. Ayırtaç halfB² − a·c uzak/küçük kürede iptale uğrar (kenara yakın ışınlar ıskalanır);
+        // eşdeğer a·(r² − |f|²), f = ışının merkeze en yakın noktası (CPU Sphere ile aynı).
         vec3 oc = ro - p.p0_mat.xyz;
         float r = p.e1_flags.x;
         float a = dot(rd, rd);
         float halfB = dot(oc, rd);
         float c = dot(oc, oc) - r * r;
-        float disc = halfB * halfB - a * c;
+        float fl = length(oc - rd * (halfB / a));
+        float disc = a * (r + fl) * (r - fl);
         if (disc < 0.0) return false;
         float sq = sqrt(disc);
-        float root = (-halfB - sq) / a;
+        float qq = -(halfB + (halfB < 0.0 ? -sq : sq));
+        float t0 = qq / a;
+        float t1 = qq != 0.0 ? c / qq : t0;
+        float root = min(t0, t1);
         if (root <= tMin || root >= tMax) {
-            root = (-halfB + sq) / a;
+            root = max(t0, t1);
             if (root <= tMin || root >= tMax) return false;
         }
         outT = root;
+        outU = 0.0;
+        outV = 0.0;
+        return true;
+    }
+    if ((flags & 16u) != 0u) {
+        // Disk (elips): p0 merkez, e1/e2 yarı eksenler, ng normal, n0/n1 ters eksenler.
+        vec3 nrm = p.ng_v1.xyz;
+        float denom = dot(rd, nrm);
+        if (abs(denom) < 1e-12) return false;
+        float t = dot(p.p0_mat.xyz - ro, nrm) / denom;
+        if (t <= tMin || t >= tMax) return false;
+        vec3 q = ro + rd * t - p.p0_mat.xyz;
+        float es = dot(q, p.n0_u0.xyz), er = dot(q, p.n1_v0.xyz);
+        if (es * es + er * er > 1.0) return false;
+        outT = t;
+        outU = es;
+        outV = er;
+        return true;
+    }
+    if ((flags & 32u) != 0u) {
+        // Açık silindir: p0 merkez, e1 birim eksen, e2.x yarıçap, e2.y yarı boy. Eksene dik
+        // bileşenlerde kararlı ikinci derece denklem, sonra boy sınırı (CPU Cylinder ile aynı).
+        vec3 ax = p.e1_flags.xyz;
+        float rad = p.e2_meta.x, hl = p.e2_meta.y;
+        vec3 o = ro - p.p0_mat.xyz;
+        float oz = dot(o, ax), dz = dot(rd, ax);
+        vec3 op = o - ax * oz, dp = rd - ax * dz;
+        float a = dot(dp, dp);
+        if (a <= 1e-12 * dot(rd, rd)) return false;
+        float b = 2.0 * dot(op, dp), c = dot(op, op) - rad * rad;
+        float fl = length(op - dp * (0.5 * b / a));
+        float disc = 4.0 * a * (rad + fl) * (rad - fl);
+        if (disc < 0.0) return false;
+        float rq = sqrt(disc);
+        float qq = -0.5 * (b < 0.0 ? b - rq : b + rq);
+        float ta = qq / a;
+        float tb = qq != 0.0 ? c / qq : ta;
+        float t0 = min(ta, tb), t1 = max(ta, tb);
+        float t = t0;
+        if (t <= tMin || t >= tMax || abs(oz + t * dz) > hl) {
+            t = t1;
+            if (t <= tMin || t >= tMax || abs(oz + t * dz) > hl) return false;
+        }
+        outT = t;
         outU = 0.0;
         outV = 0.0;
         return true;
@@ -547,6 +596,25 @@ SurfHit resolveHit(HitInfo h, vec3 ro, vec3 rd, float rayTime) {
         float phi = atan(outN.z, outN.x);
         if (phi < 0.0) phi += TWO_PI;
         sh.uv = vec2(phi / TWO_PI, theta / PI);
+    } else if ((flags & 16u) != 0u) {
+        // Disk: düz normal; uv kutupsal (açı / 2π, merkezden kenara 0..1). h.u, h.v elips koordinatları.
+        sh.ng = pr.ng_v1.xyz;
+        sh.n = sh.ng;
+        float phi = (h.u == 0.0 && h.v == 0.0) ? 0.0 : atan(h.v, h.u);
+        if (phi < 0.0) phi += TWO_PI;
+        sh.uv = vec2(phi / TWO_PI, sqrt(h.u * h.u + h.v * h.v));
+    } else if ((flags & 32u) != 0u) {
+        // Silindir: dış normal eksenden radyal; uv = (açı / 2π, boy boyunca 0..1).
+        vec3 ax = pr.e1_flags.xyz;
+        vec3 q = sh.p - pr.p0_mat.xyz;
+        float z = dot(q, ax);
+        vec3 radial = q - ax * z;
+        vec3 outN = dot(radial, radial) > 0.0 ? normalize(radial) : pr.n0_u0.xyz;
+        sh.ng = outN;
+        sh.n = outN;
+        float phi = atan(dot(outN, pr.n1_v0.xyz), dot(outN, pr.n0_u0.xyz));
+        if (phi < 0.0) phi += TWO_PI;
+        sh.uv = vec2(phi / TWO_PI, 0.5 * (z / max(pr.e2_meta.y, 1e-20) + 1.0));
     } else {
         float w = 1.0 - h.u - h.v;
         vec3 sn = normalize(pr.n0_u0.xyz * w + pr.n1_v0.xyz * h.u + pr.n2_u1.xyz * h.v);
@@ -653,6 +721,7 @@ ResolvedMat resolveMaterial(uint matIdx, SurfHit sh) {
     r.sheenColor = m.sheenCol_type.rgb;
     r.emission = m.emit_flags.rgb;
     uint mf = floatBitsToUint(m.emit_flags.w);
+    if ((mf & 8u) != 0u && !sh.frontFace) r.emission = vec3(0.0); // tek yüzlü yayıcının arka yüzü
     r.thinWalled = (mf & 1u) != 0u;
 
     vec2 uv = sh.uv * m.tex1.y;
@@ -988,11 +1057,63 @@ struct LightSampleGpu {
     int lightIdx;
 };
 
+// Küre ışığının refP'den görülen konisi: 1 − cos θmax (içerideyse 0). Küçük açıda Taylor (PBRT-v4).
+float sphereOneMinusCosMax(vec3 refP, vec3 c, float r, out float sin2Max) {
+    vec3 d = c - refP;
+    float dc2 = dot(d, d);
+    float r2 = r * r;
+    sin2Max = 0.0;
+    if (dc2 <= r2 * (1.0 + 1e-5)) return 0.0;
+    sin2Max = r2 / dc2;
+    if (sin2Max < 0.00068523) return 0.5 * sin2Max;
+    return 1.0 - sqrt(max(0.0, 1.0 - sin2Max));
+}
+
+// Tüp ışığının refP'den görülen yan yüzeyi: eksen etrafında phi0 ± alpha (ρ ≤ r: görünmez).
+bool tubeVisibleArc(GpuLight l, vec3 refP, out float phi0, out float alpha) {
+    vec3 ax = l.u_area.xyz;
+    float r = l.v_cosIn.w;
+    vec3 q = refP - l.pos_type.xyz;
+    vec3 qp = q - ax * dot(q, ax);
+    float rho = length(qp);
+    phi0 = 0.0;
+    alpha = 0.0;
+    if (rho <= r * (1.0 + 1e-5)) return false;
+    phi0 = atan(dot(qp, l.norm_power.xyz), dot(qp, l.v_cosIn.xyz));
+    alpha = acos(clamp(r / rho, 0.0, 1.0));
+    return alpha > 0.0;
+}
+
+// Tek yüzlü dikdörtgen/disk: refP ışıyan yüzün önünde mi?
+bool planarLightFacing(GpuLight l, vec3 refP) {
+    return l.v_cosIn.w < 0.5 || dot(refP - l.pos_type.xyz, l.norm_power.xyz) > 0.0;
+}
+
 float lightPdfHit(uint li, vec3 refP, vec3 hitP) {
     GpuLight l = lights[li];
     uint meta = floatBitsToUint(l.pos_type.w);
     uint type = meta & 0xFFu;
-    if (type != 0u && type != 4u) return 0.0;
+    if (type == 6u) {
+        float sin2Max;
+        float omc = sphereOneMinusCosMax(refP, l.pos_type.xyz, l.u_area.x, sin2Max);
+        return omc > 0.0 ? 1.0 / (TWO_PI * omc) : 0.0;
+    }
+    if (type == 7u) {
+        float phi0, alpha;
+        if (!tubeVisibleArc(l, refP, phi0, alpha)) return 0.0;
+        vec3 dt = hitP - refP;
+        float dt2 = dot(dt, dt);
+        if (dt2 < 1e-12) return 0.0;
+        vec3 qh = hitP - l.pos_type.xyz;
+        vec3 radial = qh - l.u_area.xyz * dot(qh, l.u_area.xyz);
+        if (dot(radial, radial) <= 0.0) return 0.0;
+        float cosT = -dot(dt, normalize(radial)) / sqrt(dt2); // iç yüz isabeti (uçtan giren ışın): 0
+        float visArea = 2.0 * alpha * l.v_cosIn.w * 2.0 * l.rad_cosOut.w;
+        if (cosT < 1e-6 || visArea <= 0.0) return 0.0;
+        return dt2 / (visArea * cosT);
+    }
+    if (type != 0u && type != 4u && type != 5u) return 0.0;
+    if (type != 4u && !planarLightFacing(l, refP)) return 0.0;
     vec3 d = hitP - refP;
     float d2 = dot(d, d);
     float dist = sqrt(max(d2, 1e-12));
@@ -1042,9 +1163,11 @@ LightSampleGpu sampleOneLight(vec3 refP, vec3 refN, uint receiverSlot, inout uin
     ls.groupIdx = (meta >> 8u) & 0xFFu;
     ls.lightIdx = int(idx);
 
-    if (type == 0u) {
-        // Dikdörtgen Alan Işığı (iki yüzlü)
-        vec3 lp = l.pos_type.xyz + l.u_area.xyz * u2.x + l.v_cosIn.xyz * u2.y;
+    if (type == 0u || type == 5u) {
+        // Dikdörtgen (0) ya da disk/elips (5) alan ışığı; v_cosIn.w = 1 ise tek yüzlü.
+        if (!planarLightFacing(l, refP)) return ls;
+        vec2 sp = type == 0u ? u2 : sampleDisk(u2);
+        vec3 lp = l.pos_type.xyz + l.u_area.xyz * sp.x + l.v_cosIn.xyz * sp.y;
         vec3 d = lp - refP;
         float d2 = dot(d, d);
         if (d2 < 1e-10) return ls;
@@ -1072,6 +1195,58 @@ LightSampleGpu sampleOneLight(vec3 refP, vec3 refN, uint receiverSlot, inout uin
         if (cosL < 1e-6 || l.u_area.w <= 0.0) return ls;
         ls.Li = l.rad_cosOut.rgb;
         ls.pdf = pmf * d2 / (l.u_area.w * cosL);
+        ls.dist = dist * 0.9995;
+        ls.delta = false;
+        ls.valid = true;
+    } else if (type == 6u) {
+        // Küre ışığı: alıcıdan görülen koni içinde katı açıda düzgün (PBRT-v4 §6.2.4).
+        vec3 c = l.pos_type.xyz;
+        float r = l.u_area.x;
+        float sin2Max;
+        float omc = sphereOneMinusCosMax(refP, c, r, sin2Max);
+        if (omc <= 0.0) return ls;
+        float sinMax = sqrt(sin2Max);
+        float cosT = 1.0 - omc * u2.x;
+        float sin2T = 1.0 - cosT * cosT;
+        if (sin2Max < 0.00068523) {
+            sin2T = sin2Max * u2.x;
+            cosT = sqrt(1.0 - sin2T);
+        }
+        float cosA = sin2T / sinMax + cosT * sqrt(max(0.0, 1.0 - sin2T / sin2Max));
+        float sinA = sqrt(max(0.0, 1.0 - cosA * cosA));
+        float ph = u2.y * TWO_PI;
+        vec3 w = normalize(c - refP);
+        vec3 fs, ft;
+        makeFrame(w, fs, ft);
+        vec3 nL = toWorld(vec3(-sinA * cos(ph), -sinA * sin(ph), -cosA), fs, ft, w);
+        vec3 d = c + nL * r - refP;
+        float d2 = dot(d, d);
+        if (d2 < 1e-10) return ls;
+        float dist = sqrt(d2);
+        ls.wi = d / dist;
+        ls.Li = l.rad_cosOut.rgb;
+        ls.pdf = pmf / (TWO_PI * omc);
+        ls.dist = dist * 0.9995;
+        ls.delta = false;
+        ls.valid = true;
+    } else if (type == 7u) {
+        // Tüp ışığı: görünür yarım şeritte (phi0 ± alpha, tüm boy) alanda düzgün.
+        float phi0, alpha;
+        if (!tubeVisibleArc(l, refP, phi0, alpha)) return ls;
+        float r = l.v_cosIn.w, hl = l.rad_cosOut.w;
+        float ph = phi0 + alpha * (2.0 * u2.x - 1.0);
+        float z = hl * (2.0 * u2.y - 1.0);
+        vec3 nL = l.v_cosIn.xyz * cos(ph) + l.norm_power.xyz * sin(ph);
+        vec3 d = l.pos_type.xyz + l.u_area.xyz * z + nL * r - refP;
+        float d2 = dot(d, d);
+        if (d2 < 1e-10) return ls;
+        float dist = sqrt(d2);
+        ls.wi = d / dist;
+        float cosL = -dot(ls.wi, nL);
+        float visArea = 2.0 * alpha * r * 2.0 * hl;
+        if (cosL < 1e-6 || visArea <= 0.0) return ls;
+        ls.Li = l.rad_cosOut.rgb;
+        ls.pdf = pmf * d2 / (visArea * cosL);
         ls.dist = dist * 0.9995;
         ls.delta = false;
         ls.valid = true;

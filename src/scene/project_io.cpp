@@ -447,6 +447,13 @@ json lightJson(const LightDesc& d, const PathMap& paths) {
     j["target"] = vec3(d.target);
     j["width"] = d.width;
     j["height"] = d.height;
+    if (d.type == LightDesc::Type::Area) {
+        j["shape"] = d.areaShape == LightDesc::AreaShape::Disk ? "disk"
+                   : d.areaShape == LightDesc::AreaShape::Tube ? "tube"
+                                                               : "rectangle";
+        j["twoSided"] = d.twoSided;
+    }
+    if (d.type == LightDesc::Type::Point && d.radius > 0.0f) j["radius"] = d.radius;
     j["azimuth"] = d.azimuthDeg;
     j["elevation"] = d.elevationDeg;
     j["visibleToCamera"] = d.visibleToCamera;
@@ -487,6 +494,13 @@ LightDesc lightFromJson(const json& j, const fs::path& base, const std::unordere
     d.target = readVec3(j, "target", d.target);
     d.width = j.value("width", d.width);
     d.height = j.value("height", d.height);
+    const std::string shape = j.value("shape", std::string("rectangle"));
+    d.areaShape = shape == "disk" ? LightDesc::AreaShape::Disk
+                : shape == "tube" ? LightDesc::AreaShape::Tube
+                                  : LightDesc::AreaShape::Rectangle;
+    // 0.5 ve öncesinde alan ışıkları hep iki yüzlüydü; anahtar yoksa öyle kalır.
+    d.twoSided = j.value("twoSided", true);
+    d.radius = std::max(0.0f, j.value("radius", 0.0f));
     d.azimuthDeg = j.value("azimuth", d.azimuthDeg);
     d.elevationDeg = j.value("elevation", d.elevationDeg);
     // 0.2 öncesi projelerde alan ışıkları kameraya hep görünürdü; anahtar yoksa öyle kalır.

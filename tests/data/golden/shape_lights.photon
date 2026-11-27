@@ -1,0 +1,506 @@
+{
+ "format": "photon-project",
+ "version": 2,
+ "camera": {
+  "target": [
+   0.0,
+   0.95,
+   0.0
+  ],
+  "radius": 4.404543109109048,
+  "theta": 1.5253730473733196,
+  "phi": 1.5707963267948966,
+  "fov": 40.0,
+  "aperture": 0.0,
+  "orthographic": false
+ },
+ "environment": {
+  "hdr": "",
+  "zenith": [
+   0,
+   0,
+   0
+  ],
+  "horizon": [
+   0,
+   0,
+   0
+  ],
+  "rotation": 0.0,
+  "intensity": 0.0,
+  "background": {
+   "mode": "color",
+   "color": [
+    0,
+    0,
+    0
+   ]
+  },
+  "ground": {
+   "enabled": false,
+   "color": [
+    0,
+    0,
+    0
+   ],
+   "roughness": 1.0,
+   "shadowCatcher": false
+  }
+ },
+ "lights": [
+  {
+   "name": "tavan paneli",
+   "enabled": true,
+   "color": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "position": [
+    0.6,
+    2.35,
+    -0.5
+   ],
+   "visibleToCamera": true,
+   "azimuth": 45.0,
+   "elevation": 45.0,
+   "type": "area",
+   "shape": "rectangle",
+   "twoSided": false,
+   "intensity": 6.0,
+   "target": [
+    0.6,
+    1.35,
+    -0.5
+   ],
+   "width": 1.2,
+   "height": 0.7
+  },
+  {
+   "name": "disk",
+   "enabled": true,
+   "color": [
+    1.0,
+    0.7777777777777778,
+    0.5555555555555556
+   ],
+   "position": [
+    -1.9,
+    1.5,
+    0.3
+   ],
+   "visibleToCamera": true,
+   "azimuth": 45.0,
+   "elevation": 45.0,
+   "type": "area",
+   "shape": "disk",
+   "twoSided": false,
+   "intensity": 9.0,
+   "target": [
+    -0.9654613729680044,
+    1.1729114805388017,
+    0.15981920594520066
+   ],
+   "width": 0.7,
+   "height": 0.7
+  },
+  {
+   "name": "ampul",
+   "enabled": true,
+   "color": [
+    1.0,
+    0.7857142857142857,
+    0.5714285714285714
+   ],
+   "position": [
+    1.5,
+    0.85,
+    -0.3
+   ],
+   "visibleToCamera": true,
+   "azimuth": 45.0,
+   "elevation": 45.0,
+   "type": "point",
+   "intensity": 0.8620530241450394,
+   "target": [
+    1.5,
+    0.85,
+    -0.3
+   ],
+   "width": 1.0,
+   "height": 1.0,
+   "radius": 0.14
+  },
+  {
+   "name": "tüp",
+   "enabled": true,
+   "color": [
+    0.625,
+    0.75,
+    1.0
+   ],
+   "position": [
+    -0.2,
+    1.85,
+    -1.6
+   ],
+   "visibleToCamera": true,
+   "azimuth": 45.0,
+   "elevation": 45.0,
+   "type": "area",
+   "shape": "tube",
+   "twoSided": false,
+   "intensity": 16.0,
+   "target": [
+    0.7918995010726926,
+    1.9293519600858156,
+    -1.5008100498927308
+   ],
+   "width": 1.8,
+   "height": 0.08
+  }
+ ],
+ "materials": [
+  {
+   "type": "lambert",
+   "albedo": [
+    0.6,
+    0.6,
+    0.6
+   ],
+   "emission": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "lambert",
+   "albedo": [
+    0.6,
+    0.6,
+    0.6
+   ],
+   "emission": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "lambert",
+   "albedo": [
+    0.6,
+    0.6,
+    0.6
+   ],
+   "emission": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "lambert",
+   "albedo": [
+    0.75,
+    0.75,
+    0.75
+   ],
+   "emission": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "lambert",
+   "albedo": [
+    0.7,
+    0.45,
+    0.3
+   ],
+   "emission": [
+    0,
+    0,
+    0
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "type": "mesh",
+   "name": "zemin",
+   "visible": true,
+   "material": 0,
+   "xf": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "geometry": {
+    "p": [
+     -3.0,
+     0.0,
+     3.0,
+     3.0,
+     0.0,
+     3.0,
+     3.0,
+     0.0,
+     -2.0,
+     -3.0,
+     0.0,
+     -2.0
+    ],
+    "n": [
+     -0.0,
+     1.0,
+     0.0,
+     -0.0,
+     1.0,
+     0.0,
+     -0.0,
+     1.0,
+     0.0,
+     -0.0,
+     1.0,
+     0.0
+    ],
+    "uv": [
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     1.0
+    ],
+    "i": [
+     0,
+     1,
+     2,
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "type": "mesh",
+   "name": "arka duvar",
+   "visible": true,
+   "material": 1,
+   "xf": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "geometry": {
+    "p": [
+     -3.0,
+     0.0,
+     -2.0,
+     3.0,
+     0.0,
+     -2.0,
+     3.0,
+     3.0,
+     -2.0,
+     -3.0,
+     3.0,
+     -2.0
+    ],
+    "n": [
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     0.0,
+     1.0
+    ],
+    "uv": [
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     1.0
+    ],
+    "i": [
+     0,
+     1,
+     2,
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "type": "mesh",
+   "name": "tavan",
+   "visible": true,
+   "material": 2,
+   "xf": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "geometry": {
+    "p": [
+     -3.0,
+     2.6,
+     -2.0,
+     3.0,
+     2.6,
+     -2.0,
+     3.0,
+     2.6,
+     3.0,
+     -3.0,
+     2.6,
+     3.0
+    ],
+    "n": [
+     0.0,
+     -1.0,
+     0.0,
+     0.0,
+     -1.0,
+     0.0,
+     0.0,
+     -1.0,
+     0.0,
+     0.0,
+     -1.0,
+     0.0
+    ],
+    "uv": [
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     1.0
+    ],
+    "i": [
+     0,
+     1,
+     2,
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "type": "sphere",
+   "name": "küre",
+   "visible": true,
+   "material": 3,
+   "radius": 0.45,
+   "xf": [
+    1,
+    0,
+    0,
+    -0.7,
+    0,
+    1,
+    0,
+    0.45,
+    0,
+    0,
+    1,
+    -0.2,
+    0,
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "type": "sphere",
+   "name": "küçük küre",
+   "visible": true,
+   "material": 4,
+   "radius": 0.3,
+   "xf": [
+    1,
+    0,
+    0,
+    0.75,
+    0,
+    1,
+    0,
+    0.3,
+    0,
+    0,
+    1,
+    0.5,
+    0,
+    0,
+    0,
+    1
+   ]
+  }
+ ],
+ "render": {
+  "denoise": false,
+  "exposure": 0.0,
+  "maxBounces": 64,
+  "toneMap": 0,
+  "pixelFilter": "box",
+  "filterWidth": 1.0
+ }
+}

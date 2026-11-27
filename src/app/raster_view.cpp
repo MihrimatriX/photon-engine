@@ -555,6 +555,8 @@ void main() {
             vec3 ctr = uLPos[i].xyz;
             vec3 hu = uLAreaU[i];
             vec3 hv = uLAreaV[i];
+            // Tek yüzlü ışık (uLCone.w = 0) yalnız hu × hv yönündeki yarı uzayı aydınlatır.
+            if (uLCone[i].w < 0.5 && dot(vW - ctr, cross(hu, hv)) <= 0.0) continue;
             vec3 corners[4];
             vec3 c0 = ctr - hu - hv - vW;
             vec3 c1 = ctr + hu - hv - vW;
@@ -1975,7 +1977,8 @@ void RasterView::renderRealtime(const Frame& f, const std::vector<Item>& items) 
         lcone[i * 4] = L.cosInner;
         lcone[i * 4 + 1] = L.cosOuter;
         lcone[i * 4 + 2] = static_cast<float>(slotOf[i]);
-        lcone[i * 4 + 3] = static_cast<float>(L.iesSlice);
+        // w: spotta IES dilimi; alan ışığında iki yüzlülük (1) ya da tek yüzlülük (0).
+        lcone[i * 4 + 3] = L.type == RealtimeLight::Type::Area ? (L.twoSided ? 1.0f : 0.0f) : static_cast<float>(L.iesSlice);
         lAreaU[i * 3] = L.areaU.x;
         lAreaU[i * 3 + 1] = L.areaU.y;
         lAreaU[i * 3 + 2] = L.areaU.z;

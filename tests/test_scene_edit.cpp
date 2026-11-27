@@ -196,3 +196,48 @@ TEST(ProjectIo, LightCameraVisibilityDefaultsAndRoundTrip) {
     EXPECT_FALSE(d2.lights[0].visibleToCamera);
     fs::remove_all(dir);
 }
+
+// Şekilli ışıklar: alan ışığının şekli (dikdörtgen/disk/tüp), tek/çift yüzlülük ve nokta ışığın
+// yarıçapı kaydedilip açılır. Anahtarı olmayan eski proje iki yüzlü dikdörtgen ve yarıçapsız
+// nokta olarak açılır (0.5 ve öncesindeki davranış).
+TEST(ProjectIo, LightShapesRoundTripAndOldProjectsStayTwoSided) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "photon_shape_test";
+    fs::create_directories(dir);
+    const std::string oldFile = (dir / "eski.photon").string();
+    {
+        std::ofstream(oldFile) << R"({"format":"photon-project","version":2,"lights":[{"type":"area","name":"A"},{"type":"point","name":"P"}],"nodes":[]})";
+    }
+    SceneGraph g;
+    ProjectData d;
+    std::string err;
+    ASSERT_TRUE(loadProject(oldFile, g, d, &err)) << err;
+    ASSERT_EQ(d.lights.size(), 2u);
+    EXPECT_EQ(d.lights[0].areaShape, LightDesc::AreaShape::Rectangle);
+    EXPECT_TRUE(d.lights[0].twoSided);
+    EXPECT_FLOAT_EQ(d.lights[1].radius, 0.0f);
+
+    d.lights[0].areaShape = LightDesc::AreaShape::Disk;
+    d.lights[0].twoSided = false;
+    d.lights[1].radius = 0.25f;
+    LightDesc tube;
+    tube.type = LightDesc::Type::Area;
+    tube.name = "T";
+    tube.areaShape = LightDesc::AreaShape::Tube;
+    tube.width = 1.5f;
+    tube.height = 0.04f;
+    d.lights.push_back(tube);
+    const std::string newFile = (dir / "yeni.photon").string();
+    ASSERT_TRUE(saveProject(newFile, g, d, &err)) << err;
+    SceneGraph g2;
+    ProjectData d2;
+    ASSERT_TRUE(loadProject(newFile, g2, d2, &err)) << err;
+    ASSERT_EQ(d2.lights.size(), 3u);
+    EXPECT_EQ(d2.lights[0].areaShape, LightDesc::AreaShape::Disk);
+    EXPECT_FALSE(d2.lights[0].twoSided);
+    EXPECT_FLOAT_EQ(d2.lights[1].radius, 0.25f);
+    EXPECT_EQ(d2.lights[2].areaShape, LightDesc::AreaShape::Tube);
+    EXPECT_FLOAT_EQ(d2.lights[2].width, 1.5f);
+    EXPECT_FLOAT_EQ(d2.lights[2].height, 0.04f);
+    fs::remove_all(dir);
+}

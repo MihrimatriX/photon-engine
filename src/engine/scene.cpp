@@ -1,9 +1,13 @@
 // scene.cpp — Render sahnesine şekil/ışık ekleme, ışık bağlama/gruplama tabloları ve kesişim sorguları.
 #include "engine/scene.h"
+#include "geometry/cylinder.h"
+#include "geometry/disk.h"
 #include "geometry/mesh.h"
 #include "geometry/mesh_instance.h"
+#include "geometry/sphere.h"
 #include "geometry/triangle.h"
 #include "lights/area_light.h"
+#include "lights/shape_lights.h"
 #include "materials/lambertian.h"
 #include <atomic>
 #include <unordered_map>
@@ -70,31 +74,46 @@ void Scene::addLight(std::shared_ptr<Light> light) {
 
     // Alan ışıkları başka türlü kesişilemez: BSDF ile örneklenen bir ışın ışığa
     // çarpınca emisyonunu göremez ve NEE'nin MIS ağırlığı o enerjiyi atar.
-    // Aynı dörtgeni BVH'ye yalnız ışık yayan siyah bir Lambertian olarak asarız.
-    auto area = std::dynamic_pointer_cast<AreaLight>(light);
-    if (!area) return;
-
-    auto mat = std::make_shared<Lambertian>(Color3f::black(), area->radiance());
-    m_emissiveMaterials.push_back(mat);
-
-    const Vec3f p0 = area->position();
-    const Vec3f p1 = p0 + area->u();
-    const Vec3f p2 = p1 + area->v();
-    const Vec3f p3 = p0 + area->v();
-    const Vec3f n = area->normal();
-    const Vec2f uv0(0.0f, 0.0f);
-    const Vec2f uv1(1.0f, 0.0f);
-    const Vec2f uv2(1.0f, 1.0f);
-    const Vec2f uv3(0.0f, 1.0f);
-    const Material* m = mat.get();
-    for (auto tri : {std::make_shared<Triangle>(p0, p1, p2, n, n, n, uv0, uv1, uv2, m),
-                     std::make_shared<Triangle>(p0, p2, p3, n, n, n, uv0, uv2, uv3, m)}) {
-        m_emitterOfShape[tri.get()] = index;
-        if (!area->visibleToCamera()) {
-            m_cameraInvisible.insert(tri.get());
-            tri->setVisibilityMask(static_cast<uint8_t>(VisAll & ~VisCamera));
+    // Aynı yüzeyi BVH'ye yalnız ışık yayan siyah bir Lambertian olarak asarız: dörtgen için iki
+    // üçgen, disk/küre/tüp için analitik şekil (örnekleme ile birebir aynı alan).
+    auto emitter = [&](const Color3f& radiance, bool oneSided) {
+        auto mat = std::make_shared<Lambertian>(Color3f::black(), radiance);
+        mat->setOneSidedEmission(oneSided);
+        m_emissiveMaterials.push_back(mat);
+        return mat.get();
+    };
+    auto attach = [&](const std::shared_ptr<Shape>& shape, bool visibleToCamera) {
+        m_emitterOfShape[shape.get()] = index;
+        if (!visibleToCamera) {
+            m_cameraInvisible.insert(shape.get());
+            shape->setVisibilityMask(static_cast<uint8_t>(VisAll & ~VisCamera));
         }
-        addShape(tri);
+        addShape(shape);
+    };
+
+    if (auto area = std::dynamic_pointer_cast<AreaLight>(light)) {
+        const Material* m = emitter(area->radiance(), !area->twoSided());
+        const Vec3f p0 = area->position();
+        const Vec3f p1 = p0 + area->u();
+        const Vec3f p2 = p1 + area->v();
+        const Vec3f p3 = p0 + area->v();
+        const Vec3f n = area->normal();
+        const Vec2f uv0(0.0f, 0.0f);
+        const Vec2f uv1(1.0f, 0.0f);
+        const Vec2f uv2(1.0f, 1.0f);
+        const Vec2f uv3(0.0f, 1.0f);
+        attach(std::make_shared<Triangle>(p0, p1, p2, n, n, n, uv0, uv1, uv2, m), area->visibleToCamera());
+        attach(std::make_shared<Triangle>(p0, p2, p3, n, n, n, uv0, uv2, uv3, m), area->visibleToCamera());
+    } else if (auto disk = std::dynamic_pointer_cast<DiskLight>(light)) {
+        const Material* m = emitter(disk->radiance(), !disk->twoSided());
+        attach(std::make_shared<Disk>(disk->center(), disk->ex(), disk->ey(), m), disk->visibleToCamera());
+    } else if (auto sphere = std::dynamic_pointer_cast<SphereLight>(light)) {
+        const Material* m = emitter(sphere->radiance(), true);
+        attach(std::make_shared<Sphere>(sphere->center(), sphere->radius(), m), sphere->visibleToCamera());
+    } else if (auto tube = std::dynamic_pointer_cast<CylinderLight>(light)) {
+        const Material* m = emitter(tube->radiance(), true);
+        attach(std::make_shared<Cylinder>(tube->center(), tube->axis() * tube->halfLength(), tube->radius(), m),
+               tube->visibleToCamera());
     }
 }
 

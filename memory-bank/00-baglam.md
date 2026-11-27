@@ -141,8 +141,14 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - OpenUSD 26.11.1 kaynaktan, monolitik `usd_ms` (Python/Hydra/araçlar kapalı); `scripts/build_usd.ps1` (CI, önbellekli) ve `build_usd.sh`. USD, motorun bağlandığı TBB'nin başlıklarıyla derlenmeli (ABI): oneTBB 2023.1.0 `third_party/tbb`'de sabit.
   - `src/io/usd_loader.cpp`: sahne birleştirme, birim/eksen, mesh/şekil/örnekleme, UsdPreviewSurface + MaterialX OpenPBR/Standard Surface/glTF PBR, UsdLux, DomeLight (USD latlong'u Photon'un aynası), kameralar. Uygulama kubbe ortamını ışık tercihiyle birlikte alır.
   - Malzeme modeli: yalıtkan speküler ağırlığı (F7.14). Referans sahneler `.usda` olarak da üretiliyor (`refscenes.py to_usd`), aynı Mitsuba eşiklerini tutuyor.
+- **2026-11-27 (oturum 13, bulut, yol haritası Adım 2b "şekilli ışıklar", aynı dal, üçüncü PR):**
+  - F2.17: tek yüzlü alan ışıkları (yeni ışıklar tek yüzlü; anahtarı olmayan eski projeler çift yüzlü açılır), disk (elips), küre (yarıçaplı nokta ışık, koni örneklemesi) ve tüp (açık silindir, görünür yarım şerit) ışıkları. Analitik şekiller `geometry/disk.*`, `cylinder.*`; ışıklar `lights/shape_lights.*`. Sahneye tek yüzlü siyah Lambert yayıcı olarak bağlanır.
+  - Vulkan: GpuPrim bit 4 disk, bit 5 silindir (ikincil BVH); GpuLight tür 5 disk, 6 küre, 7 tüp; malzeme bayrağı bit 3 tek yüzlü yayım. SPIR-V başlıkları `scripts/compile_shaders.sh` (glslangValidator 15) ile yeniden üretildi.
+  - Küre ve silindir kesişiminde pbrt-v4 ayırtacı (F6.11): uzak küçük küre ışığının kenar ışınları ıskalanıyordu.
+  - USD: Rect/Disk/Sphere/CylinderLight birebir (yaklaşık uyarısı kalktı). Test verisindeki `inputs:treatAsPoint` yanlıştı: bu OpenUSD sürümünde öznitelik ön eksiz `treatAsPoint`.
+  - Mitsuba altın sahnesi `shape_lights` (.photon + .usda): oran 1.0002, medyan 0.0027, p95 0.0092. Çift yüzlü ışık oranı 1.105 yapardı.
 - **Sıradaki adımlar:**
-  - Adım 2 devamı: tam disk/küre/silindir + tek yüzlü ışıklar (F2.17), MaterialX kütüphanesi (usdMtlx), OCIO/ACES 2, OpenVDB, Hydra delegesi (F7.15).
+  - Adım 2 devamı: MaterialX kütüphanesi (usdMtlx), OCIO/ACES 2, OpenVDB, Hydra delegesi (F7.15). Disney speküler ağırlığının (F7.14) GLSL'e taşınması. Mesh yayıcılar hâlâ çift yüzlü.
   - Gerçek 3ds Max / Maya / Blender ile canlı bağlantı ve doğrudan açma denemesi (bu ortamda yok); Windows'ta `CreateProcessW` yolu.
   - Gerçek zamanlı mod: TAA (zamansal kenar yumuşatma) ve GPU Katı modunda doku/ışık desteği.
   - OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli; yüksek performanslı RTX/RDNA kartlarda Vulkan RT benchmark ölçümü ve `bench/BASELINE.md` güncellemesi.

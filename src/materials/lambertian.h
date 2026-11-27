@@ -23,13 +23,22 @@ public:
 
     float pdf(const Vec3f& wo, const Vec3f& wi, const SurfaceInteraction& si) const override;
 
-    Color3f emitted(const SurfaceInteraction&) const override { return m_emission; }
+    /// Tek yüzlü yayıcıda (ışık geometrisi) arka yüze çarpan ışın emisyon görmez.
+    Color3f emitted(const SurfaceInteraction& si) const override {
+        return m_oneSidedEmission && !si.frontFace ? Color3f::black() : m_emission;
+    }
 
     const Color3f& albedo() const { return m_albedo; }
+
+    /// true: yalnız ön yüz (dış normalin baktığı taraf) ışır. Tek yüzlü alan ışıkları ve dışa
+    /// ışıyan küre/tüp ışıklarının yüzeyi için.
+    void setOneSidedEmission(bool v) { m_oneSidedEmission = v; }
+    bool oneSidedEmission() const { return m_oneSidedEmission; }
 
 private:
     Color3f m_albedo;
     Color3f m_emission;
+    bool m_oneSidedEmission = false;
 };
 
 } // namespace photon

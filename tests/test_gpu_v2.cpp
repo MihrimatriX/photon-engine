@@ -4,6 +4,7 @@
 //   * Eşzamanlı Hibrit GPU+CPU vs CPU eşliği
 //   * GPU üzerinde Ray Visibility, Light/Shadow Linking, Motion Blur, Light Groups (LG_*) & Cryptomatte
 //   * Artımlı güncelleme (F3.8): Materials / Lights / Transforms BLAS'ı yeniden kurmadan anında yansır
+//   * Şekilli ışıklar (F2.17): disk, küre, tüp ve tek yüzlü dikdörtgen GPU'da CPU ile aynı
 #include <gtest/gtest.h>
 
 #include "camera/perspective_camera.h"
@@ -17,6 +18,7 @@
 #include "geometry/sphere.h"
 #include "lights/area_light.h"
 #include "lights/environment_light.h"
+#include "lights/shape_lights.h"
 #include "materials/disney.h"
 #include "materials/lambertian.h"
 #include "materials/mirror.h"
@@ -428,4 +430,75 @@ TEST(VulkanV2, IncrementalMaterialAndLightUpdate) {
     EXPECT_EQ(s3.transformUpdates, s2.transformUpdates + 1);
     EXPECT_EQ(s3.blasBuilds, s0.blasBuilds);
     if (vkDev->hasRayQuery()) EXPECT_EQ(s3.tlasBuilds, s0.tlasBuilds + 1);
+}
+
+// Disk, küre ve tüp ışıkları ile tek yüzlü dikdörtgen: analitik şekillerin GPU kesişimi (ikincil
+// BVH), yeni ışık türlerinin örneklemesi/pdf'i ve tek yüzlü yayım CPU ile aynı görüntüyü vermeli.
+// Yukarı bakan tek yüzlü panel sahneyi aydınlatmamalı; kamera görünür ışıkları doğrudan görür.
+TEST(VulkanV2, ShapeLightsAndOneSidedMatchCpu) {
+    if (!hasVulkanDevice()) GTEST_SKIP() << "Vulkan cihazı bulunamadı";
+
+    auto scene = std::make_shared<Scene>();
+    auto floorMat = std::make_shared<Lambertian>(Color3f(0.7f, 0.7f, 0.7f));
+    auto ballMat = std::make_shared<DisneyMaterial>(Color3f(0.2f, 0.4f, 0.8f), 0.0f, 0.3f, 0.5f);
+    scene->retainMaterial(floorMat);
+    scene->retainMaterial(ballMat);
+    scene->addShape(makeQuad(Vec3f(-4, 0, -4), Vec3f(-4, 0, 4), Vec3f(4, 0, 4), Vec3f(4, 0, -4), floorMat.get()));
+    scene->addShape(std::make_shared<Sphere>(Vec3f(0.0f, 0.5f, 0.0f), 0.5f, ballMat.get()));
+
+    // Aşağı bakan tek yüzlü elips disk (sol üst) ve aşağı bakan tek yüzlü dikdörtgen (sağ üst).
+    auto disk = std::make_shared<DiskLight>(Vec3f(-1.2f, 2.2f, 0.5f), Vec3f(0.6f, 0.0f, 0.0f),
+                                            Vec3f(0.0f, -0.15f, 0.35f), Color3f(9.0f, 8.0f, 7.0f), false);
+    scene->addLight(disk);
+    auto rect = std::make_shared<AreaLight>(Vec3f(0.8f, 2.4f, -0.4f), Vec3f(0.9f, 0.0f, 0.0f),
+                                            Vec3f(0.0f, 0.0f, 0.9f), Color3f(6.0f, 6.0f, 8.0f), false);
+    scene->addLight(rect);
+    // Yukarı bakan tek yüzlü panel: sahneye hiç ışık vermez (iki yüzlü olsaydı zemini yakardı).
+    auto away = std::make_shared<AreaLight>(Vec3f(-0.5f, 1.6f, 1.2f), Vec3f(0.0f, 0.0f, 0.8f),
+                                            Vec3f(1.0f, 0.0f, 0.0f), Color3f(40.0f), false);
+    ASSERT_GT(away->normal().y, 0.99f);
+    scene->addLight(away);
+    // Kameranın gördüğü küre ve tüp ışıkları.
+    auto bulb = std::make_shared<SphereLight>(Vec3f(1.3f, 0.9f, 0.8f), 0.2f, Color3f(20.0f, 14.0f, 8.0f));
+    bulb->setVisibleToCamera(true);
+    scene->addLight(bulb);
+    auto tube = std::make_shared<CylinderLight>(Vec3f(-0.4f, 1.4f, -1.0f), Vec3f(0.9f, 0.2f, 0.0f), 0.06f,
+                                                Color3f(30.0f, 30.0f, 40.0f));
+    tube->setVisibleToCamera(true);
+    scene->addLight(tube);
+    scene->buildAccelerator();
+
+    PerspectiveCamera cam(Vec3f(0.0f, 1.6f, 4.0f), Vec3f(0.0f, 0.7f, 0.0f), Vec3f(0.0f, 1.0f, 0.0f), 45.0f, 1.0f);
+    RenderSettings rs;
+    rs.width = 32;
+    rs.height = 32;
+    rs.samplesPerPixel = 64;
+    rs.maxBounces = 3;
+    rs.denoiseEnabled = false;
+    rs.filter = PixelFilter{PixelFilterType::Box, 1.0f};
+
+    auto cpu = createDevice("cpu");
+    ASSERT_NE(cpu, nullptr);
+    cpu->setScene(scene);
+    Image imgCpu = renderOn(*cpu, cam, rs);
+
+    std::string err;
+    auto gpu = createDevice("vulkan:0", &err);
+    ASSERT_NE(gpu, nullptr) << err;
+    gpu->setScene(scene);
+
+    rs.gpuMode = GpuMode::Megakernel;
+    Image imgMega = renderOn(*gpu, cam, rs);
+    verifyParity(imgMega, imgCpu, 0.06, 0.08);
+
+    rs.gpuMode = GpuMode::Wavefront;
+    Image imgWf = renderOn(*gpu, cam, rs);
+    verifyParity(imgWf, imgCpu, 0.06, 0.08);
+
+    auto* vkDev = dynamic_cast<VulkanDevice*>(gpu.get());
+    if (vkDev && vkDev->hasRayQuery()) {
+        rs.gpuMode = GpuMode::RayQuery;
+        Image imgRt = renderOn(*gpu, cam, rs);
+        verifyParity(imgRt, imgCpu, 0.06, 0.08);
+    }
 }

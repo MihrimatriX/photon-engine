@@ -190,6 +190,12 @@ Tek bir `PathTracer::Li` döngüsü; her yineleme bir doğru parçası + bir yü
   %85 orantılı + %15 düzgün karışım kurar; 33'ten çok ışıkta düzgün seçime döner. Aynı dağılım
   bir sonraki isabette MIS için kullanılır.
 - **Alan ışığı:** `AreaLight::sampleLi` küresel dikdörtgen (Ureña 2013); Ω < 1e-3 sr'de alan örneklemesi.
+  Tek yüzlüde (yeni ışıkların varsayılanı) arkadaki alıcı ışık almaz, ışığın yüzeyi arkadan siyahtır.
+- **Şekilli ışıklar** (`lights/shape_lights.*`): disk/elips (alanda düzgün), küre (alıcının gördüğü
+  koni içinde katı açıda düzgün, PBRT-v4; küçük açıda Taylor dalı), tüp (açık silindir, yalnız
+  alıcıya bakan yarım şerit: φ0 ± arccos(r/ρ), tüm boy). Sahneye kendi analitik şekilleriyle
+  (`geometry/disk.*`, `sphere.*`, `cylinder.*`) tek yüzlü yayıcı olarak eklenir; NEE ve BSDF
+  isabeti aynı yüzeyi gördüğü için MIS tutarlıdır. GPU'da aynı şekiller ikincil BVH'dedir.
 - **Ortam ışığı:** luminance × sin θ dağılımından 2B CDF + isteğe bağlı güneş konisi (karışım pdf'i).
 - **Delta yüzeyler** (`Material::isDelta()`): ayna ve pürüzsüz camda NEE yapılmaz.
 - **Rus ruleti:** throughput'un en büyük bileşenine göre. **Parlama sınırı** (isteğe bağlı) yalnız

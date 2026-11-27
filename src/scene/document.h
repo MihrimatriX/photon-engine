@@ -35,13 +35,23 @@ struct LightDesc {
     /// Alan: radyans; yönlü: ışınım (irradiance); nokta: yoğunluk. Hepsi color ile çarpılır.
     float intensity = 10.0f;
     Vec3f position{0.0f, 3.0f, 0.0f};  ///< Alan/nokta: merkez
-    Vec3f target{0.0f, 0.0f, 0.0f};    ///< Alan: dörtgenin baktığı nokta
-    float width = 1.0f;                ///< Alan: dörtgen boyutları
-    float height = 1.0f;
+    Vec3f target{0.0f, 0.0f, 0.0f};    ///< Alan: yüzeyin baktığı nokta (tüpte eksen yönü)
+    float width = 1.0f;                ///< Alan: dörtgen/disk boyutları; tüpte boy
+    float height = 1.0f;               ///< tüpte çap
+    /// Alan ışığının yüzeyi. Dikdörtgen ve disk (genişlik × yükseklik çaplı elips) hedefe bakar;
+    /// tüp (açık silindir, USD CylinderLight) ekseni konumdan hedefe uzanır ve yanlarından ışır.
+    enum class AreaShape { Rectangle, Disk, Tube };
+    AreaShape areaShape = AreaShape::Rectangle;
+    /// Alan (dikdörtgen, disk): iki yüzden de ışır mı? Kapalıyken yalnız hedefe bakan yüz ışır
+    /// (KeyShot, V-Ray, Cycles ve USD ışıkları gibi). Anahtarı olmayan eski projeler iki yüzlü açılır.
+    bool twoSided = false;
+    /// Nokta: > 0 ise ışık bu yarıçaplı bir küredir (yumuşak gölge ve görünür parlama). Şiddet
+    /// aynı kalır: uzaktan bakışta aynı ışığı verir.
+    float radius = 0.0f;
     float azimuthDeg = 45.0f;          ///< Yönlü: ışığın GELDİĞİ yön (yatay açı)
     float elevationDeg = 45.0f;        ///< Yönlü: ufkun üstündeki açı
-    /// Alan: kamera dörtgeni doğrudan görsün mü? Ürün çekiminde softbox'lar genelde
-    /// görünmez; yansımalarda ve aydınlatmada her durumda vardır.
+    /// Alan ve yarıçaplı nokta: kamera ışığın yüzeyini doğrudan görsün mü? Ürün çekiminde
+    /// softbox'lar genelde görünmez; yansımalarda ve aydınlatmada her durumda vardır.
     bool visibleToCamera = false;
     float coneAngleDeg = 45.0f;        ///< Spot: koninin tam açısı (≥ 180 = yalnız IES)
     float coneBlend = 0.15f;           ///< Spot: kenar yumuşaklığı (0 keskin, 1 tam yumuşak)

@@ -1090,19 +1090,52 @@ void Application::drawLightProps() {
                 }
                 ImGui::PopID();
             }
-            if (l.type == LightDesc::Type::Area) {
-                ui::Prop("Kameraya görünür", "Kapalıyken softbox doğrudan bakışta görünmez; yansımalarda ve "
-                                             "aydınlatmada yine vardır (ürün çekimi için önerilir)");
+            auto cameraToggle = [&] {
+                ui::Prop("Kameraya görünür", "Kapalıyken ışığın yüzeyi doğrudan bakışta görünmez; yansımalarda "
+                                             "ve aydınlatmada yine vardır (ürün çekimi için önerilir)");
                 bool vis = l.visibleToCamera;
                 if (ui::Toggle("lvis", &vis)) {
                     pushUndo();
                     l.visibleToCamera = vis;
                     changed = true;
                 }
-                ui::Prop("Genişlik");
+            };
+            if (l.type == LightDesc::Type::Area) {
+                ui::Prop("Şekil", "Dikdörtgen ve disk hedefe bakar. Tüp (floresan, LED çubuk) konumdan hedefe "
+                                  "doğru uzanır ve yanlarından her yöne ışır; uçları ışımaz");
+                int shape = static_cast<int>(l.areaShape);
+                const char* shapes[] = {"Dikdörtgen", "Disk", "Tüp"};
+                if (ui::Segmented("lshape", &shape, shapes, 3)) {
+                    pushUndo();
+                    l.areaShape = static_cast<LightDesc::AreaShape>(shape);
+                    changed = true;
+                }
+                const bool tube = l.areaShape == LightDesc::AreaShape::Tube;
+                if (!tube) {
+                    ui::Prop("Çift yüzlü", "Kapalıyken yalnız hedefe bakan yüz ışır (gerçek softbox ve paneller "
+                                           "gibi). Açıkken arka yüz de aynı güçle ışır");
+                    bool ts = l.twoSided;
+                    if (ui::Toggle("l2s", &ts)) {
+                        pushUndo();
+                        l.twoSided = ts;
+                        changed = true;
+                    }
+                }
+                cameraToggle();
+                ui::Prop(tube ? "Boy" : "Genişlik");
                 if (ImGui::DragFloat("##w", &l.width, std::max(1e-3f, l.width * 0.01f), 1e-3f, 1e5f, "%.3f")) { undoPoint(*this, ImGui::GetID("w")); changed = true; }
-                ui::Prop("Yükseklik ");
+                ui::Prop(tube ? "Çap" : "Yükseklik ");
                 if (ImGui::DragFloat("##h", &l.height, std::max(1e-3f, l.height * 0.01f), 1e-3f, 1e5f, "%.3f")) { undoPoint(*this, ImGui::GetID("h")); changed = true; }
+            }
+            if (l.type == LightDesc::Type::Point) {
+                ui::Prop("Yarıçap", "0: noktasal ışık, keskin gölge. Büyüdükçe gölgeler yumuşar ve ışık yansımalarda "
+                                    "küre olarak görünür; güç aynı kalır");
+                if (ImGui::DragFloat("##rad", &l.radius, std::max(1e-3f, l.radius * 0.01f), 0.0f, 1e4f, "%.3f")) {
+                    undoPoint(*this, ImGui::GetID("rad"));
+                    l.radius = std::max(0.0f, l.radius);
+                    changed = true;
+                }
+                if (l.radius > 0.0f) cameraToggle();
             }
             ui::Prop("Işık grubu (EXR)", "Aynı adlı ışıklar çok katmanlı EXR'de LG_<ad> katmanında toplanır");
             {

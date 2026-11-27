@@ -734,6 +734,25 @@ bvh.h — Sınırlayıcı hacim hiyerarşisi (BVH): ışın-sahne kesişimini O(
 hiçbir üçgen test edilmez. Yapım: 12 kovalı SAH (yüzey alanı sezgiseli).
 Embree yoksa ve testlerde kullanılan, motorun kendi (öğrenme amaçlı) hızlandırıcısı.
 
+### `src/geometry/cylinder.cpp`
+
+cylinder.cpp — Işın-silindir kesişimi: eksene dik düzlemde ikinci derece denklem, sonra
+eksen boyunca boy sınırı.
+
+### `src/geometry/cylinder.h`
+
+cylinder.h — Analitik açık silindir (kapaksız tüp) şekli. Silindir (tüp) ışığının yan
+yüzeyidir; USD CylinderLight gibi uçlardan ışımaz ve uç kapakları yoktur.
+
+### `src/geometry/disk.cpp`
+
+disk.cpp — Işın-disk kesişimi: düzlemle kesişim, sonra elips içinde mi testi.
+
+### `src/geometry/disk.h`
+
+disk.h — Analitik düz disk (elips) şekli: merkez + iki yarı eksen vektörü. Disk ışığının
+yüzeyidir; üçgenleştirilmez, böylece ışın isabeti ile ışık örneklemesi aynı alanı görür.
+
 ### `src/geometry/mesh.cpp`
 
 mesh.cpp — TriangleMesh: sınırlar, eksik normallerin hesaplanması, tek üçgen kesişimi
@@ -978,6 +997,21 @@ point_light.cpp — Nokta ışığın örneklenmesi ve toplam gücü.
 
 point_light.h — Nokta ışık: tek bir noktadan her yöne eşit ışıyan delta ışık.
 İdeal bir kavramdır (sonsuz küçük kaynak): keskin gölge verir, kameraya görünmez.
+
+### `src/lights/shape_lights.cpp`
+
+shape_lights.cpp — Disk, küre ve silindir ışıklarının örneklemesi, pdf'leri ve sınırları.
+
+### `src/lights/shape_lights.h`
+
+shape_lights.h — Tam şekilli alan ışıkları: disk (elips), küre ve silindir (tüp). Hepsi düzgün
+Lambert yayıcıdır (radyans L her yönde aynı) ve sahnede kendi analitik şekilleriyle (Disk,
+Sphere, Cylinder) kesişilir; NEE ile BSDF isabeti aynı yüzeyi görür, MIS tutarlıdır.
+
+  Disk:     tek ya da iki yüzlü; alanda düzgün örnekleme.
+  Küre:     dışa ışır; alıcıdan görülen koni içinde katı açıda düzgün örnekleme (PBRT-v4).
+  Silindir: yan yüzey dışa ışır, uçlar ışımaz (USD CylinderLight); alıcının gördüğü yarım
+            tüpte (görünür açı aralığı) alanda düzgün örnekleme.
 
 ### `src/lights/sky_model.cpp`
 

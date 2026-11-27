@@ -63,7 +63,9 @@ grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazılm
 - HDRI ortamlar (Poly Haven, CC0) + prosedürel stüdyo gradyanları.
 - **Fiziksel gök + güneş** (Nishita: Rayleigh, Mie, ozon): yükseklik/yön ya da **konum + tarih + saat**
   (NOAA), pus, güneş boyutu; güneş ortam ışığının içinde ayrı bir koni olarak örneklenir (keskin, temiz gölge).
-- Alan (softbox, **kameraya görünmez** seçeneği), güneş, nokta ve **spot ışıklar (IES profilleriyle)**.
+- Alan ışıkları: dikdörtgen (softbox), **disk** ve **tüp** (açık silindir); **tek ya da çift yüzlü** ve
+  **kameraya görünmez** seçenekleri. Güneş, nokta (**yarıçaplı küre ışığı** olarak da: yumuşak gölge) ve
+  **spot ışıklar (IES profilleriyle)**.
 - **Gölge yakalayıcı zemin:** ürünü beyaz fona ya da şeffaf PNG'ye yalnız gölgesiyle yerleştirir.
 - Arka plan: ortam, düz renk ya da şeffaf (alfa kanallı PNG). 6 stüdyo preset'i.
 
@@ -105,7 +107,8 @@ grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazılm
   dilimleri, basit şekiller, yerel örnekleme ve PointInstancer (geometri paylaşılır). Malzemeler:
   UsdPreviewSurface ve MaterialX **OpenPBR** / Standard Surface / glTF PBR (sabitler, dokular, UV
   dönüşümü). UsdLux ışıkları (fiziksel birimlerle), **DomeLight HDRI ortamı** ve kameralar (alan
-  derinliği dahil). Disk/küre/silindir ışıkları şimdilik eşdeğer güçte dörtgen/nokta ışıkla yaklaşılır.
+  derinliği dahil). Dikdörtgen, disk, küre ve silindir (tüp) ışıkları motorda birebir aynı şekil ve
+  tek yüzlülükle gelir (yalnız ShapingAPI'li küre ışığı yarıçapsız spot olur).
 - **Alembic (.abc)** (Houdini, Maya, Marvelous Designer, Blender, C4D önbellekleri): Xform hiyerarşisi,
   PolyMesh ve SubD, yüz kümeleri malzeme parçası olur, seçilen kare okunur; birim yazan uygulamadan tahmin edilir.
 - OBJ, glTF / GLB. **İçe aktarma penceresi** (birim mm/cm/m/inç, Y/Z yukarı, Alembic karesi;
@@ -263,7 +266,7 @@ src/
 ├── geometry/      küre, üçgen, mesh, kendi BVH'miz
 ├── materials/     Lambert, ayna, cam (hacim, dispersiyon, ince duvar), Disney Principled (SSS, ince film,
 │                  pullar, kenar tonu), mikro-yüzey + Fresnel yardımcıları, GGX albedo tablosu
-├── lights/        nokta, yönlü, spot + IES, alan (küresel dikdörtgen), üçgen ışığı, HDRI + güneş (MIS telafili),
+├── lights/        nokta, yönlü, spot + IES, alan (küresel dikdörtgen), disk/küre/tüp, üçgen ışığı, HDRI + güneş (MIS telafili),
 │                  fiziksel gök, ışık sınırları + ışık BVH'si
 ├── camera/        perspektif, ince mercek (alan derinliği), ortografik
 ├── samplers/      bağımsız, tabakalı, Owen-Sobol

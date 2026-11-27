@@ -64,7 +64,12 @@ struct ImportedLight {
     float intensity = 1.0f;
     float coneAngleDeg = 45.0f;         ///< spot: tam koni açısı
     float coneBlend = 0.15f;
-    float width = 1.0f, height = 1.0f;  ///< alan: dörtgen boyutu
+    float width = 1.0f, height = 1.0f;  ///< alan: dörtgen/disk boyutu (çaplar); tüpte boy ve çap
+    /// Alan ışığının yüzeyi: tüpün ekseni ışığın ilerlediği yön (direction) boyuncadır.
+    enum class AreaShape { Rectangle, Disk, Tube };
+    AreaShape areaShape = AreaShape::Rectangle;
+    bool twoSided = true;               ///< alan (dikdörtgen, disk): iki yüzden ışır mı
+    float radius = 0.0f;                ///< nokta: > 0 ise küre ışık yarıçapı
 };
 
 /// Dosyanın ortam ışığı (USD DomeLight): motorun eşdikdörtgen kuralına çevrilmiş HDRI dosyası ve

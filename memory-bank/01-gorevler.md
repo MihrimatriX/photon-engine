@@ -139,7 +139,7 @@ Nasıl okunur:
 - [x] **F2.14** (2026-11-27: Mitsuba 3.9 referansı, `bench/reference/` ve `bench/reference/REPORT.md`) (İsteğe bağlı) Mitsuba 3 referansı: ortak malzemelerde relMSE.
 - [ ] **F2.15** Faz 3–7'nin sırasını gerçek ölçümlere göre gözden geçir.
 - [ ] **F2.16** (2026-11-27, `bench/reference/REPORT.md`) Kostikli Cornell'de Cycles eşit örnekte %30 daha az gürültülü. Rus ruleti politikası (3. sekmeden, yalnız throughput, üst sınırsız; Mitsuba η² + %95 sınır) ve path guiding varsayılanı ölçülerek denenir. Kanıt: `efficiency.py` kostik satırında verim oranı ≥ 2.
-- [ ] **F2.17** Tek yüzlü ışık seçeneği: Lambert ışıması bugün hep çift yüzlü (KeyShot/V-Ray/Cycles'ta seçilebilir). Malzemede `emitTwoSided`, NEE pdf'i ve MIS buna uyar; referans sahnede ışık tavanın altına indirilince Mitsuba ile oran 1.000 kalır.
+- [x] **F2.17** (2026-11-27: gerçek tek yüzlü ışıklar, `lights/shape_lights.*`) Tek yüzlü ışık seçeneği: dikdörtgen ve disk alan ışıklarında "Çift yüzlü" anahtarı (yeni ışıklar tek yüzlü, anahtarı olmayan eski projeler çift yüzlü açılır); disk (elips), küre (yarıçaplı nokta, koni örneklemesi) ve tüp (açık silindir, görünür yarım şerit örneklemesi) ışıkları analitik şekilleriyle kesişilir, NEE pdf'i ile BSDF isabeti aynı yüzeyi görür. CPU + Vulkan (üç mod), USD (Rect/Disk/Sphere/CylinderLight birebir), proje, arayüz, gizmo, önizleme. Mitsuba referansı `shape_lights` (.photon ve .usda). Mesh yayıcılar hâlâ çift yüzlü.
 - [ ] **F2.18** CPU verimi: Mitsuba 3 LLVM wavefront basit sahnelerde örnek başına ~2.5× hızlı. Sıradaki profil kalemleri: Disney lob değerlendirmesi, gölgelendirme çerçevesi, ortam CDF araması (alias tablosu), Kulla–Conty tablo okuması. SIMD wavefront kararı yol haritası Adım 3 ile birlikte.
 - **Öğrenme:** PBRT bölüm 2 (Monte Carlo integrasyonu, varyans, önem örnekleme); chi-kare testinin mantığı.
 
@@ -277,7 +277,7 @@ Nasıl okunur:
 - [x] **F6.8** (2026-11-27: alfa kesikleri 2026-11-06, `Material::opacity`; gölge ışınlarında geçirgen yürüyüş) Gölge any-hit: alfa/kesik desteği; ışığın kendi primitifi atlanır. `[geometry-12]`
 - [x] **F6.9** Embree 4.4 (resmi derlenmiş paket, `scripts/fetch_deps.ps1`; vcpkg portu ~1 saat sürüyor). `PHOTON_ENABLE_EMBREE` bayrağı; `bvh.cpp` referans test olarak kalır.
 - [ ] **F6.10** Global `/arch:AVX2`'nin faydası ölçülür; gerekirse varsayılan SSE4.2 olur. `[core-9]` `[build-12]`
-- [ ] **F6.11** Küre kesişim hassasiyeti (pbrt-v4 diskriminant formu). `[core-13]`
+- [x] **F6.11** (2026-11-27, F2.17 ile) Küre kesişim hassasiyeti (pbrt-v4 diskriminant formu: 4a(r² − |f|²)); silindirde ve GPU kürede de aynı form. Uzak küçük küre ışığının kenarındaki ışınlar artık ıskalanmıyor. `[core-13]`
 - **Öğrenme:** Bikker "How to build a BVH" serisi (1–9), PBRT bölüm 7, *Ray Tracing: The Next Week*.
 - **Kanıt:** her adımda Mrays/s `BASELINE.md`'ye yazılır; 1M üçgenli içe aktarma süresi ölçülür.
 
@@ -303,7 +303,7 @@ Nasıl okunur:
 - [x] **F7.13** (2026-11-27, yol haritası Adım 2a) OpenUSD içe aktarma: OpenUSD 26.11.1 kaynaktan (`scripts/build_usd.{ps1,sh}`, sabit oneTBB 2023.1.0), `src/io/usd_loader.cpp`. Birleştirilmiş sahne (katman, referans, varyant), birim/eksen, çokgen + GeomSubset, şekiller, yerel örnekleme + PointInstancer; UsdPreviewSurface ve MaterialX OpenPBR / Standard Surface / glTF PBR; UsdLux (fiziksel birimler), DomeLight → HDRI ortamı, kameralar. Kanıt: `tests/test_usd_import.cpp` ve aynı referans sahneler USD'den Mitsuba eşikleriyle (`GoldenReference.*Usd*`).
 - [x] **F7.14** (2026-11-27) Yalıtkan speküler ağırlığı: `specular` < 0.5'te F0 ve F90 birlikte ölçeklenir (glTF KHR_materials_specular, OpenPBR `specular_weight`); `specular = 0` saf difüz. Varsayılan 0.5 ve üstü birebir eski sonuç. GPU GLSL yolu henüz eski (F90 = 1; `glslc` ile yeniden derlenecek).
 - [ ] **F7.16** Principled cam (`specularTransmission` = 1) Photon'un ayrı cam BSDF'inden ≈ %0.2 sönük (kostikli Cornell, 2048 örnek: 0.998 / 1.0007). Yansıma lobu Schlick, iletim tam Fresnel; iletimli yüzeyde yansımayı da tam Fresnel'e geçirip Mitsuba ile yeniden ölç.
-- [ ] **F7.15** USD'de kalanlar: MaterialX standart kütüphanesi (usdMtlx, `.mtlx` dosyaları ve düğüm grafiği), tam disk/küre/silindir ve tek yüzlü alan ışıkları (F2.17 ile), UsdSkel/zaman örnekli geometri, dışa aktarma (Photon → USD), Hydra render delegesi.
+- [ ] **F7.15** USD'de kalanlar: MaterialX standart kütüphanesi (usdMtlx, `.mtlx` dosyaları ve düğüm grafiği), ~~tam disk/küre/silindir ve tek yüzlü alan ışıkları~~ (F2.17 ile yapıldı; şekillendirilmiş (ShapingAPI) küre ışığı hâlâ yarıçapsız spot), UsdSkel/zaman örnekli geometri, dışa aktarma (Photon → USD), Hydra render delegesi.
 - **Öğrenme:** PBRT bölüm 9–10; SIGGRAPH "Physically Based Shading" notları; Heitz 2018; OpenPBR şartnamesi.
 - **Kanıt:** fırın testinde beyaz pürüzlü metal her pürüzlülükte ≈ 1; ortak malzemelerde Mitsuba relMSE %1'in altında.
 

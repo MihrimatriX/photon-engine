@@ -22,11 +22,22 @@ bool Sphere::intersect(Ray& ray, SurfaceInteraction& isect) const {
     float a = d.dot(d);
     float b = 2.0f * o.dot(d);
     float c = o.dot(o) - m_radius * m_radius;
+    if (!(a > 0.0f)) return false;
 
-    float t0, t1;
-    if (!solveQuadratic(a, b, c, t0, t1)) {
-        return false;
-    }
+    // Ayırtaç b² − 4ac de uzak ve küçük kürede (|o| ≫ r) iptale uğrar: 4(o·d)² ile 4|o|² neredeyse
+    // eşittir, fark r² mertebesindedir ve float'ta kaybolur; kenara yakın ışınlar (küre ışığının
+    // görünür kenarı) yanlışlıkla ıskalanır. Eşdeğer biçim 4a(r² − |f|²), f = o − (o·d/d·d)·d
+    // ışının merkeze en yakın noktasıdır; çıkarılan sayılar küçüktür (Haines vd., Ray Tracing
+    // Gems böl. 7; PBRT-v4 Sphere).
+    const Vec3f f = o - d * (0.5f * b / a);
+    const float fl = f.length();
+    const float discriminant = 4.0f * a * (m_radius + fl) * (m_radius - fl);
+    if (discriminant < 0.0f) return false;
+    const float rootDisc = std::sqrt(discriminant);
+    const float q = -0.5f * (b < 0.0f ? b - rootDisc : b + rootDisc);
+    float t0 = q / a;
+    float t1 = q != 0.0f ? c / q : t0;
+    if (t0 > t1) std::swap(t0, t1);
 
     // Check if the intersection points are within the ray's valid range
     // t0 ≤ t1. Önce yakın kök denenir; geçersizse (ör. ışın kürenin içinden çıkıyorsa

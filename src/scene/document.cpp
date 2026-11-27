@@ -3,6 +3,7 @@
 #include "lights/area_light.h"
 #include "lights/directional_light.h"
 #include "lights/point_light.h"
+#include "lights/shape_lights.h"
 #include "lights/spot_light.h"
 #include "core/image/image_io.h"
 #include "core/image/imager.h"
@@ -63,7 +64,8 @@ Vec3f directionalTravelDir(const LightDesc& d) {
 }
 
 // Alan ışığı dörtgeni: merkez c, hedefe bakan normal n. Dörtgenin kenarları
-// n'ye dik iki vektör (u, v) olarak kurulur; AreaLight köşe + iki kenar ister.
+// n'ye dik iki vektör (u, v) olarak kurulur; AreaLight köşe + iki kenar ister. Disk aynı tabanda
+// yarı eksenler (u/2, v/2) ile kurulur; tüpün ekseni konumdan hedefe uzanır.
 std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& descs) {
     std::vector<std::shared_ptr<Light>> out;
     for (const LightDesc& d : descs) {
@@ -75,13 +77,27 @@ std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& de
                 Vec3f n = d.target - d.position;
                 if (n.lengthSquared() < 1e-12f) n = Vec3f(0, -1, 0);
                 n = n.normalized();
+                if (d.areaShape == LightDesc::AreaShape::Tube) {
+                    // Boy = genişlik, çap = yükseklik; yan yüzey dışa ışır, uçlar ışımaz.
+                    auto tube = std::make_shared<CylinderLight>(d.position, n * (0.5f * std::max(1e-4f, d.width)),
+                                                                0.5f * std::max(1e-4f, d.height), L);
+                    tube->setVisibleToCamera(d.visibleToCamera);
+                    created = std::move(tube);
+                    break;
+                }
                 Vec3f up = std::abs(n.y) > 0.95f ? Vec3f(1, 0, 0) : Vec3f(0, 1, 0);
                 Vec3f u = up.cross(n).normalized();
                 Vec3f v = n.cross(u).normalized();
                 u = u * std::max(1e-4f, d.width);
                 v = v * std::max(1e-4f, d.height);
+                if (d.areaShape == LightDesc::AreaShape::Disk) {
+                    auto disk = std::make_shared<DiskLight>(d.position, u * 0.5f, v * 0.5f, L, d.twoSided);
+                    disk->setVisibleToCamera(d.visibleToCamera);
+                    created = std::move(disk);
+                    break;
+                }
                 const Vec3f corner = d.position - u * 0.5f - v * 0.5f;
-                auto area = std::make_shared<AreaLight>(corner, u, v, L);
+                auto area = std::make_shared<AreaLight>(corner, u, v, L, d.twoSided);
                 area->setVisibleToCamera(d.visibleToCamera);
                 created = std::move(area);
                 break;
@@ -101,7 +117,14 @@ std::vector<std::shared_ptr<Light>> buildLights(const std::vector<LightDesc>& de
                 created = std::make_shared<DirectionalLight>(directionalTravelDir(d), L);
                 break;
             case LightDesc::Type::Point:
-                created = std::make_shared<PointLight>(d.position, L);
+                if (d.radius > 0.0f) {
+                    // Aynı şiddet I: radyans L = I / (π r²) (uzaktan görülen disk π r²).
+                    auto sphere = std::make_shared<SphereLight>(d.position, d.radius, L / (PI * d.radius * d.radius));
+                    sphere->setVisibleToCamera(d.visibleToCamera);
+                    created = std::move(sphere);
+                } else {
+                    created = std::make_shared<PointLight>(d.position, L);
+                }
                 break;
         }
         if (created) {

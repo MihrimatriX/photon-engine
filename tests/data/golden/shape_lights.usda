@@ -1,0 +1,197 @@
+#usda 1.0
+(
+    doc = "PhotonEngine referans sahnesi shape_lights (bench/reference/refscenes.py, to_usd)"
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "World"
+{
+    def Scope "Looks"
+    {
+        def Material "M0"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M0/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.6, 0.6, 0.6)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M1"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M1/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.6, 0.6, 0.6)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M2"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M2/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.6, 0.6, 0.6)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M3"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M3/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.75, 0.75, 0.75)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M4"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M4/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.7, 0.45, 0.3)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+    }
+
+    def Mesh "O0" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "zemin"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-3, 0, 3), (3, 0, 3), (3, 0, -2), (-3, 0, -2)]
+        normal3f[] normals = [(-0, 1, 0), (-0, 1, 0), (-0, 1, 0), (-0, 1, 0)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M0>
+    }
+    def Mesh "O1" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "arka duvar"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-3, 0, -2), (3, 0, -2), (3, 3, -2), (-3, 3, -2)]
+        normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M1>
+    }
+    def Mesh "O2" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "tavan"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-3, 2.6, -2), (3, 2.6, -2), (3, 2.6, 3), (-3, 2.6, 3)]
+        normal3f[] normals = [(0, -1, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M2>
+    }
+    def Sphere "O3" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "küre"
+    )
+    {
+        double radius = 0.45
+        double3 xformOp:translate = (-0.7, 0.45, -0.2)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        rel material:binding = </World/Looks/M3>
+    }
+    def Sphere "O4" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "küçük küre"
+    )
+    {
+        double radius = 0.3
+        double3 xformOp:translate = (0.75, 0.3, 0.5)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        rel material:binding = </World/Looks/M4>
+    }
+    def RectLight "L0" (
+        doc = "tavan paneli"
+    )
+    {
+        float inputs:intensity = 6
+        color3f inputs:color = (1, 1, 1)
+        float inputs:width = 0.7
+        float inputs:height = 1.2
+        matrix4d xformOp:transform = ((1, 0, 0, 0), (0, 0, -1, 0), (-0, 1, -0, 0), (0.6, 2.35, -0.5, 1))
+        uniform token[] xformOpOrder = ["xformOp:transform"]
+    }
+    def DiskLight "L1" (
+        doc = "disk"
+    )
+    {
+        float inputs:intensity = 9
+        color3f inputs:color = (1, 0.777777778, 0.555555556)
+        float inputs:radius = 0.35
+        matrix4d xformOp:transform = ((0.323469727501, 0.944993703914, -0.0485204591252, 0), (-0.14834045293, 0, -0.988936352868, 0), (-0.934538627032, 0.327088519461, 0.140180794055, 0), (-1.9, 1.5, 0.3, 1))
+        uniform token[] xformOpOrder = ["xformOp:transform"]
+    }
+    def SphereLight "L2" (
+        doc = "ampul"
+    )
+    {
+        float inputs:intensity = 14
+        color3f inputs:color = (1, 0.785714286, 0.571428571)
+        float inputs:radius = 0.14
+        double3 xformOp:translate = (1.5, 0.85, -0.3)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+    def CylinderLight "L3" (
+        doc = "tüp"
+    )
+    {
+        float inputs:intensity = 16
+        color3f inputs:color = (0.625, 0.75, 1)
+        float inputs:length = 1.8
+        float inputs:radius = 0.04
+        matrix4d xformOp:transform = ((0.991899501073, 0.0793519600858, 0.0991899501073, 0), (-0.0789581514014, 0.996846661443, -0.00789581514014, 0), (-0.099503719021, 0, 0.99503719021, 0), (-0.2, 1.85, -1.6, 1))
+        uniform token[] xformOpOrder = ["xformOp:transform"]
+    }
+    def Camera "Camera"
+    {
+        float focalLength = 32.969729
+        float verticalAperture = 24
+        float horizontalAperture = 36
+        float2 clippingRange = (0.01, 1000)
+        matrix4d xformOp:transform = ((1, -0, 0, 0), (0, 0.99896854021, -0.0454076609186, 0), (-0, 0.0454076609186, 0.99896854021, 0), (0, 1.15, 4.4, 1))
+        uniform token[] xformOpOrder = ["xformOp:transform"]
+    }
+}
