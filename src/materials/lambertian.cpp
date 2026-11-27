@@ -23,8 +23,12 @@ bool Lambertian::sample(const Vec3f& wo, const SurfaceInteraction& si, const Vec
     Vec3f wiLocal = cosineSampleHemisphere(sample);
     wi = frame.toWorld(wiLocal).normalized();
 
-    brdf = eval(wo, wi, si);
-    pdf = this->pdf(wo, wi, si);
+    // eval/pdf'i ayrıca çağırmak çerçeveyi iki kez daha kurar; yerel kosinüs zaten elde
+    // (profilde Lambert örneklemesi kapalı sahnelerde sürenin ~%6'sıydı).
+    const float cosThetaI = wiLocal.z;
+    if (cosThetaI <= 0.0f) return false;
+    brdf = m_albedo * INV_PI;
+    pdf = cosineHemispherePdf(cosThetaI);
 
     return true;
 }

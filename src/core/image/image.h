@@ -32,7 +32,13 @@ public:
     void clear();
 
     void setPixel(int x, int y, const Color3f& color);
-    Color3f getPixel(int x, int y) const;
+    /// Satır içi: ortam haritası değerlendirmesi piksel başına dört okuma yapar ve çeviri birimi
+    /// dışındaki bir çağrı ürün sahnelerinde render süresinin ~%7'sini tutuyordu.
+    Color3f getPixel(int x, int y) const {
+        const size_t idx = pixelIndex(x, y);
+        if (m_format == StorageFormat::Float32) return Color3f(m_data[idx + 0], m_data[idx + 1], m_data[idx + 2]);
+        return decodeU8(m_dataU8[idx + 0], m_dataU8[idx + 1], m_dataU8[idx + 2]);
+    }
 
     /// Bilinear sample with wrap UV in [0,1]. Uses raw pixel values (not accumulation averages).
     Color3f sampleBilinear(float u, float v) const;

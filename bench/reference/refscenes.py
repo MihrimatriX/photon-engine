@@ -1,0 +1,383 @@
+"""Referans karşılaştırma sahneleri: tek tanımdan hem PhotonEngine (.photon) hem Mitsuba 3 sahnesi.
+
+Amaç, iki motorun da *aynı* fiziksel modeli tam olarak ifade edebildiği parçalarda (Lambert,
+ideal ayna, pürüzsüz/pürüzlü cam, GGX iletken, alan ışığı, HDRI) PhotonEngine'in yansız olup
+olmadığını ölçmek. Malzeme eşlemesi bu yüzden bilerek dar tutulur:
+
+  diffuse  → Photon "lambert"                 ↔ Mitsuba diffuse
+  emitter  → Photon "lambert" + emission      ↔ Mitsuba area (siyah difüz yüzey)
+  mirror   → Photon "mirror"                  ↔ Mitsuba conductor (material = none)
+  glass    → Photon "glass" (pürüzlülük r)    ↔ Mitsuba dielectric / roughdielectric (α = r²)
+  metal    → Photon "disney" metallic = 1,    ↔ Mitsuba roughconductor (material = none, α = r²)
+             baseColor = 1 (F82 tonu beyazda F ≡ 1)
+
+Bilinen ve kasıtlı model farkları (rapor bunları ayrıca açıklar):
+  * GGX gölgeleme: Photon yüksekliğe bağlı Smith G2 kullanır, Mitsuba ayrık G1·G1. Fark yüksek
+    pürüzlülükte ve sıyırma açılarında birkaç yüzde.
+  * Çoklu saçılma: Photon'un Disney metali Kulla–Conty enerji telafisi yapar (beyaz metal fırında
+    ≈ 1 yansıtır), Mitsuba'nın tek saçılmalı GGX'i pürüzlülükle enerji kaybeder.
+  * Işık yayan yüzeyler: Photon'da Lambert ışıması çift yüzlü, Mitsuba'da tek yüzlü. Sahneler,
+    ışık kaynaklarının arka yüzü boşluğa bakacak biçimde kuruldu.
+  * HDRI texel kuralı: Mitsuba texel'leri ızgara noktası sayar, Photon piksel merkezi. Mitsuba'ya
+    verilen ortam haritası bu yüzden resample_for_mitsuba ile 4× yoğun ızgarada yeniden örneklenir.
+
+Koordinatlar: Y yukarı, birim metre. Kamera dikey FOV (derece) ile verilir.
+"""
+from __future__ import annotations
+
+import json
+import math
+import os
+from dataclasses import dataclass, field
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
+
+
+# ─────────────────────────────── sahne tanımı ───────────────────────────────
+
+@dataclass
+class Obj:
+    shape: str                 # "sphere" | "quad"
+    mat: dict
+    center: tuple = (0, 0, 0)  # sphere
+    radius: float = 1.0        # sphere
+    corners: tuple = ()        # quad: 4 köşe, saat yönünün tersi (normal sağ el kuralıyla)
+    name: str = ""
+
+
+@dataclass
+class Scene:
+    name: str
+    title: str
+    eye: tuple
+    target: tuple
+    fov: float
+    objects: list
+    env: dict | None = None    # None → siyah; {"hdr": yol} → HDRI
+    res: tuple = (320, 240)
+    notes: str = ""
+    extra: dict = field(default_factory=dict)
+
+
+def diffuse(c):
+    return {"type": "diffuse", "albedo": _c3(c)}
+
+
+def emitter(L):
+    return {"type": "emitter", "radiance": _c3(L)}
+
+
+def mirror(c=1.0):
+    return {"type": "mirror", "color": _c3(c)}
+
+
+def glass(ior=1.5, roughness=0.0):
+    return {"type": "glass", "ior": ior, "roughness": roughness}
+
+
+def metal(roughness):
+    return {"type": "metal", "roughness": roughness}
+
+
+def _c3(c):
+    return [float(c)] * 3 if np.isscalar(c) else [float(x) for x in c]
+
+
+def quad(p0, p1, p2, p3, mat, name=""):
+    return Obj("quad", mat, corners=(p0, p1, p2, p3), name=name)
+
+
+def sphere(c, r, mat, name=""):
+    return Obj("sphere", mat, center=c, radius=r, name=name)
+
+
+# ─────────────────────────────── sahneler ───────────────────────────────
+
+def _cornell(spheres, title, name, notes):
+    W = (0.73, 0.73, 0.73)
+    R = (0.63, 0.065, 0.05)
+    G = (0.14, 0.45, 0.091)
+    # Kutu [-1,1]×[0,2]×[-1,1], kamera +z'den bakar, ön yüz açık.
+    # Işık tavan düzleminde, deliği tam doldurur. Photon'da Lambert ışıması çift yüzlüdür; ışık
+    # tavanın biraz altında olsaydı arka yüzü deliğin kenarındaki tavanı sıyırarak aydınlatır ve
+    # sahneye ~%0.2 fazladan ışık katardı (Mitsuba'da ışık tek yüzlü). Düzlemdeyken arka yüz boşluğa bakar.
+    a, h = 0.25, 2.0  # ışık deliğinin yarı genişliği, ışığın yüksekliği
+    objs = [
+        quad((-1, 0, 1), (1, 0, 1), (1, 0, -1), (-1, 0, -1), diffuse(W), "zemin"),
+        quad((-1, 0, -1), (1, 0, -1), (1, 2, -1), (-1, 2, -1), diffuse(W), "arka"),
+        quad((-1, 0, 1), (-1, 0, -1), (-1, 2, -1), (-1, 2, 1), diffuse(R), "sol"),
+        quad((1, 0, -1), (1, 0, 1), (1, 2, 1), (1, 2, -1), diffuse(G), "sağ"),
+        # Tavan, ortasında ışık için kare delikle dört parça (aşağı bakar).
+        quad((-1, 2, -1), (1, 2, -1), (1, 2, -a), (-1, 2, -a), diffuse(W), "tavan1"),
+        quad((-1, 2, a), (1, 2, a), (1, 2, 1), (-1, 2, 1), diffuse(W), "tavan2"),
+        quad((-1, 2, -a), (-a, 2, -a), (-a, 2, a), (-1, 2, a), diffuse(W), "tavan3"),
+        quad((a, 2, -a), (1, 2, -a), (1, 2, a), (a, 2, a), diffuse(W), "tavan4"),
+        quad((-a, h, -a), (a, h, -a), (a, h, a), (-a, h, a), emitter((17.0, 12.0, 4.0)), "ışık"),
+    ]
+    objs += spheres
+    return Scene(name, title, eye=(0, 1, 3.9), target=(0, 1, 0), fov=39.3, objects=objs,
+                 res=(256, 256), notes=notes)
+
+
+def scenes():
+    out = []
+    out.append(_cornell(
+        [sphere((-0.45, 0.4, -0.3), 0.4, diffuse(0.73)), sphere((0.45, 0.4, 0.3), 0.4, diffuse(0.73))],
+        "Cornell kutusu, difüz", "cornell_diffuse",
+        "Çok sekmeli difüz global aydınlatma, alan ışığı NEE + MIS, renk taşması."))
+    out.append(_cornell(
+        [sphere((-0.45, 0.4, -0.3), 0.4, mirror(1.0)), sphere((0.45, 0.4, 0.3), 0.4, glass(1.5, 0.0))],
+        "Cornell kutusu, ayna + cam (kostik)", "cornell_specular",
+        "Delta loblar, cam kırılması ve camın altındaki kostik (yalnız BSDF örneklemesiyle bulunur)."))
+
+    floor = 4.0
+    objs = [quad((-floor, 0, floor), (floor, 0, floor), (floor, 0, -floor), (-floor, 0, -floor), diffuse(0.5), "zemin")]
+    xs = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5]
+    mats = [diffuse((0.8, 0.8, 0.8)), metal(0.15), metal(0.5), mirror(1.0), glass(1.5, 0.0), glass(1.5, 0.3)]
+    names = ["difüz", "metal r=0.15", "metal r=0.5", "ayna", "cam", "buzlu cam r=0.3"]
+    for x, m, n in zip(xs, mats, names):
+        objs.append(sphere((x, 0.45, 0.0), 0.45, m, n))
+    out.append(Scene("hdri_materials", "HDRI stüdyo, malzeme sırası", eye=(0, 2.2, 6.2), target=(0, 0.45, 0),
+                     fov=32.0, objects=objs, env={"hdr": "assets/environments/studio_small_09_1k.hdr"},
+                     res=(384, 192),
+                     notes="HDRI önem örneklemesi ve eşleme, GGX iletken (Kulla–Conty farkı beklenir), "
+                           "pürüzsüz ve pürüzlü cam, zemine düşen yumuşak gölgeler."))
+    return out
+
+
+# ─────────────────────────────── geometri ───────────────────────────────
+
+def quad_mesh(corners):
+    p = np.array(corners, dtype=np.float64)
+    n = np.cross(p[1] - p[0], p[3] - p[0])
+    n /= np.linalg.norm(n)
+    normals = np.tile(n, (4, 1))
+    uv = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=np.float64)
+    idx = np.array([0, 1, 2, 0, 2, 3], dtype=np.int64)
+    return p, normals, uv, idx
+
+
+def write_ply(path, p, n, uv, idx):
+    with open(path, "w") as f:
+        f.write("ply\nformat ascii 1.0\n")
+        f.write(f"element vertex {len(p)}\n")
+        f.write("property float x\nproperty float y\nproperty float z\n")
+        f.write("property float nx\nproperty float ny\nproperty float nz\n")
+        f.write("property float u\nproperty float v\n")
+        f.write(f"element face {len(idx) // 3}\nproperty list uchar int vertex_indices\nend_header\n")
+        for i in range(len(p)):
+            f.write(" ".join(f"{x:.9g}" for x in (*p[i], *n[i], *uv[i])) + "\n")
+        for t in range(len(idx) // 3):
+            f.write(f"3 {idx[3*t]} {idx[3*t+1]} {idx[3*t+2]}\n")
+
+
+# ─────────────────────────────── HDRI ───────────────────────────────
+
+def load_hdr_stb(path):
+    """Radiance RGBE'yi stb_image ile aynı kuralla çözer: değer = m · 2^(e − 136).
+
+    PhotonEngine HDR'yi stb_image ile okur; Mitsuba'nın kendi çözücüsü (+0.5 yuvarlama gibi)
+    küçük farklar verebileceği için iki motora da bu çözümden yazılmış aynı float EXR verilir.
+    """
+    with open(path, "rb") as f:
+        data = f.read()
+    pos = 0
+    while True:  # başlık satırları, boş satıra kadar
+        end = data.index(b"\n", pos)
+        line = data[pos:end]
+        pos = end + 1
+        if line.strip() == b"":
+            break
+    end = data.index(b"\n", pos)
+    res = data[pos:end].split()
+    pos = end + 1
+    assert res[0] == b"-Y" and res[2] == b"+X", res
+    H, W = int(res[1]), int(res[3])
+    out = np.zeros((H, W, 4), dtype=np.uint8)
+    buf = memoryview(data)
+    for y in range(H):
+        if buf[pos] == 2 and buf[pos + 1] == 2 and (buf[pos + 2] << 8 | buf[pos + 3]) == W:
+            pos += 4
+            for c in range(4):
+                x = 0
+                while x < W:
+                    cnt = buf[pos]
+                    pos += 1
+                    if cnt > 128:
+                        cnt -= 128
+                        out[y, x:x + cnt, c] = buf[pos]
+                        pos += 1
+                    else:
+                        out[y, x:x + cnt, c] = np.frombuffer(buf[pos:pos + cnt], dtype=np.uint8)
+                        pos += cnt
+                    x += cnt
+        else:  # düz (RLE'siz) satır
+            out[y] = np.frombuffer(buf[pos:pos + 4 * W], dtype=np.uint8).reshape(W, 4)
+            pos += 4 * W
+    e = out[..., 3].astype(np.int32)
+    scale = np.where(e == 0, 0.0, np.ldexp(1.0, e - 136))
+    rgb = out[..., :3].astype(np.float64) * scale[..., None]
+    return rgb.astype(np.float32)
+
+
+def write_exr(path, rgb):
+    import OpenEXR
+    rgb = np.ascontiguousarray(rgb.astype(np.float32))
+    header = {"compression": OpenEXR.ZIP_COMPRESSION, "type": OpenEXR.scanlineimage}
+    with OpenEXR.File(header, {"RGB": rgb}) as f:
+        f.write(path)
+
+
+def read_exr(path):
+    import OpenEXR
+    with OpenEXR.File(path) as f:
+        ch = f.channels()
+        if "RGB" in ch:
+            a = np.asarray(ch["RGB"].pixels, dtype=np.float64)
+        elif "RGBA" in ch:
+            a = np.asarray(ch["RGBA"].pixels, dtype=np.float64)
+        else:
+            a = np.stack([np.asarray(ch[c].pixels, dtype=np.float64) for c in ("R", "G", "B")], axis=-1)
+    return a[..., :3]
+
+
+# ─────────────────────────────── dışa aktarıcılar ───────────────────────────────
+
+def _identity_xf(t=(0, 0, 0)):
+    return [1, 0, 0, t[0], 0, 1, 0, t[1], 0, 0, 1, t[2], 0, 0, 0, 1]
+
+
+def _photon_material(m):
+    t = m["type"]
+    if t == "diffuse":
+        return {"type": "lambert", "albedo": m["albedo"], "emission": [0, 0, 0]}
+    if t == "emitter":
+        return {"type": "lambert", "albedo": [0, 0, 0], "emission": m["radiance"]}
+    if t == "mirror":
+        return {"type": "mirror", "color": m["color"]}
+    if t == "glass":
+        return {"type": "glass", "ior": m["ior"], "tint": [1, 1, 1], "roughness": m["roughness"]}
+    if t == "metal":
+        return {"type": "disney", "baseColor": [1, 1, 1], "metallic": 1.0, "roughness": m["roughness"],
+                "specular": 0.5, "clearCoat": 0.0, "clearCoatRoughness": 0.03, "anisotropy": 0.0,
+                "sheen": 0.0, "diffuseTransmission": 0.0, "emission": [0, 0, 0]}
+    raise ValueError(t)
+
+
+def to_photon(scene: Scene, outdir: str, env_exr: str | None) -> str:
+    mats, nodes = [], []
+    for o in scene.objects:
+        mats.append(_photon_material(o.mat))
+        mi = len(mats) - 1
+        if o.shape == "sphere":
+            nodes.append({"type": "sphere", "name": o.name or "sphere", "visible": True, "material": mi,
+                          "radius": o.radius, "xf": _identity_xf(o.center)})
+        else:
+            p, n, uv, idx = quad_mesh(o.corners)
+            nodes.append({"type": "mesh", "name": o.name or "quad", "visible": True, "material": mi,
+                          "xf": _identity_xf(), "geometry": {"p": p.ravel().tolist(), "n": n.ravel().tolist(),
+                                                             "uv": uv.ravel().tolist(), "i": idx.tolist()}})
+    e = np.array(scene.eye, dtype=np.float64)
+    t = np.array(scene.target, dtype=np.float64)
+    d = e - t
+    r = float(np.linalg.norm(d))
+    cam = {"target": t.tolist(), "radius": r, "theta": math.acos(d[1] / r), "phi": math.atan2(d[2], d[0]),
+           "fov": scene.fov, "aperture": 0.0, "orthographic": False}
+    if env_exr:
+        env = {"hdr": os.path.relpath(env_exr, outdir), "rotation": 0.0, "intensity": 1.0,
+               "background": {"mode": "environment", "color": [0, 0, 0]},
+               "ground": {"enabled": False, "color": [0, 0, 0], "roughness": 1.0, "shadowCatcher": False}}
+    else:
+        env = {"hdr": "", "zenith": [0, 0, 0], "horizon": [0, 0, 0], "rotation": 0.0, "intensity": 0.0,
+               "background": {"mode": "color", "color": [0, 0, 0]},
+               "ground": {"enabled": False, "color": [0, 0, 0], "roughness": 1.0, "shadowCatcher": False}}
+    proj = {"format": "photon-project", "version": 2, "camera": cam, "environment": env, "lights": [],
+            "materials": mats, "nodes": nodes,
+            "render": {"denoise": False, "exposure": 0.0, "maxBounces": 64, "toneMap": 0, "pixelFilter": "box",
+                       "filterWidth": 1.0}}
+    path = os.path.join(outdir, scene.name + ".photon")
+    with open(path, "w") as f:
+        json.dump(proj, f, indent=1, ensure_ascii=False)
+    return path
+
+
+def _mitsuba_bsdf(m):
+    t = m["type"]
+    if t == "diffuse":
+        return {"type": "diffuse", "reflectance": {"type": "rgb", "value": m["albedo"]}}
+    if t == "emitter":
+        return {"type": "diffuse", "reflectance": {"type": "rgb", "value": [0, 0, 0]}}
+    if t == "mirror":
+        return {"type": "conductor", "material": "none", "specular_reflectance": {"type": "rgb", "value": m["color"]}}
+    if t == "glass":
+        if m["roughness"] <= 1e-3:
+            return {"type": "dielectric", "int_ior": m["ior"], "ext_ior": 1.0}
+        return {"type": "roughdielectric", "distribution": "ggx", "alpha": m["roughness"] ** 2,
+                "int_ior": m["ior"], "ext_ior": 1.0}
+    if t == "metal":
+        return {"type": "roughconductor", "distribution": "ggx", "alpha": m["roughness"] ** 2, "material": "none"}
+    raise ValueError(t)
+
+
+def to_mitsuba(scene: Scene, outdir: str, env_exr_mitsuba: str | None, spp: int, max_depth: int = 65) -> dict:
+    W, H = scene.res
+    d = {"type": "scene",
+         "integrator": {"type": "path", "max_depth": max_depth, "rr_depth": 5},
+         "sensor": {"type": "perspective", "fov": scene.fov, "fov_axis": "y",
+                    "to_world": _mi_look_at(scene.eye, scene.target),
+                    "sampler": {"type": "independent", "sample_count": spp},
+                    "film": {"type": "hdrfilm", "width": W, "height": H, "pixel_format": "rgb",
+                             "rfilter": {"type": "box"}}}}
+    for k, o in enumerate(scene.objects):
+        if o.shape == "sphere":
+            s = {"type": "sphere", "center": list(o.center), "radius": o.radius}
+        else:
+            ply = os.path.join(outdir, f"{scene.name}_{k}.ply")
+            write_ply(ply, *quad_mesh(o.corners))
+            s = {"type": "ply", "filename": ply, "face_normals": False}
+        s["bsdf"] = _mitsuba_bsdf(o.mat)
+        if o.mat["type"] == "emitter":
+            s["emitter"] = {"type": "area", "radiance": {"type": "rgb", "value": o.mat["radiance"]}}
+        d[f"obj{k}"] = s
+    if env_exr_mitsuba:
+        d["env"] = {"type": "envmap", "filename": env_exr_mitsuba, "scale": 1.0}
+    return d
+
+
+def _mi_look_at(eye, target):
+    import mitsuba as mi
+    return mi.ScalarTransform4f().look_at(origin=list(eye), target=list(target), up=[0, 1, 0])
+
+
+def resample_for_mitsuba(img, factor=4):
+    """Photon'un piksel-merkezli çift doğrusal ortam fonksiyonunu Mitsuba'nın köşe (texel = ızgara
+    noktası) kuralına örnekler.
+
+    Mitsuba 3 envmap'i texel'leri ızgara noktası sayar: u = i / W (sarma için ek sütun), v = j / (H − 1).
+    Photon (ve çoğu motor) piksel merkezi kullanır: u = (i + ½) / W, v = (j + ½) / H. Aynı görüntü iki
+    kuralda dikeyde H / (H − 1) kadar gerilir; 512 satırlık bir HDRI'da ortamın toplam gücü Mitsuba'da
+    ≈ %0.2 fazla çıkar. Bu fonksiyon Photon'un sürekli fonksiyonunu @p factor kat yoğun ızgarada
+    Mitsuba'nın ızgara noktalarında değerlendirir; kalan fark ~1 / (factor · H) mertebesindedir.
+    """
+    H, W, _ = img.shape
+    Hm, Wm = H * factor, W * factor
+    i = np.arange(Wm)
+    j = np.arange(Hm)
+    u_m = i / Wm
+    v = j / (Hm - 1)
+    u_p = (0.75 - u_m) % 1.0
+    x = u_p * W - 0.5
+    y = v * H - 0.5
+    x0 = np.floor(x).astype(np.int64)
+    y0 = np.floor(y).astype(np.int64)
+    fx = (x - x0)[None, :, None]
+    fy = (y - y0)[:, None, None]
+    xa, xb = x0 % W, (x0 + 1) % W
+    ya, yb = np.clip(y0, 0, H - 1), np.clip(y0 + 1, 0, H - 1)
+    img = img.astype(np.float64)
+    c0 = img[ya][:, xa] * (1 - fx) + img[ya][:, xb] * fx
+    c1 = img[yb][:, xa] * (1 - fx) + img[yb][:, xb] * fx
+    return (c0 * (1 - fy) + c1 * fy).astype(np.float32)

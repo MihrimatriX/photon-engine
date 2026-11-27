@@ -135,3 +135,68 @@ TEST(SobolSampler, ConvergesFasterThanIndependent) {
     double eIndep = rmse(indep);
     EXPECT_LT(eSobol, 0.25 * eIndep) << "sobol " << eSobol << " independent " << eIndep;
 }
+
+// Hızlı uygulama (bayt tablolu Sobol boyut 1, sadeleştirilmiş ters çevirmeler, y'siz get1D)
+// Burley 2020'nin tanımıyla bit bit aynı olmalı: altın görüntüler ve determinizm buna dayanır.
+namespace {
+uint32_t refReverse(uint32_t x) {
+    x = ((x >> 1) & 0x55555555u) | ((x & 0x55555555u) << 1);
+    x = ((x >> 2) & 0x33333333u) | ((x & 0x33333333u) << 2);
+    x = ((x >> 4) & 0x0F0F0F0Fu) | ((x & 0x0F0F0F0Fu) << 4);
+    x = ((x >> 8) & 0x00FF00FFu) | ((x & 0x00FF00FFu) << 8);
+    return (x >> 16) | (x << 16);
+}
+uint32_t refSobol1(uint32_t index) {
+    uint32_t r = 0;
+    for (uint32_t v = 0x80000000u; index != 0; index >>= 1, v ^= v >> 1)
+        if (index & 1u) r ^= v;
+    return r;
+}
+uint32_t refLK(uint32_t x, uint32_t seed) {
+    x += seed;
+    x ^= x * 0x6c50b47cu;
+    x ^= x * 0xb82f1e52u;
+    x ^= x * 0xc7afe638u;
+    x ^= x * 0x8d22f6e6u;
+    return x;
+}
+uint32_t refNUS(uint32_t x, uint32_t seed) { return refReverse(refLK(refReverse(x), seed)); }
+uint32_t refMix(uint32_t x) {
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    return x;
+}
+uint32_t refHash(uint32_t h, uint32_t v) { return refMix(h ^ (v + 0x9e3779b9u + (h << 6) + (h >> 2))); }
+float refUnit(uint32_t x) { return static_cast<float>(x >> 8) * 0x1p-24f; }
+} // namespace
+
+TEST(SobolSampler, MatchesReferenceDefinitionBitExact) {
+    const uint64_t seed = 0x1234567890abcdefull;
+    SobolSampler s(seed);
+    RNG rng(77);
+    for (int t = 0; t < 2000; ++t) {
+        const int px = static_cast<int>(rng.uniformUint32() % 4096), py = static_cast<int>(rng.uniformUint32() % 4096);
+        const int idx = t < 64 ? t : static_cast<int>(rng.uniformUint32() & 0x7fffffffu);
+        s.startPixel(px, py);
+        s.startSample(idx);
+        uint32_t h = refMix(static_cast<uint32_t>(seed) ^ refMix(static_cast<uint32_t>(seed >> 32)));
+        h = refHash(h, static_cast<uint32_t>(px));
+        const uint32_t pixelHash = refHash(h, static_cast<uint32_t>(py));
+        for (uint32_t dim = 0; dim < 12; ++dim) {
+            const uint32_t sd = refHash(pixelHash, dim);
+            const uint32_t index = refNUS(static_cast<uint32_t>(idx), sd);
+            const float ex = refUnit(refNUS(refReverse(index), refHash(sd, 0u)));
+            const float ey = refUnit(refNUS(refSobol1(index), refHash(sd, 1u)));
+            if (dim % 3 == 2) {
+                ASSERT_EQ(s.get1D(), ex) << t << " " << dim;
+            } else {
+                const Vec2f v = s.get2D();
+                ASSERT_EQ(v.x, ex) << t << " " << dim;
+                ASSERT_EQ(v.y, ey) << t << " " << dim;
+            }
+        }
+    }
+}

@@ -132,6 +132,11 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - **M4 — GPU Engine v2:** Vulkan SDK derleme bağımlılığı olmadan dinamik yükleyicili (`vulkan_abi.h`) Vulkan 1.1 Compute SAH BVH2 + 4 aşamalı Wavefront + `VK_KHR_ray_query` Donanım RT shader'ları (önceden derlenmiş SPIR-V başlıkları repoda), eşzamanlı `HybridDevice` (GPU+CPU) ve artımlı `updateScene(Materials|Lights|Transforms)` + FNV-1a BLAS önbelleği.
   - **M5 — Gerçek Zamanlı OpenGL 3.3 Viewport v2:** Heitz 2016 64×64 LTC dikdörtgen alan ışıkları (`ltc_lut.*`), Spot IES 1D dokulu atlas, Jimenez 2016 GTAO + çift yanlı bulanıklaştırma, 5 seviyeli Hi-Z SSR, 5 seviyeli Jimenez/Karis HDR Bloom ve CPU ile birebir GPU Imager + 64³ ToneLut kompoziti.
   - **M6 — Stüdyo UX & v0.5.0:** `Ctrl+K` Türkçe bulanık aramalı Komut Paleti (40+ eylem), canlı viewport performans HUD'u (`Vulkan RT/WF/Compute` / `Hibrit` / `CPU`, M örnek/sn, VRAM, bayraklar), Özellikler ve Render panellerinde OpenPBR, ışın görünürlüğü, ışık/gölge bağlama, ışık grubu, Motion Blur, Path Guiding ve GPU modu denetimleri. Sürüm `0.5.0`.
+- **2026-11-27 (oturum 11, bulut, yol haritası Adım 1 "kalite kanıtı", dal `claude/project-thread-zlqmmf`):**
+  - Kullanıcı hedefi: KeyShot/Octane/V-Ray'i geçen, en yeni standartları destekleyen, kullanımı kolay motor; ticarileşme sonra. 4 adımlı plan onaylandı: 1) kalite kanıtı → 2) standartlar (OpenUSD, MaterialX/OpenPBR, OCIO/ACES 2, glTF, OpenVDB, Hydra) → 3) donanım yükseltmesi sonrası GPU (Vulkan RT ana yol, ReSTIR DI, GPU OIDN, OptiX isteğe bağlı) → 4) kullanım kolaylığı + CAD (STEP/IGES, 3DM).
+  - `bench/reference/`: Mitsuba 3 ve Cycles ile aynı sahne karşılaştırması, `REPORT.md`. Photon yansız (Cornell difüz/kostik oran 0.9999/1.0000, gürültü tabanında); pürüzlü metal Mitsuba'dan %12 parlak (Kulla–Conty), Cycles çoklu saçılmalı GGX ile %0.3. Cycles'a göre eşit sürede 1.2–2.2× daha temiz.
+  - Hızlandırma: Sobol örnekleyici bit bit aynı hızlı sürüm (profilde %28 → %11), Lambert, satır içi `getPixel`, yoğunluğu 0 ortam sahneye girmez → 4 iş parçacığında +%17–37.
+  - F2.8 altın görüntüler Mitsuba referanslı. Linux için `scripts/fetch_deps.sh` (Embree + OIDN). Görev listesi M1–M6'ya göre işaretlendi; yeni maddeler F2.16–F2.18.
 - **Sıradaki adımlar:**
   - Gerçek 3ds Max / Maya / Blender ile canlı bağlantı ve doğrudan açma denemesi (bu ortamda yok); Windows'ta `CreateProcessW` yolu.
   - Gerçek zamanlı mod: TAA (zamansal kenar yumuşatma) ve GPU Katı modunda doku/ışık desteği.
@@ -139,7 +144,8 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - Pullar ve kutu eşleme dünya uzayında (nesne hareket edince kayar) → nesne uzayı.
   - Tutamaç sürüklenirken Esc ile iptal (şimdilik Ctrl+Z).
   - Kurulum paketi (Inno Setup, makinede yok), kod imzalama, log + çökme dökümü.
-  - F2.8 golden görüntüler; `v0.5.0` etiketi ile GitHub Release yayımlama.
+  - `v0.5.0` etiketi ile GitHub Release yayımlama.
+  - Yol haritası Adım 2 (standartlar): OpenUSD içe/dışa aktarma ile başla.
   - TODO(human) öğrenme maddeleri önceki oturumda kullanıcı isteğiyle tamamlandı; istenirse ilgili fonksiyonlar egzersiz olarak yeniden boşaltılabilir.
 
 ## Kaynaklar (CG/CGI pipeline)

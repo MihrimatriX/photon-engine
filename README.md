@@ -166,6 +166,7 @@ isteğe bağlıdır (yoksa motorun kendi BVH'si ve basit bulanıklık kullanıl�
 ```bash
 sudo apt install build-essential cmake ninja-build libgl-dev libx11-dev libxrandr-dev \
                  libxinerama-dev libxcursor-dev libxi-dev
+bash scripts/fetch_deps.sh   # isteğe bağlı: Embree 4 + OIDN 2 (Linux paketleri)
 cmake --preset fetch-release -DGLFW_BUILD_WAYLAND=OFF
 cmake --build --preset fetch-release
 ctest --preset fetch-release

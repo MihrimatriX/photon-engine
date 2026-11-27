@@ -1,0 +1,371 @@
+{
+ "format": "photon-project",
+ "version": 2,
+ "camera": {
+  "target": [
+   0.0,
+   0.45,
+   0.0
+  ],
+  "radius": 6.442243398071824,
+  "theta": 1.2956949511277134,
+  "phi": 1.5707963267948966,
+  "fov": 32.0,
+  "aperture": 0.0,
+  "orthographic": false
+ },
+ "environment": {
+  "hdr": "../../../assets/environments/studio_small_09_1k.hdr",
+  "rotation": 0.0,
+  "intensity": 1.0,
+  "background": {
+   "mode": "environment",
+   "color": [
+    0,
+    0,
+    0
+   ]
+  },
+  "ground": {
+   "enabled": false,
+   "color": [
+    0,
+    0,
+    0
+   ],
+   "roughness": 1.0,
+   "shadowCatcher": false
+  }
+ },
+ "lights": [],
+ "materials": [
+  {
+   "type": "lambert",
+   "albedo": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "emission": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "lambert",
+   "albedo": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "emission": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    1,
+    1,
+    1
+   ],
+   "metallic": 1.0,
+   "roughness": 0.15,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "disney",
+   "baseColor": [
+    1,
+    1,
+    1
+   ],
+   "metallic": 1.0,
+   "roughness": 0.5,
+   "specular": 0.5,
+   "clearCoat": 0.0,
+   "clearCoatRoughness": 0.03,
+   "anisotropy": 0.0,
+   "sheen": 0.0,
+   "diffuseTransmission": 0.0,
+   "emission": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "type": "mirror",
+   "color": [
+    1.0,
+    1.0,
+    1.0
+   ]
+  },
+  {
+   "type": "glass",
+   "ior": 1.5,
+   "tint": [
+    1,
+    1,
+    1
+   ],
+   "roughness": 0.0
+  },
+  {
+   "type": "glass",
+   "ior": 1.5,
+   "tint": [
+    1,
+    1,
+    1
+   ],
+   "roughness": 0.3
+  }
+ ],
+ "nodes": [
+  {
+   "type": "mesh",
+   "name": "zemin",
+   "visible": true,
+   "material": 0,
+   "xf": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1
+   ],
+   "geometry": {
+    "p": [
+     -4.0,
+     0.0,
+     4.0,
+     4.0,
+     0.0,
+     4.0,
+     4.0,
+     0.0,
+     -4.0,
+     -4.0,
+     0.0,
+     -4.0
+    ],
+    "n": [
+     -0.0,
+     1.0,
+     0.0,
+     -0.0,
+     1.0,
+     0.0,
+     -0.0,
+     1.0,
+     0.0,
+     -0.0,
+     1.0,
+     0.0
+    ],
+    "uv": [
+     0.0,
+     0.0,
+     1.0,
+     0.0,
+     1.0,
+     1.0,
+     0.0,
+     1.0
+    ],
+    "i": [
+     0,
+     1,
+     2,
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "type": "sphere",
+   "name": "difüz",
+   "visible": true,
+   "material": 1,
+   "radius": 0.45,
+   "xf": [
+    1,
+    0,
+    0,
+    -2.5,
+    0,
+    1,
+    0,
+    0.45,
+    0,
+    0,
+    1,
+    0.0,
+    0,
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "type": "sphere",
+   "name": "metal r=0.15",
+   "visible": true,
+   "material": 2,
+   "radius": 0.45,
+   "xf": [
+    1,
+    0,
+    0,
+    -1.5,
+    0,
+    1,
+    0,
+    0.45,
+    0,
+    0,
+    1,
+    0.0,
+    0,
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "type": "sphere",
+   "name": "metal r=0.5",
+   "visible": true,
+   "material": 3,
+   "radius": 0.45,
+   "xf": [
+    1,
+    0,
+    0,
+    -0.5,
+    0,
+    1,
+    0,
+    0.45,
+    0,
+    0,
+    1,
+    0.0,
+    0,
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "type": "sphere",
+   "name": "ayna",
+   "visible": true,
+   "material": 4,
+   "radius": 0.45,
+   "xf": [
+    1,
+    0,
+    0,
+    0.5,
+    0,
+    1,
+    0,
+    0.45,
+    0,
+    0,
+    1,
+    0.0,
+    0,
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "type": "sphere",
+   "name": "cam",
+   "visible": true,
+   "material": 5,
+   "radius": 0.45,
+   "xf": [
+    1,
+    0,
+    0,
+    1.5,
+    0,
+    1,
+    0,
+    0.45,
+    0,
+    0,
+    1,
+    0.0,
+    0,
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "type": "sphere",
+   "name": "buzlu cam r=0.3",
+   "visible": true,
+   "material": 6,
+   "radius": 0.45,
+   "xf": [
+    1,
+    0,
+    0,
+    2.5,
+    0,
+    1,
+    0,
+    0.45,
+    0,
+    0,
+    1,
+    0.0,
+    0,
+    0,
+    0,
+    1
+   ]
+  }
+ ],
+ "render": {
+  "denoise": false,
+  "exposure": 0.0,
+  "maxBounces": 64,
+  "toneMap": 0,
+  "pixelFilter": "box",
+  "filterWidth": 1.0
+ }
+}
