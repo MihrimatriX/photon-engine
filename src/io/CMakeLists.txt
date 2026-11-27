@@ -1,4 +1,4 @@
-# src/io/CMakeLists.txt — photon_io: model dosyası yükleyicileri (OBJ, glTF).
+# src/io/CMakeLists.txt — photon_io: model dosyası yükleyicileri (OBJ, glTF, FBX, Alembic, USD).
 # Dış dosya biçimlerini motorun TriangleMesh + Material türlerine çevirir. tinyobjloader ve
 # cgltf tek başlıklı (single-header) kütüphanelerdir; uygulamaları yalnız bu hedefte derlenir.
 add_library(photon_io STATIC
@@ -30,4 +30,17 @@ if(PHOTON_ALEMBIC_FOUND)
         target_link_libraries(photon_io PRIVATE Alembic)
     endif()
     target_compile_definitions(photon_io PUBLIC PHOTON_HAS_ALEMBIC=1)
+endif()
+
+if(PHOTON_USD_FOUND)
+    target_sources(photon_io PRIVATE usd_loader.cpp)
+    target_link_libraries(photon_io PRIVATE usd_m)
+    target_compile_definitions(photon_io PUBLIC PHOTON_HAS_USD=1)
+    if(MSVC)
+        # USD başlıkları /W4'te çok sayıda uyarı verir; dosya düzeyinde kapatılır (başlıklar SYSTEM).
+        set_source_files_properties(usd_loader.cpp PROPERTIES COMPILE_OPTIONS "/wd4244;/wd4305;/wd4267;/wd4100;/wd4127")
+    else()
+        # TfHashSet eski <ext/hash_set> başlığını içerir (GCC "#warning" verir).
+        set_source_files_properties(usd_loader.cpp PROPERTIES COMPILE_OPTIONS "-Wno-deprecated")
+    endif()
 endif()

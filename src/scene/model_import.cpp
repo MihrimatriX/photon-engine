@@ -1,11 +1,12 @@
-// model_import.cpp — OBJ (tinyobjloader), glTF (cgltf), FBX (ufbx) ve Alembic yükleyicilerini
-// sahne ağacına bağlar.
+// model_import.cpp — OBJ (tinyobjloader), glTF (cgltf), FBX (ufbx), Alembic ve OpenUSD
+// yükleyicilerini sahne ağacına bağlar.
 #include "scene/model_import.h"
 #include "scene/dcc_convert.h"
 #include "io/alembic_loader.h"
 #include "io/fbx_loader.h"
 #include "io/gltf_loader.h"
 #include "io/obj_loader.h"
+#include "io/usd_loader.h"
 #include "materials/disney.h"
 #include "core/math/constants.h"
 #include "core/platform/path.h"
@@ -32,6 +33,16 @@ bool alembicAvailable() {
     return false;
 #endif
 }
+
+bool usdAvailable() {
+#ifdef PHOTON_HAS_USD
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool isUsdExtension(const std::string& e) { return e == ".usd" || e == ".usda" || e == ".usdc" || e == ".usdz"; }
 
 /// Hiyerarşik içe aktarma sonucunu sahne düğümlerine çevirir. Tek mesh'li ve çocuksuz düğüm
 /// tek bir mesh düğümüne katlanır (sahne panelinde "Gövde › Gövde" yerine yalnız "Gövde").
@@ -60,12 +71,14 @@ std::unique_ptr<SceneNode> toSceneNode(const ImportedNode& in, const ImportedMod
 bool isSupportedModelFile(const std::string& path) {
     const std::string e = lowerExtension(path);
     return e == ".obj" || e == ".gltf" || e == ".glb" || e == ".fbx" || (e == ".abc" && alembicAvailable()) ||
-           isDccNativeFile(path);
+           (isUsdExtension(e) && usdAvailable()) || isDccNativeFile(path);
 }
 
 std::string supportedModelPatterns() {
-    return alembicAvailable() ? "*.fbx;*.obj;*.gltf;*.glb;*.abc;*.max;*.ma;*.mb;*.blend"
-                              : "*.fbx;*.obj;*.gltf;*.glb;*.max;*.ma;*.mb;*.blend";
+    std::string p = "*.fbx;*.obj;*.gltf;*.glb";
+    if (usdAvailable()) p += ";*.usd;*.usda;*.usdc;*.usdz";
+    if (alembicAvailable()) p += ";*.abc";
+    return p + ";*.max;*.ma;*.mb;*.blend";
 }
 
 namespace {
@@ -73,6 +86,10 @@ namespace {
 /// Dosyanın dünya uzayındaki (kök düğümün ebeveyni) kamera ve ışıkları grubun yerel uzayına alır.
 void collectExtras(const ImportedModel& model, ImportExtras& out) {
     const Transform toLocal = model.root.local.inverse();
+    // Kökün dönüşümü birim ölçeği taşıyabilir (USD: metersPerUnit): boyutlar ve uzaklıklar da yerel
+    // birime çevrilir ki transformImportExtras geri çevirdiğinde metre çıksın.
+    const float s = (toLocal.transformVector(Vec3f(1, 0, 0)).length() + toLocal.transformVector(Vec3f(0, 1, 0)).length() +
+                     toLocal.transformVector(Vec3f(0, 0, 1)).length()) / 3.0f;
     for (const ImportedCamera& c : model.cameras) {
         CameraTrack t;
         t.name = c.name;
@@ -84,6 +101,8 @@ void collectExtras(const ImportedModel& model, ImportExtras& out) {
             key.eye = toLocal.transformPoint(k.eye);
             key.target = toLocal.transformPoint(k.target);
             key.fovDeg = k.fovDeg;
+            key.focusDistance = k.focusDistance * s;
+            key.fStop = k.fStop;
             t.keys.push_back(key);
         }
         if (!t.empty()) out.cameras.push_back(std::move(t));
@@ -93,6 +112,8 @@ void collectExtras(const ImportedModel& model, ImportExtras& out) {
         d.name = l.name;
         d.color = l.color;
         d.intensity = l.intensity;
+        // Nokta/spot yoğunluğu metre uzayında; transformImportExtras ölçeğin karesiyle çarpar, burada tersi.
+        if (l.type == ImportedLight::Type::Point || l.type == ImportedLight::Type::Spot) d.intensity *= s * s;
         d.visibleToCamera = false;
         const Vec3f pos = toLocal.transformPoint(l.position);
         const Vec3f aim = toLocal.transformPoint(l.position + l.direction * l.aimDistance);
@@ -112,8 +133,8 @@ void collectExtras(const ImportedModel& model, ImportExtras& out) {
                 d.type = LightDesc::Type::Area;
                 d.position = pos;
                 d.target = aim;
-                d.width = l.width;
-                d.height = l.height;
+                d.width = l.width * s;
+                d.height = l.height * s;
                 break;
             case ImportedLight::Type::Directional: {
                 d.type = LightDesc::Type::Directional;
@@ -125,6 +146,17 @@ void collectExtras(const ImportedModel& model, ImportExtras& out) {
             }
         }
         out.lights.push_back(std::move(d));
+    }
+    if (!model.environments.empty()) {
+        const ImportedEnvironment& e = model.environments.front();
+        EnvironmentDesc env;
+        env.kind = EnvironmentDesc::Kind::Image;
+        env.hdrPath = e.hdrPath;
+        env.intensity = e.intensity;
+        // Ortam dönüşü kökün ebeveyni uzayında; grubun yerel uzayına taşınır (bkz. transformImportExtras).
+        const Vec3f z = toLocal.transformVector(Vec3f(0, 0, 1));
+        env.rotationDeg = e.rotationDeg - std::atan2(z.x, z.z) * RAD_TO_DEG;
+        out.environment = env;
     }
 }
 
@@ -140,6 +172,12 @@ void transformImportExtras(ImportExtras& extras, const Transform& toWorld) {
             k.target = toWorld.transformPoint(k.target);
             k.focusDistance *= s;
         }
+    if (extras.environment) {
+        // Grup Y ekseni etrafında α kadar dönünce ortam da döner. Motorun eşdikdörtgen eşlemesinde
+        // (u = (atan2(−z, x) + π + dönüş)/2π) dünyada α dönüş, dönüş parametresinde −α demektir.
+        const Vec3f z = toWorld.transformVector(Vec3f(0, 0, 1));
+        extras.environment->rotationDeg -= std::atan2(z.x, z.z) * RAD_TO_DEG;
+    }
     for (LightDesc& d : extras.lights) {
         const Vec3f from = sphericalDirection(d.azimuthDeg, d.elevationDeg);
         d.position = toWorld.transformPoint(d.position);
@@ -184,11 +222,17 @@ std::unique_ptr<SceneNode> importModelFile(const std::string& path, std::string*
     const std::filesystem::path p = pathFromUtf8(path);
 
     std::unique_ptr<SceneNode> group;
-    if (ext == ".fbx" || ext == ".abc") {
+    if (ext == ".fbx" || ext == ".abc" || isUsdExtension(ext)) {
         ImportedModel model;
         std::string err;
         if (ext == ".fbx") {
             model = FbxLoader::load(path, &err);
+        } else if (isUsdExtension(ext)) {
+#ifdef PHOTON_HAS_USD
+            model = UsdLoader::load(path, &err, options.unitMeters);
+#else
+            err = "Bu sürüm OpenUSD desteği olmadan derlendi (" + ext + ").";
+#endif
         } else {
 #ifdef PHOTON_HAS_ALEMBIC
             model = AlembicLoader::load(path, &err, options.alembicTime, options.unitMeters);

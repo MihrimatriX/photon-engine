@@ -50,6 +50,7 @@ add_executable(photon_tests
     test_gpu_v2.cpp
     test_realtime_v2.cpp
     test_golden_reference.cpp
+    test_usd_import.cpp
     ${CMAKE_SOURCE_DIR}/src/app/live_link.cpp
 )
 
@@ -92,6 +93,7 @@ endif()
 target_compile_definitions(photon_tests PRIVATE PHOTON_ASSETS_DIR="${CMAKE_SOURCE_DIR}/assets"
                                                PHOTON_TEST_DATA="${CMAKE_SOURCE_DIR}/tests/data")
 
+photon_copy_usd_runtime(photon_tests)
 photon_copy_oidn_dlls(photon_tests)
 
 add_test(NAME photon_tests COMMAND photon_tests)

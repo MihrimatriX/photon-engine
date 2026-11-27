@@ -1,5 +1,6 @@
 // imported_model.cpp — Köşe birleştirme, sarma yönü düzeltme ve gömülü doku önbelleği.
 #include "io/imported_model.h"
+#include "core/image/image_io.h"
 #include "core/platform/path.h"
 
 #include <bit>
@@ -94,17 +95,55 @@ void setEmbeddedTextureCacheDir(const std::string& dir) {
     gCacheDir = dir;
 }
 
+namespace {
+
+std::filesystem::path textureCacheDir() {
+    std::lock_guard<std::mutex> lk(gCacheMutex);
+    return gCacheDir.empty() ? userDataDir() / "textures" : pathFromUtf8(gCacheDir);
+}
+
+} // namespace
+
+std::string derivedTexturePath(const std::string& key, const char* ext) {
+    namespace fs = std::filesystem;
+    const fs::path dir = textureCacheDir();
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (!fs::is_directory(dir, ec)) return {};
+    char name[32];
+    std::snprintf(name, sizeof(name), "%016llx",
+                  static_cast<unsigned long long>(fnv1a64(reinterpret_cast<const unsigned char*>(key.data()), key.size())));
+    return pathToUtf8(dir / (std::string("der_") + name + ext));
+}
+
+std::string cacheDerivedImage(const Image& image, const std::string& key) {
+    if (image.width() <= 0 || image.height() <= 0) return {};
+    namespace fs = std::filesystem;
+    const std::string path = derivedTexturePath(key, ".exr");
+    if (path.empty()) return {};
+    const fs::path file = pathFromUtf8(path);
+    std::error_code ec;
+    if (fs::exists(file, ec) && fs::file_size(file, ec) > 0) return pathToUtf8(file);
+    const fs::path tmp = fs::path(file).concat(".tmp.exr");
+    if (!saveImageEXR(image, pathToUtf8(tmp))) {
+        fs::remove(tmp, ec);
+        return {};
+    }
+    fs::rename(tmp, file, ec);
+    if (ec) {
+        fs::remove(tmp, ec);
+        return fs::exists(file) ? pathToUtf8(file) : std::string();
+    }
+    return pathToUtf8(file);
+}
+
 std::string cacheEmbeddedTexture(const void* data, size_t size) {
     if (!data || size == 0) return {};
     const auto* bytes = static_cast<const unsigned char*>(data);
     const char* ext = sniffImageExtension(bytes, size);
     if (!ext) return {};
     namespace fs = std::filesystem;
-    fs::path dir;
-    {
-        std::lock_guard<std::mutex> lk(gCacheMutex);
-        dir = gCacheDir.empty() ? userDataDir() / "textures" : pathFromUtf8(gCacheDir);
-    }
+    const fs::path dir = textureCacheDir();
     std::error_code ec;
     fs::create_directories(dir, ec);
     char name[32];

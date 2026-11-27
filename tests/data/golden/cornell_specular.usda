@@ -1,0 +1,331 @@
+#usda 1.0
+(
+    doc = "PhotonEngine referans sahnesi cornell_specular (bench/reference/refscenes.py, to_usd)"
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "World"
+{
+    def Scope "Looks"
+    {
+        def Material "M0"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M0/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.73, 0.73, 0.73)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M1"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M1/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.73, 0.73, 0.73)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M2"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M2/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.63, 0.065, 0.05)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M3"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M3/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.14, 0.45, 0.091)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M4"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M4/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.73, 0.73, 0.73)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M5"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M5/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.73, 0.73, 0.73)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M6"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M6/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.73, 0.73, 0.73)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M7"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M7/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                color3f inputs:base_color = (0.73, 0.73, 0.73)
+                float inputs:base_weight = 1
+                token outputs:out
+            }
+        }
+        def Material "M8"
+        {
+            token outputs:mtlx:surface.connect = </World/Looks/M8/Surface.outputs:out>
+            def Shader "Surface"
+            {
+                uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+                float inputs:specular_weight = 0
+                float inputs:base_weight = 0
+                float inputs:emission_luminance = 17
+                color3f inputs:emission_color = (1, 0.705882353, 0.235294118)
+                token outputs:out
+            }
+        }
+        def Material "M9"
+        {
+            token outputs:surface.connect = </World/Looks/M9/Surface.outputs:surface>
+            def Shader "Surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (1, 1, 1)
+                float inputs:metallic = 1
+                float inputs:roughness = 0
+                token outputs:surface
+            }
+        }
+        def Material "M10"
+        {
+            token outputs:surface.connect = </World/Looks/M10/Surface.outputs:surface>
+            def Shader "Surface"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (1, 1, 1)
+                float inputs:opacity = 0
+                float inputs:ior = 1.5
+                float inputs:roughness = 0
+                token outputs:surface
+            }
+        }
+    }
+
+    def Mesh "O0" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "zemin"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-1, 0, 1), (1, 0, 1), (1, 0, -1), (-1, 0, -1)]
+        normal3f[] normals = [(-0, 1, 0), (-0, 1, 0), (-0, 1, 0), (-0, 1, 0)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M0>
+    }
+    def Mesh "O1" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "arka"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-1, 0, -1), (1, 0, -1), (1, 2, -1), (-1, 2, -1)]
+        normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M1>
+    }
+    def Mesh "O2" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "sol"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-1, 0, 1), (-1, 0, -1), (-1, 2, -1), (-1, 2, 1)]
+        normal3f[] normals = [(1, -0, 0), (1, -0, 0), (1, -0, 0), (1, -0, 0)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M2>
+    }
+    def Mesh "O3" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "sağ"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(1, 0, -1), (1, 0, 1), (1, 2, 1), (1, 2, -1)]
+        normal3f[] normals = [(-1, 0, 0), (-1, 0, 0), (-1, 0, 0), (-1, 0, 0)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M3>
+    }
+    def Mesh "O4" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "tavan1"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-1, 2, -1), (1, 2, -1), (1, 2, -0.25), (-1, 2, -0.25)]
+        normal3f[] normals = [(0, -1, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M4>
+    }
+    def Mesh "O5" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "tavan2"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-1, 2, 0.25), (1, 2, 0.25), (1, 2, 1), (-1, 2, 1)]
+        normal3f[] normals = [(0, -1, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M5>
+    }
+    def Mesh "O6" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "tavan3"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-1, 2, -0.25), (-0.25, 2, -0.25), (-0.25, 2, 0.25), (-1, 2, 0.25)]
+        normal3f[] normals = [(0, -1, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M6>
+    }
+    def Mesh "O7" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "tavan4"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(0.25, 2, -0.25), (1, 2, -0.25), (1, 2, 0.25), (0.25, 2, 0.25)]
+        normal3f[] normals = [(0, -1, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M7>
+    }
+    def Mesh "O8" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "ışık"
+    )
+    {
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+        point3f[] points = [(-0.25, 2, -0.25), (0.25, 2, -0.25), (0.25, 2, 0.25), (-0.25, 2, 0.25)]
+        normal3f[] normals = [(0, -1, 0), (0, -1, 0), (0, -1, 0), (0, -1, 0)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 1), (1, 1), (1, 0), (0, 0)] (
+            interpolation = "vertex"
+        )
+        uniform token subdivisionScheme = "none"
+        rel material:binding = </World/Looks/M8>
+    }
+    def Sphere "O9" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "sphere"
+    )
+    {
+        double radius = 0.4
+        double3 xformOp:translate = (-0.45, 0.4, -0.3)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        rel material:binding = </World/Looks/M9>
+    }
+    def Sphere "O10" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+        doc = "sphere"
+    )
+    {
+        double radius = 0.4
+        double3 xformOp:translate = (0.45, 0.4, 0.3)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        rel material:binding = </World/Looks/M10>
+    }
+    def Camera "Camera"
+    {
+        float focalLength = 33.6070814
+        float verticalAperture = 24
+        float horizontalAperture = 24
+        float2 clippingRange = (0.01, 1000)
+        matrix4d xformOp:transform = ((1, -0, 0, 0), (0, 1, 0, 0), (-0, -0, 1, 0), (0, 1, 3.9, 1))
+        uniform token[] xformOpOrder = ["xformOp:transform"]
+    }
+}

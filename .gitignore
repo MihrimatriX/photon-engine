@@ -68,6 +68,9 @@ third_party_dl/
 # OIDN / Embree prebuilt packages (scripts/fetch_deps.ps1)
 third_party/oidn/
 third_party/embree/
+# OpenUSD + oneTBB (scripts/build_usd.ps1 / build_usd.sh)
+third_party/usd
+third_party/tbb
 
 # Paket çıktısı (scripts/package.ps1)
 dist/

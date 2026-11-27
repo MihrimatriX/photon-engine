@@ -5,6 +5,7 @@
 
 Her referans sahnesinin küçük çözünürlüklü kopyası (en uzun kenar 64–96 piksel) için:
   <sahne>.photon        PhotonEngine projesi (HDRI, depodaki assets/ dosyasını göreli yolla gösterir)
+  <sahne>.usda          aynı sahne OpenUSD olarak (içe aktarıcının render eşitliği testi)
   <sahne>_mitsuba.exr   Mitsuba 3 (llvm_ad_rgb, path, kutu filtre) çok yüksek örnekli render
 tests/test_golden_reference.cpp bu dosyaları okur. Sahne tanımı değişirse bu betik yeniden çalıştırılır.
 """
@@ -28,7 +29,16 @@ def main():
     ap.add_argument("--spp", type=int, default=65536)
     ap.add_argument("--chunk", type=int, default=4096)
     ap.add_argument("--out", default=os.path.join(rs.REPO, "tests", "data", "golden"))
+    ap.add_argument("--scenes-only", action="store_true", help="yalnız .photon ve .usda (Mitsuba render'ı yok)")
     args = ap.parse_args()
+    if args.scenes_only:
+        for sc in rs.scenes():
+            if sc.name in GOLDEN_RES:
+                sc = dataclasses.replace(sc, res=GOLDEN_RES[sc.name])
+                env = os.path.join(rs.REPO, sc.env["hdr"]) if sc.env else None
+                rs.to_photon(sc, args.out, env)
+                rs.to_usd(sc, args.out, env)
+        return
 
     import mitsuba as mi
     mi.set_variant("llvm_ad_rgb")
@@ -45,6 +55,7 @@ def main():
             env_m = os.path.join(tmp, sc.name + "_env_mitsuba.exr")
             rs.write_exr(env_m, rs.resample_for_mitsuba(rs.load_hdr_stb(env_p), 4))
         rs.to_photon(sc, args.out, env_p)
+        rs.to_usd(sc, args.out, env_p)
         ref, a, b = render_mitsuba(rs.to_mitsuba(sc, tmp, env_m, spp=args.chunk), args.spp, args.chunk)
         rs.write_exr(os.path.join(args.out, sc.name + "_mitsuba.exr"), ref)
         print(f"{sc.name}: {sc.res[0]}x{sc.res[1]} @ {args.spp} spp, ortalama {ref.reshape(-1, 3).mean(0)}")

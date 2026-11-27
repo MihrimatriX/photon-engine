@@ -3,7 +3,8 @@
 # SHA-256 özeti GitHub Release'e eklenir; sürüm notları docs/releases/<etiket>.md'den.
 #
 # Bağımlılıklar vcpkg'siz gelir (fetch-release preset'i, CMake FetchContent); Intel OIDN ve
-# Embree'nin resmi Windows paketleri scripts/fetch_deps.ps1 ile third_party/'ye iner.
+# Embree'nin resmi Windows paketleri scripts/fetch_deps.ps1 ile third_party/'ye iner, OpenUSD
+# scripts/build_usd.ps1 ile kaynaktan derlenir (önbellekli).
 name: Windows
 
 on:
@@ -31,8 +32,21 @@ jobs:
       - name: OIDN ve Embree önbelleği
         uses: actions/cache@v4
         with:
-          path: third_party
+          path: |
+            third_party/oidn
+            third_party/embree
           key: third-party-${{ hashFiles('scripts/fetch_deps.ps1') }}
+
+      # OpenUSD kaynaktan derlenir (ilk sefer ~30 dk); betik değişmedikçe önbellekten gelir. Önbellek
+      # derlemeden hemen sonra kaydedilir: sonraki adımlar (testler) başarısız olsa da yeniden derlenmez.
+      - name: OpenUSD ve oneTBB önbelleği
+        id: usd-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            third_party/usd
+            third_party/tbb
+          key: openusd-${{ runner.os }}-${{ hashFiles('scripts/build_usd.ps1') }}
 
       - name: OIDN ve Embree (resmi Windows paketleri)
         shell: pwsh
@@ -54,9 +68,28 @@ jobs:
           cl 2>&1 | Select-Object -First 1
           cmake --version | Select-Object -First 1
 
+      - name: OpenUSD (kaynaktan, önbellekli)
+        shell: pwsh
+        run: ./scripts/build_usd.ps1
+
+      - name: OpenUSD önbelleğini kaydet
+        if: steps.usd-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            third_party/usd
+            third_party/tbb
+          key: openusd-${{ runner.os }}-${{ hashFiles('scripts/build_usd.ps1') }}
+
       - name: Yapılandır
         shell: pwsh
-        run: cmake --preset fetch-release
+        run: |
+          cmake --preset fetch-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # USD bulunamazsa içe aktarma sessizce kapanırdı; CI'da bulunması şart.
+          if (-not (Select-String -Path build/fetch-release/CMakeCache.txt -Pattern '^pxr_DIR:PATH=.*third_party/usd' -Quiet)) {
+            throw 'OpenUSD bulunamadı'
+          }
 
       - name: Derle
         shell: pwsh
@@ -79,8 +112,12 @@ jobs:
           Push-Location $dir.FullName
           ./photon_render.exe ornekler/vitrin.photon --res 320x180 --spp 4 --out "$env:RUNNER_TEMP\duman.png"
           if ($LASTEXITCODE -ne 0) { throw "photon_render çıkış kodu $LASTEXITCODE" }
+          # OpenUSD: usd_ms.dll ve eklenti tanımları (usd\, plugin\usd\) pakette mi?
+          ./photon_render.exe "$env:GITHUB_WORKSPACE/tests/data/golden/cornell_specular.usda" --res 96x96 --spp 4 --out "$env:RUNNER_TEMP\duman_usd.png"
+          if ($LASTEXITCODE -ne 0) { throw "photon_render (USD) çıkış kodu $LASTEXITCODE" }
           Pop-Location
           if ((Get-Item "$env:RUNNER_TEMP\duman.png").Length -lt 1000) { throw 'duman.png boş' }
+          if ((Get-Item "$env:RUNNER_TEMP\duman_usd.png").Length -lt 1000) { throw 'duman_usd.png boş' }
 
       - name: SHA-256
         shell: pwsh
