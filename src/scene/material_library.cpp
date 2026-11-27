@@ -70,8 +70,8 @@ bool MaterialLibrary::loadFile(const std::string& path) {
     auto mapPath = [&](const char* key) -> std::string {
         auto it = j.find("maps");
         if (it == j.end() || !it->is_object() || !it->contains(key)) return {};
-        std::filesystem::path p = pathFromUtf8((*it)[key].get<std::string>());
-        return pathToUtf8(p.is_absolute() ? p : texDir / p);
+        const std::filesystem::path file = pathFromUtf8((*it)[key].get<std::string>());
+        return pathToUtf8(file.is_absolute() ? file : texDir / file);
     };
     p.albedoMap = mapPath("albedo");
     p.normalMap = mapPath("normal");

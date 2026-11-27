@@ -1431,8 +1431,8 @@ void addLight(const UsdPrim& prim, Ctx& ctx) {
     const float coneDeg = prim.HasAPI<UsdLuxShapingAPI>() ? attrOr<float>(shaping.GetShapingConeAngleAttr(), 90.0f, t) : 90.0f;
     const float softness = prim.HasAPI<UsdLuxShapingAPI>() ? attrOr<float>(shaping.GetShapingConeSoftnessAttr(), 0.0f, t) : 0.0f;
 
-    if (UsdLuxRectLight r{prim}) {
-        const float w = attrOr<float>(r.GetWidthAttr(), 1.0f, t), h = attrOr<float>(r.GetHeightAttr(), 1.0f, t);
+    if (UsdLuxRectLight rect{prim}) {
+        const float w = attrOr<float>(rect.GetWidthAttr(), 1.0f, t), h = attrOr<float>(rect.GetHeightAttr(), 1.0f, t);
         if (normalize) L /= std::max(1e-12f, w * stageLen(f.stageWorld, Vec3f(1, 0, 0)) * h * stageLen(f.stageWorld, Vec3f(0, 1, 0)));
         l.type = ImportedLight::Type::Area;
         l.width = w * f.x.length();
