@@ -20,6 +20,8 @@ vcpkg paketleri `vcpkg.json` (builtin-baseline `eb2d3a3279fd019cb7733072d86900d0
 | Alembic | `1.8.12` (yalnız Ogawa; HDF5, Python, araçlar kapalı); önce kurulu paket aranır | BSD-3-Clause | statik (`photon_io`), `PHOTON_ENABLE_ALEMBIC`, CMake ≥ 3.29 |
 | Imath | `v3.2.3` (Alembic bağımlılığı) | BSD-3-Clause | statik |
 | Intel Open Image Denoise | 2.5.1, resmi Windows paketi (`scripts/fetch_deps.ps1` → `third_party/oidn`) | Apache-2.0 (oneTBB: Apache-2.0) | dinamik (`OpenImageDenoise*.dll`, `tbb12.dll`) |
+| OpenUSD (Pixar) | `v26.11.1`, kaynaktan (`scripts/build_usd.ps1` / `build_usd.sh` → `third_party/usd`); monolitik, Python, Hydra, araçlar kapalı | Tomorrow Open Source Technology License 1.0 (Apache-2.0 tabanlı, ticari kullanım serbest; Pixar adı/markası kullanılmaz). Gömülü: double-conversion (BSD-3), pegtl (MIT), Ryu (Apache-2.0 / Boost) | dinamik (`usd_ms.dll` + `usd/`, `plugin/usd/` eklenti tanımları), `PHOTON_ENABLE_USD` |
+| oneTBB | `2023.1.0`, resmi paket, SHA-256 sabitli (`build_usd.*` → `third_party/tbb`); OIDN'nin `tbb12.dll`'iyle aynı sürüm | Apache-2.0 | dinamik (`tbb12.dll`); OpenUSD ona karşı derlenir |
 
 ## Varlıklar (assets/)
 
@@ -47,6 +49,7 @@ vcpkg paketleri `vcpkg.json` (builtin-baseline `eb2d3a3279fd019cb7733072d86900d0
 | Ne | Kaynak | Lisans |
 | --- | --- | --- |
 | 5 FBX dosyası (Blender 2.79/2.93, 3ds Max 2009; SHA-256 sabitli) | ufbx deposu `data/` | ufbx deposunun lisansı (MIT / kamu malı) |
+| `tests/data/golden/*.usda` (referans sahnelerin OpenUSD kopyası) | `bench/reference/refscenes.py` (`to_usd`) ile depoda üretildi | CC0 |
 
 ## Geliştirme araçları (dağıtılmaz)
 

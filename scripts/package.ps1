@@ -22,10 +22,17 @@ foreach ($f in (Join-Path $app 'photon_app.exe'), (Join-Path $build 'photon_rend
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force -Path $out, "$out\ornekler", "$out\lisanslar" | Out-Null
 
-# Programlar ve DLL'ler (photon_app'in yanındakiler: Embree, OIDN, TBB, GLFW).
+# Programlar ve DLL'ler (photon_app'in yanındakiler: Embree, OIDN, TBB, GLFW, OpenUSD).
 Copy-Item (Join-Path $app 'photon_app.exe'), (Join-Path $build 'photon_render.exe') $out
 Copy-Item (Join-Path $app '*.dll') $out
 Copy-Item -Recurse (Join-Path $app 'assets') $out
+# OpenUSD eklenti tanımları (plugInfo.json, şemalar): usd_ms.dll'in yanında usd\ ve plugin\usd\.
+$hasUsd = Test-Path (Join-Path $app 'usd_ms.dll')
+if ($hasUsd) {
+    Copy-Item -Recurse (Join-Path $app 'usd') $out
+    New-Item -ItemType Directory -Force -Path "$out\plugin" | Out-Null
+    Copy-Item -Recurse (Join-Path $app 'plugin\usd') "$out\plugin"
+}
 
 # VC++ çalışma zamanı: Microsoft "app-local" dağıtıma izin verir; böylece hedef
 # makinede vc_redist kurulu olmasa (ya da eski sürüm olsa) da çalışır. Geliştirici
@@ -57,6 +64,10 @@ Get-ChildItem "$out\integrations" -Recurse -Directory -Filter '__pycache__' | Re
 Copy-Item (Join-Path $repo 'docs\THIRD_PARTY.md') "$out\lisanslar"
 Copy-Item (Join-Path $repo 'third_party\oidn\LICENSE.txt') "$out\lisanslar\oidn.txt"
 Copy-Item (Join-Path $repo 'third_party\embree\LICENSE.txt') "$out\lisanslar\embree.txt"
+if ($hasUsd) {
+    Copy-Item (Join-Path $repo 'third_party\usd\LICENSE.txt') "$out\lisanslar\openusd.txt"
+    Copy-Item (Join-Path $repo 'third_party\tbb\LICENSE.txt') "$out\lisanslar\onetbb.txt"
+}
 # Her bileşen: vcpkg'nin copyright dosyası ya da FetchContent kaynağındaki LICENSE.
 function Copy-License([string]$name, [string[]]$vcpkgNames, [string[]]$fetchDirs) {
     foreach ($v in $vcpkgNames) {

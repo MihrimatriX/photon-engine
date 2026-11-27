@@ -27,9 +27,18 @@ inline float f0FromIor(float ior) {
     return r * r;
 }
 
-/// Taban yalıtkan F0: varsayılan IOR 1.5'te 0.04 · 2 · specular = 0.08 · specular (eski Disney ile birebir).
+/// Yalıtkan speküler lobunun ağırlığı w = min(1, 2·specular). specular ≤ 0.5'te tüm Fresnel eğrisi
+/// (dik gelişteki F0 ve sıyırma F90) w ile ölçeklenir: specular = 0 speküleri tamamen kapatır.
+/// glTF KHR_materials_specular'ın (F0·w, F90 = w) ve OpenPBR specular_weight / Blender "IOR Level"
+/// davranışının Schlick karşılığı. specular ≥ 0.5'te w = 1: eski Disney ile birebir.
+inline float dielectricWeight(const DisneyMaterial::ShadingParams& p) {
+    return std::clamp(2.0f * p.specular, 0.0f, 1.0f);
+}
+
+/// Ağırlıktan önceki Schlick F0: specular ≤ 0.5'te f0(ior), üstünde f0(ior)·2·specular. Dik gelişte
+/// yansıma w·F0 = f0(ior)·2·specular (varsayılan IOR 1.5'te 0.08 · specular, eski Disney ile aynı).
 inline float dielectricF0(const DisneyMaterial::ShadingParams& p) {
-    return std::clamp(f0FromIor(p.ior) * (2.0f * p.specular), 0.0f, 1.0f);
+    return std::clamp(f0FromIor(p.ior) * std::max(1.0f, 2.0f * p.specular), 0.0f, 1.0f);
 }
 
 inline float coatF0(const DisneyMaterial::ShadingParams& p) {
@@ -68,15 +77,16 @@ constexpr float FLAKE_ALPHA = 0.06f;
 /// Taban speküler lobunun Fresnel'i (yalıtkan ve metal paylarının karışımı).
 Color3f specularFresnel(const DisneyMaterial::ShadingParams& p, float cosD) {
     const float f0d = dielectricF0(p);
+    const float w = dielectricWeight(p);
     if (p.thinFilmThickness <= 0.0f) {
-        const Color3f fd(schlickF(f0d, cosD));
+        const Color3f fd(w * schlickF(f0d, cosD));
         if (p.metallic <= 0.0f) return fd;
         return lerp(fd, fresnelF82Tint(p.baseColor, p.edgeTint, cosD), p.metallic);
     }
     const float sd = std::sqrt(std::clamp(f0d, 0.0f, 0.99f));
     const cfloat nd((1.0f + sd) / (1.0f - sd), 0.0f);
     const cfloat dielectric[3] = {nd, nd, nd};
-    Color3f fd = thinFilmRGB(cosD, p.thinFilmIor, dielectric, p.thinFilmThickness);
+    Color3f fd = thinFilmRGB(cosD, p.thinFilmIor, dielectric, p.thinFilmThickness) * w;
     if (p.metallic <= 0.0f) return fd;
     cfloat metal[3];
     for (int c = 0; c < 3; ++c) metal[c] = gulbrandsenIor(p.baseColor[c], p.edgeTint[c]);
@@ -118,6 +128,7 @@ float pdfFlake(const Vec3f& wo, const Vec3f& wi, const DisneyMaterial::ShadingPa
 struct DielectricLayer {
     float alpha = 0.0f;
     float f0 = 0.0f;
+    float weight = 1.0f;
     float invOneMinusAvg = 1.0f;
 
     explicit DielectricLayer(const DisneyMaterial::ShadingParams& p) {
@@ -125,9 +136,10 @@ struct DielectricLayer {
         anisoAlpha(p.roughness, p.anisotropy, ax, ay);
         alpha = std::sqrt(ax * ay);
         f0 = dielectricF0(p);
-        invOneMinusAvg = 1.0f / std::max(1e-4f, 1.0f - ggxSchlickAverageAlbedo(alpha, f0));
+        weight = dielectricWeight(p);
+        invOneMinusAvg = 1.0f / std::max(1e-4f, 1.0f - weight * ggxSchlickAverageAlbedo(alpha, f0));
     }
-    float transmit(float mu) const { return std::max(0.0f, 1.0f - ggxSchlickAlbedo(mu, alpha, f0)); }
+    float transmit(float mu) const { return std::max(0.0f, 1.0f - weight * ggxSchlickAlbedo(mu, alpha, f0)); }
     float factor(float muO, float muI) const { return transmit(muO) * transmit(muI) * invOneMinusAvg; }
 };
 
@@ -310,7 +322,9 @@ void lobeWeights(const DisneyMaterial::ShadingParams& p, float& pCoat, float& pS
     }
     const float rem = 1.0f - pCoat;
     const float st = std::clamp(p.specularTransmission, 0.0f, 1.0f) * (1.0f - p.metallic);
-    pSpec = rem * lerp(0.5f, 1.0f, p.metallic);
+    // Yalıtkan speküler payı lobun ağırlığıyla (specular < 0.5) küçülür. Geçirgen yüzeyde (cam) içeriden
+    // toplam iç yansıma speküler lobdan örneklendiği için pay korunur.
+    pSpec = rem * lerp(0.5f * (st > 0.0f ? 1.0f : dielectricWeight(p)), 1.0f, p.metallic);
     float pRest = rem - pSpec;
     const float pSt = pRest * st;
     pRest -= pSt;

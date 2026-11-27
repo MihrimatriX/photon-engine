@@ -137,7 +137,12 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - `bench/reference/`: Mitsuba 3 ve Cycles ile aynı sahne karşılaştırması, `REPORT.md`. Photon yansız (Cornell difüz/kostik oran 0.9999/1.0000, gürültü tabanında); pürüzlü metal Mitsuba'dan %12 parlak (Kulla–Conty), Cycles çoklu saçılmalı GGX ile %0.3. Cycles'a göre eşit sürede 1.2–2.2× daha temiz.
   - Hızlandırma: Sobol örnekleyici bit bit aynı hızlı sürüm (profilde %28 → %11), Lambert, satır içi `getPixel`, yoğunluğu 0 ortam sahneye girmez → 4 iş parçacığında +%17–37.
   - F2.8 altın görüntüler Mitsuba referanslı. Linux için `scripts/fetch_deps.sh` (Embree + OIDN). Görev listesi M1–M6'ya göre işaretlendi; yeni maddeler F2.16–F2.18.
+- **2026-11-27 (oturum 12, bulut, yol haritası Adım 2a "OpenUSD", aynı dal, ikinci PR):**
+  - OpenUSD 26.11.1 kaynaktan, monolitik `usd_ms` (Python/Hydra/araçlar kapalı); `scripts/build_usd.ps1` (CI, önbellekli) ve `build_usd.sh`. USD, motorun bağlandığı TBB'nin başlıklarıyla derlenmeli (ABI): oneTBB 2023.1.0 `third_party/tbb`'de sabit.
+  - `src/io/usd_loader.cpp`: sahne birleştirme, birim/eksen, mesh/şekil/örnekleme, UsdPreviewSurface + MaterialX OpenPBR/Standard Surface/glTF PBR, UsdLux, DomeLight (USD latlong'u Photon'un aynası), kameralar. Uygulama kubbe ortamını ışık tercihiyle birlikte alır.
+  - Malzeme modeli: yalıtkan speküler ağırlığı (F7.14). Referans sahneler `.usda` olarak da üretiliyor (`refscenes.py to_usd`), aynı Mitsuba eşiklerini tutuyor.
 - **Sıradaki adımlar:**
+  - Adım 2 devamı: tam disk/küre/silindir + tek yüzlü ışıklar (F2.17), MaterialX kütüphanesi (usdMtlx), OCIO/ACES 2, OpenVDB, Hydra delegesi (F7.15).
   - Gerçek 3ds Max / Maya / Blender ile canlı bağlantı ve doğrudan açma denemesi (bu ortamda yok); Windows'ta `CreateProcessW` yolu.
   - Gerçek zamanlı mod: TAA (zamansal kenar yumuşatma) ve GPU Katı modunda doku/ışık desteği.
   - OIDN ile yeni sahneler (SSS kanal gürültüsü) denenmeli; yüksek performanslı RTX/RDNA kartlarda Vulkan RT benchmark ölçümü ve `bench/BASELINE.md` güncellemesi.
@@ -145,7 +150,6 @@ Her çalışma oturumunun sonunda iki şey güncellenir: aşağıdaki "Kaldığ�
   - Tutamaç sürüklenirken Esc ile iptal (şimdilik Ctrl+Z).
   - Kurulum paketi (Inno Setup, makinede yok), kod imzalama, log + çökme dökümü.
   - `v0.5.0` etiketi ile GitHub Release yayımlama.
-  - Yol haritası Adım 2 (standartlar): OpenUSD içe/dışa aktarma ile başla.
   - TODO(human) öğrenme maddeleri önceki oturumda kullanıcı isteğiyle tamamlandı; istenirse ilgili fonksiyonlar egzersiz olarak yeniden boşaltılabilir.
 
 ## Kaynaklar (CG/CGI pipeline)

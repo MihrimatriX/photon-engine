@@ -230,3 +230,41 @@ TEST(DisneyMaterial, ResolveUsesBaseWithoutMaps) {
     EXPECT_NEAR(p.roughness, 0.25f, 1e-5f);
     EXPECT_NEAR(p.normal.y, 1.0f, 1e-5f);
 }
+
+// Yalıtkan speküler ağırlığı (glTF KHR_materials_specular, OpenPBR specular_weight): specular = 0
+// speküleri sıyırma açısında da kapatır, kalan saf Lambert'tir (pürüzlülükten bağımsız, ρ/π).
+// specular = 0.25 lobu yarıya indirir: dik gelişte F0 ve sıyırmada F90 birlikte.
+TEST(DisneyMaterial, ZeroSpecularWeightIsPureLambert) {
+    const SurfaceInteraction si = zUp();
+    const Color3f rho(0.6f, 0.3f, 0.1f);
+    for (float rough : {0.05f, 0.5f, 1.0f}) {
+        DisneyMaterial mat(rho, 0.0f, rough, 0.0f);
+        for (float co : {1.0f, 0.5f, 0.1f, 0.02f})
+            for (float ci : {1.0f, 0.3f, 0.05f}) {
+                const Vec3f wo(std::sqrt(1.0f - co * co), 0.0f, co);
+                const Vec3f wiMirror(-wo.x, 0.0f, wo.z); // speküler tepe
+                const Vec3f wi(std::sqrt(1.0f - ci * ci), 0.0f, ci);
+                for (const Vec3f& d : {wiMirror, wi}) {
+                    const Color3f f = mat.eval(wo, d, si);
+                    EXPECT_NEAR(f.r, rho.r * INV_PI, 1e-5f) << "r=" << rough << " cos_o=" << co;
+                    EXPECT_NEAR(f.b, rho.b * INV_PI, 1e-5f);
+                }
+            }
+        // Örnekleme de tutarlı: beyaz Lambert'in yönsel albedosu 1.
+        DisneyMaterial white(Color3f(1.0f), 0.0f, rough, 0.0f);
+        EXPECT_NEAR(albedo(white, Vec3f(0.6f, 0.0f, 0.8f), 20000), 1.0f, 0.02f);
+    }
+}
+
+TEST(DisneyMaterial, SpecularWeightScalesGrazingReflection) {
+    const SurfaceInteraction si = zUp();
+    // Siyah taban: yalnız speküler lob. Sıyırma açısında yansıma ağırlıkla orantılı.
+    DisneyMaterial full(Color3f(0.0f), 0.0f, 0.3f, 0.5f), quarter(Color3f(0.0f), 0.0f, 0.3f, 0.25f);
+    for (float co : {1.0f, 0.2f, 0.05f}) {
+        const Vec3f wo(std::sqrt(1.0f - co * co), 0.0f, co);
+        const Vec3f wi(-wo.x, 0.0f, wo.z);
+        const float a = full.eval(wo, wi, si).g, b = quarter.eval(wo, wi, si).g;
+        ASSERT_GT(a, 0.0f);
+        EXPECT_NEAR(b / a, 0.5f, 1e-3f) << "cos_o=" << co;
+    }
+}

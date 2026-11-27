@@ -300,6 +300,10 @@ Nasıl okunur:
 - [~] **F7.10** (2026-11-27: M1, `DisneyMaterial` OpenPBR tarzı katmanlarla birleşti (taban IOR, iletim, vernik IOR/tonu, sheen rengi, EON difüz). Kalan: OpenPBR şartnamesinin parametre adlarıyla birebir giriş/çıkış ve MaterialX — yol haritası Adım 2) OpenPBR Surface'e geçiş. Disney referans olarak kalır; her lob fırın ve chi-kare kapısından geçer.
 - [x] **F7.11** (2026-10-24: integratörde, Cycles bevel benzeri) Yuvarlatılmış kenar (bevel) gölgelendiricisi.
 - [x] **F7.12** (2026-11-27: M1, `setIor`, `setSpecularTransmission`) Disney'de eksik loblar (specTrans, IOR) OpenPBR ile gelir.
+- [x] **F7.13** (2026-11-27, yol haritası Adım 2a) OpenUSD içe aktarma: OpenUSD 26.11.1 kaynaktan (`scripts/build_usd.{ps1,sh}`, sabit oneTBB 2023.1.0), `src/io/usd_loader.cpp`. Birleştirilmiş sahne (katman, referans, varyant), birim/eksen, çokgen + GeomSubset, şekiller, yerel örnekleme + PointInstancer; UsdPreviewSurface ve MaterialX OpenPBR / Standard Surface / glTF PBR; UsdLux (fiziksel birimler), DomeLight → HDRI ortamı, kameralar. Kanıt: `tests/test_usd_import.cpp` ve aynı referans sahneler USD'den Mitsuba eşikleriyle (`GoldenReference.*Usd*`).
+- [x] **F7.14** (2026-11-27) Yalıtkan speküler ağırlığı: `specular` < 0.5'te F0 ve F90 birlikte ölçeklenir (glTF KHR_materials_specular, OpenPBR `specular_weight`); `specular = 0` saf difüz. Varsayılan 0.5 ve üstü birebir eski sonuç. GPU GLSL yolu henüz eski (F90 = 1; `glslc` ile yeniden derlenecek).
+- [ ] **F7.16** Principled cam (`specularTransmission` = 1) Photon'un ayrı cam BSDF'inden ≈ %0.2 sönük (kostikli Cornell, 2048 örnek: 0.998 / 1.0007). Yansıma lobu Schlick, iletim tam Fresnel; iletimli yüzeyde yansımayı da tam Fresnel'e geçirip Mitsuba ile yeniden ölç.
+- [ ] **F7.15** USD'de kalanlar: MaterialX standart kütüphanesi (usdMtlx, `.mtlx` dosyaları ve düğüm grafiği), tam disk/küre/silindir ve tek yüzlü alan ışıkları (F2.17 ile), UsdSkel/zaman örnekli geometri, dışa aktarma (Photon → USD), Hydra render delegesi.
 - **Öğrenme:** PBRT bölüm 9–10; SIGGRAPH "Physically Based Shading" notları; Heitz 2018; OpenPBR şartnamesi.
 - **Kanıt:** fırın testinde beyaz pürüzlü metal her pürüzlülükte ≈ 1; ortak malzemelerde Mitsuba relMSE %1'in altında.
 
@@ -345,7 +349,7 @@ Nasıl okunur:
 
 ## Ürünleşme eki (karar bekliyor)
 
-EULA ve gizlilik metni, lisans anahtarı, kod imzalama, kurulum paketi, Linux derlemesi/CI/paketleme, ağ render, STEP/IGES/USD içe aktarma (FBX ve Alembic 2026-10-29'da yapıldı), Python ve eklenti API'si, KeyShot/Cycles karşılaştırması, patent incelemesi, telemetri. Şimdiden geçerli tek kural: GPL bağımlılık yok.
+EULA ve gizlilik metni, lisans anahtarı, kod imzalama, kurulum paketi, Linux derlemesi/CI/paketleme, ağ render, STEP/IGES içe aktarma (FBX ve Alembic 2026-10-29'da, OpenUSD 2026-11-27'de yapıldı), Python ve eklenti API'si, KeyShot/Cycles karşılaştırması, patent incelemesi, telemetri. Şimdiden geçerli tek kural: GPL bağımlılık yok.
 
 ## Öğrenme kilometre taşları
 

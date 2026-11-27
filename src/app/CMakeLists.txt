@@ -51,6 +51,7 @@ add_custom_command(TARGET photon_app POST_BUILD
         ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:photon_app>/assets
     COMMENT "Copying assets to output directory"
 )
+photon_copy_usd_runtime(photon_app)
 photon_copy_oidn_dlls(photon_app)
 
 # Hakkında penceresindeki sürüm; tek kaynak kök CMakeLists'teki project(VERSION).

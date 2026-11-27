@@ -304,6 +304,127 @@ def to_photon(scene: Scene, outdir: str, env_exr: str | None) -> str:
     return path
 
 
+def _usd_material(path, m):
+    """OpenUSD malzemesi. Difüz ve ışık yayan yüzeyler MaterialX OpenPBR (specular_weight = 0 → saf
+    Lambert; UsdPreviewSurface'in speküler lobu kapatılamaz), ayna/cam/metal UsdPreviewSurface."""
+    t = m["type"]
+
+    def f3(c):
+        return "(" + ", ".join(f"{x:.9g}" for x in c) + ")"
+
+    if t in ("diffuse", "emitter"):
+        lines = ['uniform token info:id = "ND_open_pbr_surface_surfaceshader"', "float inputs:specular_weight = 0"]
+        if t == "diffuse":
+            lines += [f"color3f inputs:base_color = {f3(m['albedo'])}", "float inputs:base_weight = 1"]
+        else:
+            L = m["radiance"]
+            lum = max(L)
+            lines += ["float inputs:base_weight = 0", f"float inputs:emission_luminance = {lum:.9g}",
+                      f"color3f inputs:emission_color = {f3([x / lum for x in L])}"]
+        out, conn = "token outputs:out", "outputs:mtlx:surface"
+    else:
+        lines = ['uniform token info:id = "UsdPreviewSurface"']
+        if t == "mirror":
+            lines += [f"color3f inputs:diffuseColor = {f3(m['color'])}", "float inputs:metallic = 1",
+                      "float inputs:roughness = 0"]
+        elif t == "glass":
+            lines += ["color3f inputs:diffuseColor = (1, 1, 1)", "float inputs:opacity = 0",
+                      f"float inputs:ior = {m['ior']:.9g}", f"float inputs:roughness = {m['roughness']:.9g}"]
+        elif t == "metal":
+            lines += ["color3f inputs:diffuseColor = (1, 1, 1)", "float inputs:metallic = 1",
+                      f"float inputs:roughness = {m['roughness']:.9g}"]
+        else:
+            raise ValueError(t)
+        out, conn = "token outputs:surface", "outputs:surface"
+    body = "\n".join("                " + x for x in lines + [out])
+    port = out.split()[-1]
+    return (f'        def Material "{path.split("/")[-1]}"\n        {{\n'
+            f"            token {conn}.connect = <{path}/Surface.{port}>\n"
+            f'            def Shader "Surface"\n            {{\n{body}\n'
+            f"            }}\n        }}\n")
+
+
+def _usd_matrix(rows):
+    return "(" + ", ".join("(" + ", ".join(f"{x:.12g}" for x in r) + ")" for r in rows) + ")"
+
+
+def to_usd(scene: Scene, outdir: str, env_hdr: str | None) -> str:
+    """Sahneyi OpenUSD (.usda) olarak yazar: metre, Y yukarı. Dörtgenler 4 köşeli çokgen mesh (yükleyici
+    üçgenler), küreler UsdGeomSphere, kamera UsdGeomCamera, HDRI DomeLight.
+
+    Photon'un .photon'daki ortam eşlemesiyle birebir aynı ortam için kubbeye Ry(90°)·diag(−1, 1, 1)
+    verilir: USD kubbesi OpenEXR eşdikdörtgen kuralını (Photon'un aynası) izler, aynalı dönüşüm bunu
+    geri çevirir. Böylece aynı .hdr dosyası çevrilmeden ve dönüşsüz kullanılır.
+    """
+    def f3(v):
+        return "(" + ", ".join(f"{float(x):.9g}" for x in v) + ")"
+
+    mats, prims = [], []
+    for k, o in enumerate(scene.objects):
+        mpath = f"/World/Looks/M{k}"
+        mats.append(_usd_material(mpath, o.mat))
+        name = f"O{k}"
+        doc = (o.name or o.shape).replace('"', "'")
+        if o.shape == "sphere":
+            prims.append(f'    def Sphere "{name}" (\n        prepend apiSchemas = ["MaterialBindingAPI"]\n'
+                         f'        doc = "{doc}"\n    )\n    {{\n'
+                         f"        double radius = {o.radius:.9g}\n"
+                         f"        double3 xformOp:translate = {f3(o.center)}\n"
+                         f'        uniform token[] xformOpOrder = ["xformOp:translate"]\n'
+                         f"        rel material:binding = <{mpath}>\n    }}\n")
+        else:
+            p, n, uv, _ = quad_mesh(o.corners)
+            st = [(u, 1.0 - v) for u, v in uv]  # USD st: t yukarı
+            prims.append(f'    def Mesh "{name}" (\n        prepend apiSchemas = ["MaterialBindingAPI"]\n'
+                         f'        doc = "{doc}"\n    )\n    {{\n'
+                         f"        int[] faceVertexCounts = [4]\n"
+                         f"        int[] faceVertexIndices = [0, 1, 2, 3]\n"
+                         f"        point3f[] points = [{', '.join(f3(x) for x in p)}]\n"
+                         f"        normal3f[] normals = [{', '.join(f3(x) for x in n)}] (\n"
+                         f'            interpolation = "vertex"\n        )\n'
+                         f"        texCoord2f[] primvars:st = [{', '.join(f3(x) for x in st)}] (\n"
+                         f'            interpolation = "vertex"\n        )\n'
+                         f'        uniform token subdivisionScheme = "none"\n'
+                         f"        rel material:binding = <{mpath}>\n    }}\n")
+
+    # Kamera: −Z'ye bakar, +Y yukarı. Açıklık oranı render oranına eşit (pencere uydurma belirsizliği yok).
+    e = np.array(scene.eye, dtype=np.float64)
+    t = np.array(scene.target, dtype=np.float64)
+    f = (t - e) / np.linalg.norm(t - e)
+    r = np.cross(f, [0.0, 1.0, 0.0])
+    r /= np.linalg.norm(r)
+    u = np.cross(r, f)
+    W, H = scene.res
+    va = 24.0
+    focal = 0.5 * va / math.tan(math.radians(scene.fov) * 0.5)
+    cam = (f'    def Camera "Camera"\n    {{\n'
+           f"        float focalLength = {focal:.9g}\n"
+           f"        float verticalAperture = {va:.9g}\n"
+           f"        float horizontalAperture = {va * W / H:.9g}\n"
+           f"        float2 clippingRange = (0.01, 1000)\n"
+           f"        matrix4d xformOp:transform = {_usd_matrix([[*r, 0], [*u, 0], [*(-f), 0], [*e, 1]])}\n"
+           f'        uniform token[] xformOpOrder = ["xformOp:transform"]\n    }}\n')
+    dome = ""
+    if env_hdr:
+        rel = os.path.relpath(env_hdr, outdir).replace(os.sep, "/")
+        dome = (f'    def DomeLight "Ortam"\n    {{\n'
+                f"        asset inputs:texture:file = @{rel}@\n"
+                f'        token inputs:texture:format = "latlong"\n'
+                f"        float inputs:intensity = 1\n"
+                f"        float xformOp:rotateY = 90\n"
+                f"        float3 xformOp:scale = (-1, 1, 1)\n"
+                f'        uniform token[] xformOpOrder = ["xformOp:rotateY", "xformOp:scale"]\n    }}\n')
+    text = ("#usda 1.0\n(\n"
+            f'    doc = "PhotonEngine referans sahnesi {scene.name} (bench/reference/refscenes.py, to_usd)"\n'
+            '    defaultPrim = "World"\n    metersPerUnit = 1\n    upAxis = "Y"\n)\n\n'
+            'def Xform "World"\n{\n    def Scope "Looks"\n    {\n' + "".join(mats) + "    }\n\n" +
+            "".join(prims) + cam + dome + "}\n")
+    path = os.path.join(outdir, scene.name + ".usda")
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+    return path
+
+
 def _mitsuba_bsdf(m):
     t = m["type"]
     if t == "diffuse":

@@ -220,6 +220,47 @@ if(PHOTON_ENABLE_ALEMBIC)
     endif()
 endif()
 
+# OpenUSD (Pixar, TOST-1.0: Apache-2.0'nin marka maddesi değiştirilmiş hali): .usd/.usda/.usdc/
+# .usdz içe aktarma. Hazır derlenmiş C++ paketi olmadığı için kaynaktan bir kez derlenir
+# (scripts/build_usd.ps1 ya da build_usd.sh → third_party/usd; Python'suz, görüntüleme kapalı, tek
+# paylaşılan kitaplık usd_ms). oneTBB (Apache-2.0, OIDN'ninkiyle aynı 2023.1) third_party/tbb'de.
+option(PHOTON_ENABLE_USD "OpenUSD (.usd, .usda, .usdc, .usdz) import when found" ON)
+set(PHOTON_USD_FOUND FALSE)
+set(PHOTON_USD_DIR "")
+if(PHOTON_ENABLE_USD)
+    list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/third_party/tbb" "${CMAKE_SOURCE_DIR}/third_party/usd")
+    find_package(pxr CONFIG QUIET)
+    if(pxr_FOUND AND TARGET usd_m)
+        set(PHOTON_USD_FOUND TRUE)
+        set(PHOTON_USD_DIR "${PXR_CMAKE_DIR}")
+        message(STATUS "OpenUSD: found 0.${PXR_MINOR_VERSION}.${PXR_PATCH_VERSION} (${PHOTON_USD_DIR})")
+    else()
+        message(STATUS "OpenUSD: not found — run scripts/build_usd.ps1 / build_usd.sh (USD import off)")
+    endif()
+endif()
+
+# USD çalışma zamanı: usd_ms + eklenti tanımları (plugInfo.json) exe'nin yanına. USD eklentilerini
+# kitaplığın bulunduğu klasöre göre "usd/" ve "plugin/usd/" altında arar (bkz. usd_loader.cpp).
+function(photon_copy_usd_runtime target)
+    if(NOT PHOTON_USD_FOUND)
+        return()
+    endif()
+    if(WIN32)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PHOTON_USD_DIR}/lib/usd_ms.dll" $<TARGET_FILE_DIR:${target}>
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${PHOTON_USD_DIR}/lib/usd" $<TARGET_FILE_DIR:${target}>/usd
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${PHOTON_USD_DIR}/plugin/usd" $<TARGET_FILE_DIR:${target}>/plugin/usd
+            COMMENT "Copying OpenUSD runtime for ${target}")
+        # oneTBB (OIDN'nin tbb12.dll'iyle aynı sürüm; Embree tbbmalloc.dll'i zaten getirir).
+        set(_tbb_redist "${CMAKE_SOURCE_DIR}/third_party/tbb/redist/intel64/vc14")
+        if(EXISTS "${_tbb_redist}/tbb12.dll")
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_tbb_redist}/tbb12.dll" $<TARGET_FILE_DIR:${target}>
+                COMMENT "Copying oneTBB for ${target}")
+        endif()
+    endif()
+endfunction()
+
 # nlohmann/json – project files, material and studio presets (MIT)
 find_package(nlohmann_json CONFIG QUIET)
 if(NOT nlohmann_json_FOUND)
@@ -343,6 +384,7 @@ endif()
 if(PHOTON_BUILD_CLI)
     add_executable(photon_render src/main.cpp)
     target_link_libraries(photon_render PRIVATE photon_scene photon_engine photon_build_flags)
+    photon_copy_usd_runtime(photon_render)
     photon_copy_oidn_dlls(photon_render)
 endif()
 

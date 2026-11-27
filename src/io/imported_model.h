@@ -9,6 +9,7 @@
 
 #include "core/math/transform.h"
 #include "geometry/mesh.h"
+#include "core/image/image.h"
 #include "materials/material.h"
 
 #include <cstdint>
@@ -38,6 +39,8 @@ struct ImportedCameraKey {
     Vec3f eye{0.0f};
     Vec3f target{0.0f, 0.0f, -1.0f};
     float fovDeg = 35.0f; ///< dikey
+    float focusDistance = 0.0f; ///< 0 = göz–hedef uzaklığı
+    float fStop = 0.0f;         ///< 0 = alan derinliği kapalı
 };
 
 /// DCC kamerası (FBX). Tek anahtar = sabit kamera; birden çok = her karede örneklenmiş animasyon.
@@ -49,7 +52,7 @@ struct ImportedCamera {
     std::vector<ImportedCameraKey> keys;
 };
 
-/// DCC ışığı (FBX), motor birimlerine dönüştürülmüş şiddetle. Konum/yön dosyanın dünya uzayında.
+/// DCC ışığı (FBX, USD), motor birimlerine dönüştürülmüş şiddetle. Konum/yön dosyanın dünya uzayında.
 struct ImportedLight {
     enum class Type { Point, Spot, Directional, Area };
     Type type = Type::Point;
@@ -64,13 +67,22 @@ struct ImportedLight {
     float width = 1.0f, height = 1.0f;  ///< alan: dörtgen boyutu
 };
 
+/// Dosyanın ortam ışığı (USD DomeLight): motorun eşdikdörtgen kuralına çevrilmiş HDRI dosyası ve
+/// Y ekseni etrafındaki dönüşü (EnvironmentDesc::rotationDeg anlamında).
+struct ImportedEnvironment {
+    std::string hdrPath;
+    float intensity = 1.0f;
+    float rotationDeg = 0.0f;
+};
+
 struct ImportedModel {
     std::vector<ImportedMesh> meshes;
     ImportedNode root;
     std::vector<ImportedCamera> cameras;
     std::vector<ImportedLight> lights;
+    std::vector<ImportedEnvironment> environments; ///< ilki kullanılır
     std::vector<std::string> warnings;
-    bool empty() const { return meshes.empty() && cameras.empty() && lights.empty(); }
+    bool empty() const { return meshes.empty() && cameras.empty() && lights.empty() && environments.empty(); }
 };
 
 /// Üçgen köşelerini (konum, normal, UV) toplar; aynı köşeleri birleştirerek indeksli bir mesh kurar.
@@ -114,5 +126,14 @@ std::string cacheEmbeddedTexture(const void* data, size_t size);
 
 /// Gömülü doku önbelleğinin klasörü (testler başka yere yönlendirebilir; boş = varsayılan).
 void setEmbeddedTextureCacheDir(const std::string& dir);
+
+/// İçe aktarmada türetilen bir görüntüyü (ör. aynalanmış HDRI) doku önbelleğine EXR olarak yazar;
+/// @p key aynı kaldıkça (kaynak yol, boyut, değişiklik zamanı, parametreler) yeniden yazmaz.
+/// Hata durumunda boş döner.
+std::string cacheDerivedImage(const Image& image, const std::string& key);
+
+/// Türetilmiş doku için önbellek dosya yolu (klasörü oluşturur); @p ext ".png" gibi. Dosyayı çağıran
+/// yazar (varsa yeniden yazmaz). Klasör oluşturulamazsa boş döner.
+std::string derivedTexturePath(const std::string& key, const char* ext);
 
 } // namespace photon

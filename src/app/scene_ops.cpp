@@ -556,14 +556,24 @@ void Application::attachImported(const std::string& path, std::unique_ptr<SceneN
     // DCC kameraları ve ışıkları grubun yerel uzayında geldi: yerleştirmeden sonraki dünya
     // dönüşümüyle taşınır, böylece 3ds Max / Maya / Blender'daki kadraj ve ışık düzeni korunur.
     int dccLights = 0, dccCams = 0, dccTracks = 0;
+    bool dccEnvironment = false;
     std::optional<OrbitCamera> firstDccView;
     if (extras && !extras->empty()) {
         transformImportExtras(*extras, node->localTransform);
-        if (m_s.importPrefs.importLights)
+        if (m_s.importPrefs.importLights) {
             for (LightDesc& l : extras->lights) {
                 m_s.lights.push_back(std::move(l));
                 ++dccLights;
             }
+            // USD kubbe ışığı sahnenin ortamı olur (zemin, arka plan ve gök ayarları korunur).
+            if (extras->environment) {
+                m_s.environment.kind = EnvironmentDesc::Kind::Image;
+                m_s.environment.hdrPath = extras->environment->hdrPath;
+                m_s.environment.intensity = extras->environment->intensity;
+                m_s.environment.rotationDeg = extras->environment->rotationDeg;
+                dccEnvironment = true;
+            }
+        }
         if (m_s.importPrefs.importCameras)
             for (CameraTrack& t : extras->cameras) {
                 if (!firstDccView) firstDccView = orbitFromKey(t.keys.front(), m_s.camera);
@@ -584,10 +594,10 @@ void Application::attachImported(const std::string& path, std::unique_ptr<SceneN
         // Dosya kendi ışıklarını getirdiyse varsayılan stüdyo ışıkları eklenmez ve ortam ışığı
         // kısılır: DCC'lerde (Max, Maya) varsayılan ortam siyahtır, sahneyi ışıklar aydınlatır.
         // Hafif bir dolgu yansımalar için kalır; Ortam sekmesinden geri açılır.
-        if (m_s.lights.empty()) {
+        if (m_s.lights.empty() && !dccEnvironment) {
             for (const auto& s : m_s.studios)
                 if (s.id == "product_softbox") applyStudio(s);
-        } else if (dccLights > 0) {
+        } else if (dccLights > 0 && !dccEnvironment) {
             m_s.environment.intensity = 0.15f;
         }
         // Dosyada kamera varsa onun kadrajı (DCC'deki görünüm); yoksa sahneye sığdır.
@@ -599,7 +609,8 @@ void Application::attachImported(const std::string& path, std::unique_ptr<SceneN
 
     markDocumentChanged();
     std::string msg = "İçe aktarıldı: " + ui::fileName(path) + " (" + std::to_string(parts) + " parça";
-    if (dccLights) msg += ", " + std::to_string(dccLights) + " ışık" + (wasEmpty ? " (ortam ışığı kısıldı)" : "");
+    if (dccLights) msg += ", " + std::to_string(dccLights) + " ışık" + (wasEmpty && !dccEnvironment ? " (ortam ışığı kısıldı)" : "");
+    if (dccEnvironment) msg += ", kubbe ortamı";
     if (dccCams) msg += ", " + std::to_string(dccCams) + " kamera";
     if (dccTracks) msg += ", " + std::to_string(dccTracks) + " kamera animasyonu";
     msg += ")";

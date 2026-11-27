@@ -18,11 +18,13 @@
 #include "core/image/image_io.h"
 #include "engine/render_session.h"
 #include "scene/document.h"
+#include "scene/model_import.h"
 #include "scene/project_io.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -58,17 +60,16 @@ double luminanceMean(const Image& img, int x0, int y0, int w, int h) {
     return s / (w * h);
 }
 
-void runGolden(const GoldenCase& gc) {
+/// Sahneyi render edip Mitsuba referansıyla karşılaştırır.
+void renderAndCompare(const GoldenCase& gc, const std::string& label, const SceneGraph& graph,
+                      const std::vector<LightDesc>& lights, const EnvironmentDesc& env,
+                      const std::function<std::shared_ptr<const Camera>(float)>& camera) {
     const std::string dir = std::string(PHOTON_TEST_DATA) + "/golden/";
-    SceneGraph graph;
-    ProjectData data;
-    std::string err;
-    ASSERT_TRUE(loadProject(dir + gc.name + ".photon", graph, data, &err)) << err;
     const std::optional<Image> ref = loadImageEXR(dir + gc.name + "_mitsuba.exr");
     ASSERT_TRUE(ref.has_value()) << "referans okunamadı";
 
     EnvironmentCache cache;
-    auto scene = buildRenderScene(graph, data.lights, data.environment, cache, false);
+    auto scene = buildRenderScene(graph, lights, env, cache, false);
     RenderSettings rs;
     rs.width = ref->width();
     rs.height = ref->height();
@@ -84,7 +85,7 @@ void runGolden(const GoldenCase& gc) {
     sc.mode = RenderMode::Final;
     sc.targetSpp = gc.spp;
     sc.batchSeconds = 10.0;
-    session.begin(orbitCamera(data.camera, static_cast<float>(rs.width) / rs.height), rs, sc);
+    session.begin(camera(static_cast<float>(rs.width) / rs.height), rs, sc);
     while (session.advance()) {
     }
     const Image img = session.resolve();
@@ -101,7 +102,7 @@ void runGolden(const GoldenCase& gc) {
             }
     for (int c = 0; c < 3; ++c) {
         ASSERT_GT(sr[c], 0.0);
-        EXPECT_NEAR(sa[c] / sr[c], gc.expectedMean, gc.meanTol) << gc.name << " kanal " << c;
+        EXPECT_NEAR(sa[c] / sr[c], gc.expectedMean, gc.meanTol) << label << " kanal " << c;
     }
 
     // 2. 8×8 blok göreli farkı (neredeyse siyah bloklar hariç).
@@ -120,11 +121,75 @@ void runGolden(const GoldenCase& gc) {
     std::sort(rel.begin(), rel.end());
     const double median = rel[rel.size() / 2];
     const double p95 = rel[std::min(rel.size() - 1, static_cast<size_t>(0.95 * static_cast<double>(rel.size())))];
-    EXPECT_LT(median, gc.blockMedian) << gc.name;
-    EXPECT_LT(p95, gc.blockP95) << gc.name;
-    std::printf("[golden] %s: ortalama oranı %.4f %.4f %.4f, blok medyan %.4f, p95 %.4f\n", gc.name, sa[0] / sr[0],
-                sa[1] / sr[1], sa[2] / sr[2], median, p95);
+    EXPECT_LT(median, gc.blockMedian) << label;
+    EXPECT_LT(p95, gc.blockP95) << label;
+    std::printf("[golden] %s: ortalama oranı %.4f %.4f %.4f, blok medyan %.4f, p95 %.4f\n", label.c_str(),
+                sa[0] / sr[0], sa[1] / sr[1], sa[2] / sr[2], median, p95);
 }
+
+void runGolden(const GoldenCase& gc) {
+    SceneGraph graph;
+    ProjectData data;
+    std::string err;
+    ASSERT_TRUE(loadProject(std::string(PHOTON_TEST_DATA) + "/golden/" + gc.name + ".photon", graph, data, &err)) << err;
+    renderAndCompare(gc, gc.name, graph, data.lights, data.environment,
+                     [&](float aspect) { return orbitCamera(data.camera, aspect); });
+}
+
+#ifdef PHOTON_HAS_USD
+/// Aynı sahne OpenUSD'den (refscenes.py to_usd): geometri, malzemeler (OpenPBR + UsdPreviewSurface),
+/// kamera ve kubbe ışığı içe aktarıcıdan gelir; .photon'dan yalnız render ayarları (arka plan, zemin
+/// kapalı) alınır. İçe aktarıcının eşlemesi doğruysa aynı Mitsuba referansını aynı eşiklerle tutar.
+void runGoldenUsd(const GoldenCase& gc) {
+    const std::string dir = std::string(PHOTON_TEST_DATA) + "/golden/";
+    SceneGraph photonGraph;
+    ProjectData data;
+    std::string err;
+    ASSERT_TRUE(loadProject(dir + gc.name + ".photon", photonGraph, data, &err)) << err;
+
+    ImportExtras extras;
+    std::vector<std::string> warnings;
+    auto group = importModelFile(dir + gc.name + ".usda", &err, {}, &warnings, &extras);
+    ASSERT_NE(group, nullptr) << err;
+    for (const std::string& w : warnings) ADD_FAILURE() << "uyarı: " << w;
+    transformImportExtras(extras, group->localTransform);
+    SceneGraph graph;
+    graph.root()->addChild(std::move(group));
+
+    ASSERT_EQ(extras.cameras.size(), 1u);
+    ASSERT_EQ(extras.cameras[0].keys.size(), 1u);
+    const CameraKey key = extras.cameras[0].keys[0];
+    // Kamera .photon'daki yörünge kamerasıyla aynı olmalı.
+    {
+        const auto& c = data.camera;
+        const auto& t = c["target"];
+        const Vec3f target(t[0].get<float>(), t[1].get<float>(), t[2].get<float>());
+        const float r = c["radius"].get<float>(), th = c["theta"].get<float>(), ph = c["phi"].get<float>();
+        const Vec3f eye = target + Vec3f(std::sin(th) * std::cos(ph), std::cos(th), std::sin(th) * std::sin(ph)) * r;
+        EXPECT_LT((key.eye - eye).length(), 1e-4f);
+        const Vec3f fUsd = (key.target - key.eye).normalized(), fPh = (target - eye).normalized();
+        EXPECT_GT(fUsd.dot(fPh), 0.999999f);
+        EXPECT_NEAR(key.fovDeg, c["fov"].get<float>(), 1e-3f);
+    }
+
+    EnvironmentDesc env = data.environment;
+    if (extras.environment) {
+        ASSERT_FALSE(data.environment.hdrPath.empty()) << "USD'de kubbe var, .photon'da yok";
+        env.kind = EnvironmentDesc::Kind::Image;
+        env.hdrPath = extras.environment->hdrPath;
+        env.rotationDeg = extras.environment->rotationDeg;
+        env.intensity = extras.environment->intensity;
+    } else {
+        EXPECT_TRUE(data.environment.hdrPath.empty()) << ".photon'da HDRI var, USD'de kubbe yok";
+    }
+    EXPECT_TRUE(extras.lights.empty());
+    renderAndCompare(gc, std::string(gc.name) + " (USD)", graph, {}, env,
+                     [&](float aspect) {
+                         return std::make_shared<PerspectiveCamera>(key.eye, key.target, Vec3f(0, 1, 0), key.fovDeg,
+                                                                    aspect);
+                     });
+}
+#endif
 
 } // namespace
 
@@ -137,5 +202,25 @@ TEST(GoldenReference, CornellSpecularMatchesMitsuba) { runGolden({"cornell_specu
 // HDRI sahnesinde beklenen oran 1 değil: pürüzlü beyaz metaller Photon'da Kulla–Conty enerji
 // telafisi ve yüksekliğe bağlı Smith G2 ile Mitsuba'nın tek saçılmalı, ayrık G1·G1 GGX'inden
 // parlaktır (r = 0.5 küresi ≈ +%12, bkz. bench/reference/REPORT.md). Difüz, ayna ve cam bölgeleri
-// birebir. Oran 1'e düşerse telafi bozulmuş demektir; yükselirse enerji fazlası vardır.
-TEST(GoldenReference, HdriMaterialsMatchesMitsuba) { runGolden({"hdri_materials", 256, 0.006, 0.025, 0.12, 1.0155}); }
+// birebir. Beklenen değer yakınsamış orandır (4096 örnekte 1.0112); 256 örnekteki 1.0155 ayna
+// küresindeki tek tük parlak örneklerden gelir ve tolerans içindedir. Oran 1'e düşerse telafi
+// bozulmuş demektir; yükselirse enerji fazlası vardır.
+constexpr double kHdriExpectedRatio = 1.0112;
+TEST(GoldenReference, HdriMaterialsMatchesMitsuba) {
+    runGolden({"hdri_materials", 256, 0.006, 0.025, 0.12, kHdriExpectedRatio});
+}
+
+#ifdef PHOTON_HAS_USD
+// Aynı sahneler OpenUSD'den içe aktarılarak, .photon kollarıyla aynı eşiklerle. Küreler UsdGeomSphere'dir
+// ve üçgenlenir (128 dilim; aynı kürenin mesh hâli .photon'da analitik küreyle aynı oranı verir). Ayna ve
+// cam UsdPreviewSurface'ten birleşik Principled'a çevrilir (Photon'un ayrı cam BSDF'ine değil); Principled
+// cam ayrı cam BSDF'inden ≈ %0.2 sönüktür (analitik kürede de aynı fark ölçüldü). Speküler sahnelerde
+// 1024 örnek: kostik ve HDRI yansımaları 256 örnekte ortalamayı %0.5–0.8 oynatır.
+// Ölçüm (2026-11-27, GCC 13): difüz 1.0000, medyan 0.0015, p95 0.0089; kostikli 0.998, 0.0083, 0.045;
+// HDRI 1.0100, 0.0075, 0.088.
+TEST(GoldenReference, CornellDiffuseUsdMatchesMitsuba) { runGoldenUsd({"cornell_diffuse", 256, 0.005, 0.005, 0.02}); }
+TEST(GoldenReference, CornellSpecularUsdMatchesMitsuba) { runGoldenUsd({"cornell_specular", 1024, 0.01, 0.035, 0.16}); }
+TEST(GoldenReference, HdriMaterialsUsdMatchesMitsuba) {
+    runGoldenUsd({"hdri_materials", 1024, 0.006, 0.025, 0.12, kHdriExpectedRatio});
+}
+#endif

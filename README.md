@@ -99,6 +99,13 @@ grafiğinin tüm hattını öğretecek biçimde Türkçe açıklamalarla yazılm
   metal/pürüzlülük, normal, emisyon, cam geçirgenliği, vernik, sheen, SSS, ince film; Autodesk
   Standard Surface / 3ds Max Physical / Phong) ve gömülü dokular gelir. Alfa kesikleri (opaklık
   haritası) henüz yok; içe aktarma uyarısı verir.
+- **OpenUSD (.usd, .usda, .usdc, .usdz)** (Houdini Solaris, Omniverse, Maya, Blender, Apple Reality
+  Composer; Pixar OpenUSD 26.11): katmanlar, referanslar, varyantlar USD'nin kendisiyle birleştirilir;
+  Xform hiyerarşisi, birim (`metersPerUnit`) ve yukarı eksen, çokgen/delikli mesh, GeomSubset malzeme
+  dilimleri, basit şekiller, yerel örnekleme ve PointInstancer (geometri paylaşılır). Malzemeler:
+  UsdPreviewSurface ve MaterialX **OpenPBR** / Standard Surface / glTF PBR (sabitler, dokular, UV
+  dönüşümü). UsdLux ışıkları (fiziksel birimlerle), **DomeLight HDRI ortamı** ve kameralar (alan
+  derinliği dahil). Disk/küre/silindir ışıkları şimdilik eşdeğer güçte dörtgen/nokta ışıkla yaklaşılır.
 - **Alembic (.abc)** (Houdini, Maya, Marvelous Designer, Blender, C4D önbellekleri): Xform hiyerarşisi,
   PolyMesh ve SubD, yüz kümeleri malzeme parçası olur, seçilen kare okunur; birim yazan uygulamadan tahmin edilir.
 - OBJ, glTF / GLB. **İçe aktarma penceresi** (birim mm/cm/m/inç, Y/Z yukarı, Alembic karesi;
@@ -150,7 +157,10 @@ powershell -ExecutionPolicy Bypass -File scripts\fetch_deps.ps1
 $env:VCPKG_ROOT = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\vcpkg"
 . .\scripts\devshell.ps1
 
-# 3) Yapılandır, derle, test et
+# 3) İsteğe bağlı, bir kez: OpenUSD'yi kaynaktan derle (~30 dk) — third_party/usd, third_party/tbb
+powershell -ExecutionPolicy Bypass -File scripts\build_usd.ps1
+
+# 4) Yapılandır, derle, test et
 cmake --preset release
 cmake --build --preset release
 ctest --preset release
@@ -167,6 +177,7 @@ isteğe bağlıdır (yoksa motorun kendi BVH'si ve basit bulanıklık kullanıl�
 sudo apt install build-essential cmake ninja-build libgl-dev libx11-dev libxrandr-dev \
                  libxinerama-dev libxcursor-dev libxi-dev
 bash scripts/fetch_deps.sh   # isteğe bağlı: Embree 4 + OIDN 2 (Linux paketleri)
+bash scripts/build_usd.sh    # isteğe bağlı: OpenUSD + oneTBB (~15 dk, bir kez)
 cmake --preset fetch-release -DGLFW_BUILD_WAYLAND=OFF
 cmake --build --preset fetch-release
 ctest --preset fetch-release
@@ -201,7 +212,7 @@ build\release\photon_render.exe sahne.photon --res 1920x1080 --spp 256 --out ren
 `--no-denoise`, `--stats stats.json` (süre, Mörnek/sn), `--noise 0.02` (uyarlamalı örnekleme),
 `--min-spp N`, `--clamp 10` (dolaylı parlama sınırı), `--time 60` (süre sınırı),
 `--filter blackman-harris --filter-width 1.5` (piksel filtresi), `--passes` (çıktı `.exr` ise tüm
-render geçişleri tek dosyada), `--device auto|cpu|cuda:0` ve `--list-devices` (render cihazları). Model olarak `.obj`, `.gltf`, `.glb`, `.fbx`, `.abc` verilebilir.
+render geçişleri tek dosyada), `--device auto|cpu|cuda:0` ve `--list-devices` (render cihazları). Model olarak `.obj`, `.gltf`, `.glb`, `.fbx`, `.abc`, `.usd`/`.usda`/`.usdc`/`.usdz` verilebilir.
 Projedeki görüntüleyici ayarları PNG/JPEG çıktısına uygulanır.
 
 Görsel regresyon ve tanıtım sahneleri `bench/scenes/` altındadır (`scripts/gen_material_scenes.py`
@@ -220,13 +231,14 @@ arayüzü çizip ekran görüntüsü alır ve çıkar (görsel regresyon için).
 | `PHOTON_ENABLE_OIDN` | `ON` | `third_party/oidn` bulunursa gürültü giderme |
 | `PHOTON_ENABLE_SIMD` | `ON` | AVX2/FMA |
 | `PHOTON_ENABLE_ALEMBIC` | `ON` | `.abc` içe aktarma (kurulu Alembic ya da 1.8.12 kaynaktan; CMake ≥ 3.29) |
+| `PHOTON_ENABLE_USD` | `ON` | `third_party/usd` bulunursa OpenUSD içe aktarma (bir kez: `scripts/build_usd.ps1`, MSVC kabuğunda ~30 dk) |
 | `PHOTON_ENABLE_ASAN` | `OFF` | AddressSanitizer |
 
 ---
 
 ## Kullanım
 
-1. Modeli (FBX / Alembic / OBJ / glTF / GLB) pencereye sürükleyin; içe aktarma penceresinde birimi ve
+1. Modeli (FBX / USD / Alembic / OBJ / glTF / GLB) pencereye sürükleyin; içe aktarma penceresinde birimi ve
    yukarı ekseni onaylayın. Viewport'taki bir yüzeye bırakılan model oraya oturur; boş sahnede
    zemine oturtulur, kamera kadrajlanır, varsayılan stüdyo ışıkları kurulur. Dosya → Son dosyalar.
 2. **Kütüphane → Malzeme**'den bir küreyi viewport'taki parçanın üzerine bırakın (ya da parçayı seçip çift tıklayın).
@@ -256,7 +268,7 @@ src/
 ├── camera/        perspektif, ince mercek (alan derinliği), ortografik
 ├── samplers/      bağımsız, tabakalı, Owen-Sobol
 ├── integrators/   yol izleyici (ortamlar, SSS yürüyüşü, dispersiyon, ışık seçimi, gölge yakalayıcı)
-├── io/            OBJ, glTF, FBX (ufbx), Alembic yükleyiciler; ortak içe aktarma katmanı (kaynak, sarma, dokular)
+├── io/            OBJ, glTF, FBX (ufbx), Alembic, OpenUSD yükleyiciler; ortak içe aktarma katmanı (kaynak, sarma, dokular)
 ├── engine/        render Scene, Renderer, Embree hızlandırıcısı, OIDN
 ├── scene/         sahne ağacı, malzeme kütüphanesi, ışık/ortam belgesi, stüdyolar, proje dosyası, geri al
 ├── ui/            tema + fontlar, ortak widget'lar, orbit kamera, dosya diyaloğu
