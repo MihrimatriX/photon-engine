@@ -92,6 +92,9 @@ else()
     # reject non-finite radiance (see core/math/float_bits.h).
     target_compile_options(photon_build_flags INTERFACE
         -Wall -Wextra -Wpedantic -ffast-math -fno-finite-math-only)
+    # MSVC /W4 flags a local that hides another local or a parameter (C4456/C4457) and /WX
+    # makes it fatal; GCC's -Wshadow=local is the same check, so Linux builds catch it too.
+    target_compile_options(photon_build_flags INTERFACE $<$<CXX_COMPILER_ID:GNU>:-Wshadow=local>)
     if(PHOTON_WARNINGS_AS_ERRORS)
         target_compile_options(photon_build_flags INTERFACE -Werror)
     endif()
